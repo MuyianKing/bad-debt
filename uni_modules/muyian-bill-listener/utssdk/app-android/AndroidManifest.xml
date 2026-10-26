@@ -1,5 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        无障碍自恢复：adb 授予此签名权限后，App 可自行把无障碍服务补回系统启用列表。
+        未在清单声明时 pm grant 会静默无效（checkPermission 恒为拒绝）。
+    -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+
     <application>
 
         <!--
