@@ -1,0 +1,39 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!--
+            无障碍服务：用户在系统"无障碍"中开启后由系统 bind。
+            监听候选支付App的窗口切换与内容变化，抓取支付结果页文本交给 MuyianBillCore 解析。
+            android:exported 必须为 true（Android 12+ 带 intent-filter 的组件要求），
+            BIND_ACCESSIBILITY_SERVICE 权限保证只有系统可以绑定。
+        -->
+        <service
+            android:name="muyian.bill.listener.MuyianBillAccessibilityService"
+            android:exported="true"
+            android:label="@string/muyian_acc_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/muyian_accessibility_config" />
+        </service>
+
+        <!--
+            通知监听服务（辅助渠道）：用户在系统"通知使用权"中授权后被系统 bind。
+            覆盖无障碍看不到的场景：收款到账提醒只在通知栏、熄屏碰卡支付的交易通知等。
+        -->
+        <service
+            android:name="muyian.bill.listener.BillNotificationListener"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

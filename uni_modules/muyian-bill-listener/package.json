@@ -1,0 +1,11 @@
+{
+  "id": "muyian-bill-listener",
+  "displayName": "孽账通知记账监听",
+  "version": "0.1.0",
+  "description": "Android 通知监听自动记账：过滤候选App通知，本地解析金额与收支，生成待确认账单草稿",
+  "keywords": [
+    "记账",
+    "通知监听"
+  ],
+  "uni_modules": {}
+}

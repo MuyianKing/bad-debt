@@ -1,0 +1,61 @@
+// muyian-bill-listener：iOS 平台桩实现。
+// iOS 无读取其他 App 屏幕内容的公开 API，本插件仅支持 Android。
+// 保留同名导出以满足多平台编译，页面侧请配合 #ifdef APP-ANDROID / APP-PLUS 条件编译。
+
+export function initBillListener(): void {}
+
+export function isAccessibilityEnabled(): boolean {
+  return false;
+}
+
+export function openAccessibilitySettings(): void {}
+
+export function isNotificationListenerEnabled(): boolean {
+  return false;
+}
+
+export function openNotificationListenerSettings(): void {}
+
+export function getPendingDrafts(): string {
+  return "[]";
+}
+
+export function getDraft(token: string): string {
+  return "";
+}
+
+export function resolveDraft(token: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string {
+  return '{"success":false,"error":"android only"}';
+}
+
+export function discardDraft(token: string): boolean {
+  return false;
+}
+
+export function saveManualBill(money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string {
+  return '{"success":false,"error":"android only"}';
+}
+
+export function saveBillEx(date: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string, reimb: boolean, starred: boolean): string {
+  return '{"success":false,"error":"android only"}';
+}
+
+export function updateBill(id: string, date: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string, reimb: boolean, starred: boolean): string {
+  return '{"success":false,"error":"android only"}';
+}
+
+export function getMonthBills(year: string, month: string): string {
+  return "[]";
+}
+
+export function getYearBills(year: string): string {
+  return "[]";
+}
+
+export function deleteBill(id: string): boolean {
+  return false;
+}
+
+export function emitTestBill(text: string): string {
+  return '{"accepted":false,"reason":"android only"}';
+}

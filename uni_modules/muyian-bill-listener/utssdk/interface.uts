@@ -1,0 +1,74 @@
+/**
+ * muyian-bill-listener 对外 API 声明
+ *
+ * 约定：所有复杂数据以 JSON 字符串进出，页面侧自行 JSON.parse，
+ * 以避免 UTS(number) 与 Kotlin(Int/Double) 的类型映射问题。
+ * 金额规则：支出为负数、收入为正数（与账单库一致）。
+ */
+
+/** 初始化：创建通知渠道、清理过期草稿。在 App onLaunch 调用一次 */
+export function initBillListener(): void
+
+/** 检测用户是否已在系统设置中开启本应用的无障碍服务 */
+export function isAccessibilityEnabled(): boolean
+
+/** 跳转到系统的"无障碍"设置页 */
+export function openAccessibilitySettings(): void
+
+/** 自恢复状态查询，返回 {"hasPermission":bool,"serviceEnabled":bool,"packageName":"..."} JSON 字符串 */
+export function getSelfRepairState(): string
+
+/** 无障碍服务自恢复：把本应用服务补回系统已启用列表（需 WRITE_SECURE_SETTINGS），返回 {"success":bool,"serviceEnabled":bool,"error"?:string} JSON 字符串 */
+export function repairAccessibilityService(): string
+
+/** [辅助渠道] 检测"通知使用权"授权状态，覆盖收款到账提醒、碰卡交易通知等场景 */
+export function isNotificationListenerEnabled(): boolean
+
+/** [辅助渠道] 跳转到系统的"通知使用权"授权页 */
+export function openNotificationListenerSettings(): void
+
+/** 待确认草稿列表，返回 JSON 数组字符串 */
+export function getPendingDrafts(): string
+
+/** 按 token 取单个草稿，返回 JSON 对象字符串（无则空串） */
+export function getDraft(token: string): string
+
+/**
+ * 确认草稿并入账
+ * @param money 正数金额（字符串），收支方向由 isIncome 决定
+ * @param isIncome true 收入 / false 支出
+ */
+export function resolveDraft(token: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string
+
+/** 丢弃草稿（不记账） */
+export function discardDraft(token: string): boolean
+
+/** 手动记一笔（不走自动解析），返回 {"success":true,"id":n} JSON 字符串 */
+export function saveManualBill(money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string
+
+/**
+ * 按指定日期记一笔（date 为 "YYYY-MM-DD"，空串取今天）
+ * 返回 {"success":true,"id":n} JSON 字符串
+ */
+export function saveBillEx(date: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string, reimb: boolean, starred: boolean): string
+
+/**
+ * 编辑已入账账单（保留来源与创建时间），date 为 "YYYY-MM-DD"
+ * 返回 {"success":true} JSON 字符串
+ */
+export function updateBill(id: string, date: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string, reimb: boolean, starred: boolean): string
+
+/** 某月账单列表（含每笔完整字段），返回 JSON 数组字符串 */
+export function getMonthBills(year: string, month: string): string
+
+/** 某年账单列表（用于年维度统计），返回 JSON 数组字符串 */
+export function getYearBills(year: string): string
+
+/** 删除账单 */
+export function deleteBill(id: string): boolean
+
+/**
+ * 调试用：把一段文本当作"支付成功"页面注入解析流水线，无需真实支付即可验证。
+ * 文本需包含完成标记（如"支付成功"）与金额，返回结果 JSON 字符串。
+ */
+export function emitTestBill(text: string): string
