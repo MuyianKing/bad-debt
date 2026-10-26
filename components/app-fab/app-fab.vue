@@ -31,11 +31,11 @@ export default {
   width: 108rpx;
   height: 108rpx;
   border-radius: 50%;
-  background: linear-gradient(145deg, #ffc23d 0%, #f7a600 55%, #f08c00 100%);
+  background: var(--grad-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-float), inset 0 2rpx 0 rgba(255, 255, 255, 0.4);
   z-index: 99;
 }
 .app-fab:active {

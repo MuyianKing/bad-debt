@@ -6,7 +6,7 @@
  * 金额规则：支出为负数、收入为正数（与账单库一致）。
  */
 
-/** 初始化：创建通知渠道、清理过期草稿。在 App onLaunch 调用一次 */
+/** 初始化：清理旧版本遗留状态并拉起后台保活。在 App onLaunch 调用一次 */
 export function initBillListener(): void
 
 /** 检测用户是否已在系统设置中开启本应用的无障碍服务 */
@@ -27,21 +27,32 @@ export function isNotificationListenerEnabled(): boolean
 /** [辅助渠道] 跳转到系统的"通知使用权"授权页 */
 export function openNotificationListenerSettings(): void
 
-/** 待确认草稿列表，返回 JSON 数组字符串 */
-export function getPendingDrafts(): string
+/** 系统是否允许本应用发通知（Android 13+ 含 POST_NOTIFICATIONS 运行时权限） */
+export function areNotificationsEnabled(): boolean
 
-/** 按 token 取单个草稿，返回 JSON 对象字符串（无则空串） */
-export function getDraft(token: string): string
+/** 后台保活是否开启（前台服务常驻，默认开启） */
+export function isKeepAliveEnabled(): boolean
 
-/**
- * 确认草稿并入账
- * @param money 正数金额（字符串），收支方向由 isIncome 决定
- * @param isIncome true 收入 / false 支出
- */
-export function resolveDraft(token: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string
+/** 开启/关闭后台保活前台服务，返回是否设置成功 */
+export function setKeepAliveEnabled(enabled: boolean): boolean
 
-/** 丢弃草稿（不记账） */
-export function discardDraft(token: string): boolean
+/** MIUI/HyperOS 的"后台弹出界面"开关是否已允许（对应"显示在其他应用上层"）；弹层是 Activity，不用它绘制窗口 */
+export function hasOverlayPermission(): boolean
+
+/** 打开系统的"显示在其他应用上层"授权页 */
+export function requestOverlayPermission(): boolean
+
+/** 设置支付后底部确认弹层的主题强调色（#RRGGBB，字面色——原生不认 CSS 变量），下次弹层生效 */
+export function setCardThemeColor(color: string): boolean
+
+/** 系统是否已对本应用豁免电池优化（true = 电池策略不限制） */
+export function isIgnoringBatteryOptimizations(): boolean
+
+/** 请求电池优化白名单，返回 {"success":bool,"granted":bool} JSON 字符串 */
+export function requestIgnoreBatteryOptimizations(): string
+
+/** 打开本应用系统详情页（国产 ROM 的自启动/后台管理入口） */
+export function openAppSettings(): void
 
 /** 手动记一笔（不走自动解析），返回 {"success":true,"id":n} JSON 字符串 */
 export function saveManualBill(money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string

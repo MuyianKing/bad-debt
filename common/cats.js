@@ -4,15 +4,19 @@
  *   { name, icon, subs?: [{ name, icon }] }
  * icon 为 common/icons.js 里的线性图标名（不再是 emoji）。
  * 账单里的 costType 存的是"叶子名"（选了子类存子类名，否则存一级名）；
- * 排行统计时通过 topNameOf() 归并到一级分类。
+ * 环图统计时通过 topNameOf() 归并到一级分类。
  */
+
+import { theme } from './theme.js'
 
 const STORAGE_KEY = 'muyian_categories_v2' // v2：icon 从 emoji 改为线性图标名
 
+// 高饱和糖果色板：按默认分类顺序排列（三餐→零食→衣服→…→电器数码），改顺序会让已有分类换色
 export const PALETTE = [
-  '#F5A623', '#F0663F', '#3EB575', '#A8D046', '#4A90F5', '#35A3E8',
-  '#2BB7A0', '#7ED3B2', '#9B7DF7', '#F06292', '#64B5F6', '#8BC34A',
-  '#FFB74D', '#4DB6AC', '#BA68C8', '#E57373', '#7986CB', '#FFD54F'
+  '#FF653F', '#4489FE', '#00AAF5', '#B487FE', '#29C184', '#FFC94D',
+  '#95D46B', '#8B9FFF', '#F7707A', '#5C7CFA', '#80CBC4', '#F5A65B',
+  '#FF85C0', '#4FC3F7', '#FF5E5E', '#FFA83E', '#01BFA3', '#C77DFF',
+  '#FA66D4'
 ]
 
 /** 自建分类的默认图标 */
@@ -150,6 +154,45 @@ export function colorOf(name, type) {
   let hash = 0
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
   return PALETTE[hash % PALETTE.length]
+}
+
+/* ---------- 颜色工具（页面/组件共用的彩色图标底座） ---------- */
+function rgbOf(hex) {
+  const raw = String(hex || '#c8ccd4').replace('#', '')
+  const h = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw
+  return {
+    r: parseInt(h.slice(0, 2), 16) || 0,
+    g: parseInt(h.slice(2, 4), 16) || 0,
+    b: parseInt(h.slice(4, 6), 16) || 0
+  }
+}
+
+function mixColor(hex, target, ratio) {
+  const a = rgbOf(hex)
+  const b = rgbOf(target)
+  return {
+    r: Math.round(a.r + (b.r - a.r) * ratio),
+    g: Math.round(a.g + (b.g - a.g) * ratio),
+    b: Math.round(a.b + (b.b - a.b) * ratio)
+  }
+}
+
+/** 分类色 -> 极淡同色底（图标块/选中行底色）。深色主题向黑色混合，否则亮色块压不住白字 */
+export function tintOf(hex, ratio = 0.88) {
+  const c = mixColor(hex, theme.value.dark ? '#000000' : '#ffffff', ratio)
+  return 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')'
+}
+
+/** 分类色 -> 同色系渐变块（彩色图标统一底座，白图标压在上面） */
+export function gradOf(hex, angle = 140) {
+  const base = rgbOf(hex)
+  const light = mixColor(hex, '#ffffff', 0.24)
+  const dark = mixColor(hex, '#000000', 0.12)
+  return (
+    'linear-gradient(' + angle + 'deg, rgb(' + light.r + ',' + light.g + ',' + light.b + ') 0%, ' +
+    'rgb(' + base.r + ',' + base.g + ',' + base.b + ') 55%, ' +
+    'rgb(' + dark.r + ',' + dark.g + ',' + dark.b + ') 100%)'
+  )
 }
 
 /** 判断名字是否为某类型下的子类，返回其父名；不是子类返回空串 */

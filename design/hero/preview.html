@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>首页头图 · 搞怪哪吒效果图</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 30px;
+    background: #e9e6dd;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 21px; margin: 0 0 6px; color: #2b2b2b; font-weight: 700; }
+  .note { font-size: 12.5px; color: #6b6b6b; margin: 0 0 8px; line-height: 1.7; }
+  .row-label { font-size: 14px; font-weight: 700; color: #434343; margin: 24px 0 10px; }
+  .row-label span { font-weight: 400; font-size: 12px; color: #8a8a8a; margin-left: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 390px); gap: 20px 26px; }
+  .col-title { font-size: 12px; font-weight: 700; color: #3a3a3a; margin: 0 0 8px; }
+  .col-title span { font-weight: 400; color: #8a8a8a; margin-left: 6px; }
+  .stage { position: relative; width: 390px; height: 300px; }
+
+  .cutouts { display: flex; gap: 20px; }
+  .cutcard {
+    width: 240px; border-radius: 20px; background: #f7f2e8; border: 1px solid #e2dbca;
+    box-shadow: 0 8px 24px rgba(60,50,20,.08); padding: 14px 14px 12px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .cutbox { height: 250px; display: flex; align-items: flex-end; justify-content: center; }
+  .cutbox img { max-width: 210px; max-height: 240px; filter: drop-shadow(0 10px 16px rgba(80,40,0,.16)); }
+  .cutname { font-size: 13px; font-weight: 700; color: #2b2b2b; margin-top: 8px; }
+  .cutdesc { font-size: 11.5px; color: #7a7a7a; margin-top: 3px; text-align: center; line-height: 1.5; }
+
+  .hero {
+    position: relative; width: 390px; height: 197px;
+    border-radius: 0 0 18px 18px; color: #fff;
+  }
+  .bg { position: absolute; inset: 0; border-radius: 0 0 18px 18px; overflow: hidden; background: inherit; }
+  .hero.wukong { background: linear-gradient(165deg, #ffbb2b 0%, #f39a00 45%, #dd7b00 100%); }
+  .hero.nezha  { background: linear-gradient(165deg, #ff6a4d 0%, #e33a2c 45%, #b81d18 100%); }
+  .hero.shaseng{ background: linear-gradient(165deg, #2a2a2f 0%, #151517 45%, #000000 100%); }
+
+  .sheen { position: absolute; left: -15%; top: -45%; width: 80%; height: 130%;
+    background: radial-gradient(circle, rgba(255,255,255,.3) 0%, rgba(255,255,255,0) 70%); }
+  .scrim { position: absolute; left: 0; right: 0; bottom: 0; height: 46%;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.15) 100%); }
+  .art {
+    position: absolute; right: -10px; bottom: 0; height: auto; display: block; pointer-events: none;
+    filter: drop-shadow(0 5px 10px rgba(90,40,0,.22));
+  }
+
+  .status { height: 28px; }
+  .nav { position: relative; z-index: 1; display: flex; align-items: center; padding: 6px 12px; }
+  .side { flex: 1; display: flex; align-items: center; }
+  .side.right { justify-content: flex-end; gap: 10px; }
+  .btn { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+  .btn i { display: block; width: 19px; height: 19px; border: 2px solid #fff; border-radius: 4px; opacity: .95; }
+  .btn i.circle { border-radius: 50%; }
+  .month { display: flex; align-items: center; font-size: 15px; font-weight: 700; letter-spacing: .3px;
+    text-shadow: 0 1px 5px rgba(120,70,20,.28); }
+  .month:after { content: ''; width: 6px; height: 6px; border-right: 2px solid rgba(255,255,255,.9);
+    border-bottom: 2px solid rgba(255,255,255,.9); transform: rotate(45deg); margin-left: 6px; margin-top: -3px; }
+  .body { position: relative; z-index: 1; padding: 18px 24px 0; }
+  .label { font-size: 13px; letter-spacing: 1px; color: rgba(255,255,255,.82); }
+  .amount { font-size: 36px; font-weight: 700; line-height: 1.3; margin-top: 5px; letter-spacing: .5px;
+    text-shadow: 0 1px 6px rgba(150,80,0,.24); }
+
+  .card {
+    position: absolute; left: 16px; right: 16px; bottom: -35px; z-index: 2;
+    height: 70px; border-radius: 14px;
+    background: rgba(255,255,255,.62);
+    -webkit-backdrop-filter: blur(16px) saturate(1.6); backdrop-filter: blur(16px) saturate(1.6);
+    border: .5px solid rgba(255,255,255,.85);
+    box-shadow: 0 5px 15px rgba(94,74,22,.12);
+    display: flex; align-items: center;
+  }
+  .hero.shaseng .card { background: rgba(28,28,32,.62); border-color: rgba(255,255,255,.1); }
+  .ov { flex: 1; text-align: center; }
+  .ov .t { font-size: 12px; color: #8a90a0; }
+  .hero.shaseng .ov .t { color: #a2a2aa; }
+  .ov .n { font-size: 16px; font-weight: 700; color: #1d2129; margin-top: 5px; }
+  .hero.shaseng .ov .n { color: #f2f2f4; }
+  .ov .n.out { color: #f0655e; }
+  .hero.shaseng .ov .n.out { color: #ff6f68; }
+  .div { width: 1px; height: 26px; background: rgba(29,33,41,.08); }
+  .hero.shaseng .div { background: rgba(255,255,255,.08); }
+</style>
+</head>
+<body>
+  <h1>首页头图 · 搞怪哪吒</h1>
+  <p class="note">网络透明免抠素材（花瓣，哪吒2 同人/周边渲染图），仅作本地设计稿；上架或分发需自行确认授权。</p>
+
+  <div class="row-label">三种表情 <span>选一张，或换其他表情</span></div>
+  <div class="cutouts">
+    <div class="cutcard">
+      <div class="cutbox"><img src="assets/nezha-grin.png"></div>
+      <div class="cutname">A · 坏笑</div>
+      <div class="cutdesc">牙尖嘴利，最像电影里那股欠揍劲</div>
+    </div>
+    <div class="cutcard">
+      <div class="cutbox"><img src="assets/nezha-cheer.png"></div>
+      <div class="cutname">B · 大笑</div>
+      <div class="cutdesc">举拳大笑，最讨喜、最搞怪</div>
+    </div>
+    <div class="cutcard">
+      <div class="cutbox"><img src="assets/nezha-grumpy.png"></div>
+      <div class="cutname">C · 不服</div>
+      <div class="cutdesc">撇嘴斜眼，表情最拽</div>
+    </div>
+  </div>
+
+  <div id="app"></div>
+
+<script>
+const themes = [
+  { id: 'wukong', name: '悟空黄', tag: '默认', out: '#f0655e' },
+  { id: 'nezha',  name: '哪吒红', tag: '',     out: '#f0655e' },
+  { id: 'shaseng',name: '沙僧黑', tag: '',     out: '#ff6f68' }
+]
+
+const hero = (t, src, w) => `
+  <div class="stage">
+    <div class="hero ${t.id}">
+      <div class="bg">
+        <div class="sheen"></div>
+        <img class="art" src="${src}" style="width:${w}px">
+        <div class="scrim"></div>
+      </div>
+      <div class="status"></div>
+      <div class="nav">
+        <div class="side"><div class="btn"><i></i></div></div>
+        <div class="month">2026-10</div>
+        <div class="side right"><div class="btn"><i class="circle"></i></div><div class="btn"><i class="circle"></i></div></div>
+      </div>
+      <div class="body">
+        <div class="label">本月支出</div>
+        <div class="amount">¥ 5,200.00</div>
+      </div>
+      <div class="card">
+        <div class="ov"><div class="t">月收入</div><div class="n">5,200.00</div></div><div class="div"></div>
+        <div class="ov"><div class="t">本月结余</div><div class="n out">4,631.50</div></div><div class="div"></div>
+        <div class="ov"><div class="t">日均支出</div><div class="n">168.50</div></div>
+      </div>
+    </div>
+  </div>`
+
+const section = (title, sub, src, w) => `
+  <div class="row-label">${title}${sub ? `<span>${sub}</span>` : ''}</div>
+  <div class="grid">
+    ${themes.map(t => `<div><p class="col-title">${t.name}<span>${t.tag}</span></p>${hero(t, src, w)}</div>`).join('')}
+  </div>`
+
+document.getElementById('app').innerHTML =
+  section('效果 A · 坏笑', '130px 宽，压进概览卡', 'assets/nezha-grin.png', 130) +
+  section('效果 B · 大笑', '125px 宽，露出拳头', 'assets/nezha-cheer.png', 125) +
+  section('效果 C · 不服', '125px 宽', 'assets/nezha-grumpy.png', 125)
+</script>
+</body>
+</html>

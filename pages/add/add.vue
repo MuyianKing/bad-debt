@@ -1,10 +1,10 @@
 <template>
-  <view class="page">
+  <view :class="['page', themeClass]">
     <!-- 顶部：关闭 / 支出收入 / 添加分类 -->
     <view class="status-bar"></view>
     <view class="nav">
       <view class="nav-btn" @tap="goBack">
-        <app-icon name="x" color="#1d2129" :size="22"></app-icon>
+        <app-icon name="x" :color="theme.ink" :size="22"></app-icon>
       </view>
       <view class="nav-tabs">
         <view :class="['nav-tab', !isIncome ? 'nav-tab-active' : '']" @tap="switchType(false)">
@@ -16,15 +16,8 @@
         <view :class="['nav-line', isIncome ? 'nav-line-in' : '']" :style="{ transform: isIncome ? 'translateX(100%)' : 'translateX(0)' }"></view>
       </view>
       <view class="nav-btn" @tap="goCategories">
-        <app-icon name="plus" color="#1d2129" :size="22"></app-icon>
+        <app-icon name="plus" :color="theme.ink" :size="22"></app-icon>
       </view>
-    </view>
-
-    <!-- 草稿提示 -->
-    <view v-if="mode === 'draft'" class="draft-tip">
-      <app-icon name="bell" color="#ff9f43" :size="16"></app-icon>
-      <text class="draft-tip-text">自动记账草稿 · 确认后入账</text>
-      <text class="draft-tip-link" @tap="discardDraftNow">不记这笔</text>
     </view>
 
     <!-- 分类宫格 -->
@@ -39,7 +32,7 @@
           <view
             :class="['cat-circle', selectedTop === c.name ? 'cat-circle-active' : '']"
           >
-            <app-icon :name="c.icon || 'grid'" :color="selectedTop === c.name ? '#e8930c' : '#7a8194'" :size="25" :solid="true"></app-icon>
+            <app-icon :name="c.icon || 'grid'" :color="selectedTop === c.name ? theme.primaryDeep : '#7a8194'" :size="25" :solid="true"></app-icon>
           </view>
           <text :class="['cat-name', selectedTop === c.name ? 'cat-name-active' : '']">{{ c.name }}</text>
         </view>
@@ -58,14 +51,14 @@
           :class="['sub-chip', selectedSub === s.name ? 'sub-chip-active' : '']"
           @tap="selectSub(s.name)"
         >
-          <view class="sub-chip-inner"><app-icon :name="s.icon || 'grid'" color="#7a8194" :size="15" :solid="true"></app-icon><text class="sub-chip-text">{{ s.name }}</text></view>
+          <view class="sub-chip-inner"><app-icon :name="s.icon || 'grid'" :color="selectedSub === s.name ? '#ffffff' : '#8a90a0'" :size="15" :solid="true"></app-icon><text class="sub-chip-text">{{ s.name }}</text></view>
         </view>
       </view>
       <view class="grid-bottom-space"></view>
     </scroll-view>
 
     <!-- 底部：备注 + 键盘 -->
-    <view class="keypad-panel">
+    <view class="keypad-panel glass">
       <view class="input-row">
         <input
           class="remark-input"
@@ -82,8 +75,8 @@
 
       <view class="chips-row">
         <picker mode="date" :value="dateValue" @change="onDateChange">
-          <view class="chip">
-            <app-icon name="calendar" color="#5b6170" :size="15"></app-icon>
+          <view class="chip glass">
+            <app-icon name="calendar" :color="theme.inkSub" :size="15"></app-icon>
             <text class="chip-text">{{ dateChipText }}</text>
           </view>
         </picker>
@@ -91,11 +84,11 @@
           <text class="chip-text">报销</text>
         </view>
         <view :class="['chip', imgPath ? 'chip-active' : '']" @tap="onImageChip">
-          <app-icon name="image" color="#5b6170" :size="15"></app-icon>
+          <app-icon name="image" :color="imgPath ? '#ffffff' : theme.inkSub" :size="15"></app-icon>
           <text class="chip-text">图片</text>
         </view>
-        <view :class="['chip', starred ? 'chip-star-active' : '']" @tap="starred = !starred">
-          <app-icon name="star" :color="starred ? '#f7a600' : '#5b6170'" :size="15" :stroke-width="2.2"></app-icon>
+        <view :class="['chip', starred ? 'chip-active' : '']" @tap="starred = !starred">
+          <app-icon name="star" :color="starred ? '#ffffff' : theme.inkSub" :size="15" :stroke-width="2.2"></app-icon>
         </view>
       </view>
 
@@ -104,7 +97,7 @@
         <view class="key" hover-class="key-hover" @tap="onKey('2')"><text class="key-text">2</text></view>
         <view class="key" hover-class="key-hover" @tap="onKey('3')"><text class="key-text">3</text></view>
         <view class="key key-fn" hover-class="key-fn-hover" @tap="onKey('del')">
-          <app-icon name="delete" color="#4a5060" :size="22"></app-icon>
+          <app-icon name="delete" :color="theme.inkSub" :size="22"></app-icon>
         </view>
 
         <view class="key" hover-class="key-hover" @tap="onKey('4')"><text class="key-text">4</text></view>
@@ -127,25 +120,34 @@
         </view>
       </view>
     </view>
+
+    <!-- 备注图片操作菜单 -->
+    <wd-action-sheet
+      v-model="imgMenuShow"
+      :actions="imgMenuItems"
+      cancel-text="取消"
+      :z-index="300"
+      :safe-area-inset-bottom="true"
+      @select="onImageMenuSelect"
+    ></wd-action-sheet>
   </view>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { pad2, todayStr, evalExpr } from '@/common/fmt.js'
+import { todayStr, evalExpr } from '@/common/fmt.js'
 import { listByType } from '@/common/cats.js'
-import { suggestCategory, learnCategory } from '@/common/merchants.js'
+import { theme, themeClass, refreshTheme } from '@/common/theme.js'
 // #ifdef APP-PLUS
-import { getDraft, resolveDraft, discardDraft, saveBillEx, updateBill } from '@/uni_modules/muyian-bill-listener'
+import { saveBillEx, updateBill } from '@/uni_modules/muyian-bill-listener'
 // #endif
 // #ifndef APP-PLUS
-import { getDraft, resolveDraft, discardDraft, saveBillEx, updateBill } from '@/common/web-bill-api.js'
+import { saveBillEx, updateBill } from '@/common/web-bill-api.js'
 // #endif
 
-const mode = ref('new') // new | edit | draft
+const mode = ref('new') // new | edit
 const editId = ref('')
-const token = ref('')
 const isIncome = ref(false)
 const cats = ref([])
 const selectedTopIndex = ref(0)
@@ -156,8 +158,14 @@ const reimb = ref(false)
 const starred = ref(false)
 const dateValue = ref(todayStr())
 const imgPath = ref('')
+// 备注图片操作菜单（wot action sheet）
+const imgMenuShow = ref(false)
+const imgMenuItems = [
+  { name: '预览图片' },
+  { name: '移除图片', color: 'var(--c-out)' },
+  { name: '更换图片' }
+]
 const launchQuery = ref({})
-const draftMerchant = ref('')
 
 const selectedTop = computed(() => (cats.value[selectedTopIndex.value] || {}).name || '')
 const subList = computed(() => (cats.value[selectedTopIndex.value] || {}).subs || [])
@@ -167,10 +175,7 @@ const dateChipText = computed(() => (dateValue.value === todayStr() ? '今天' :
 onLoad((query) => {
   const q = query || {}
   launchQuery.value = q
-  if (q.token) {
-    mode.value = 'draft'
-    token.value = decodeURIComponent(q.token)
-  } else if (q.id) {
+  if (q.id) {
     mode.value = 'edit'
     editId.value = String(q.id)
   }
@@ -181,37 +186,11 @@ onLoad((query) => {
 })
 
 onShow(() => {
+  refreshTheme()
   // 分类每次进入都刷新，便于刚在分类管理里改完回来生效
   cats.value = listByType(isIncome.value ? 'income' : 'expense')
   if (selectedTopIndex.value >= cats.value.length) selectedTopIndex.value = 0
 
-  if (mode.value === 'draft' && token.value && !expr.value) {
-    try {
-      const d = JSON.parse(getDraft(token.value) || 'null')
-      if (d) {
-        expr.value = String(Math.abs(Number(d.money)))
-        isIncome.value = Number(d.money) >= 0
-        remark.value = d.orderRemark || ''
-        dateValue.value = d.year + '-' + pad2(d.month) + '-' + pad2(d.day)
-        draftMerchant.value = d.merchant || ''
-        // 商户名预填备注（草稿没有备注时），确认入账时随备注落库
-        if (draftMerchant.value && !remark.value) remark.value = draftMerchant.value
-        // 草稿可能改写收支方向，按最终方向刷新分类列表
-        cats.value = listByType(isIncome.value ? 'income' : 'expense')
-        if (selectedTopIndex.value >= cats.value.length) selectedTopIndex.value = 0
-        // 分类建议：用户历史修正 > 内置词典；都没命中时保持默认选中第一项
-        const sug = suggestCategory(draftMerchant.value, isIncome.value)
-        if (sug) {
-          selectLeaf(sug)
-        } else if (d.costType && d.costType !== '消费' && d.costType !== '收入') {
-          const idx = cats.value.findIndex(c => c.name === d.costType)
-          if (idx >= 0) selectedTopIndex.value = idx
-        }
-      }
-    } catch (e) {
-      // 草稿读取失败按新记录处理
-    }
-  }
   if (mode.value === 'edit' && !expr.value) {
     // 编辑模式：参数带入
     const params = launchQuery.value || {}
@@ -281,18 +260,15 @@ function onDateChange(e) {
 }
 
 function onImageChip() {
-  if (imgPath.value) {
-    uni.showActionSheet({
-      itemList: ['预览图片', '移除图片', '更换图片'],
-      success: (res) => {
-        if (res.tapIndex === 0) uni.previewImage({ urls: [imgPath.value] })
-        else if (res.tapIndex === 1) imgPath.value = ''
-        else chooseImage()
-      }
-    })
-  } else {
-    chooseImage()
-  }
+  if (imgPath.value) imgMenuShow.value = true
+  else chooseImage()
+}
+
+function onImageMenuSelect({ index }) {
+  if (!imgPath.value) return
+  if (index === 0) uni.previewImage({ urls: [imgPath.value] })
+  else if (index === 1) imgPath.value = ''
+  else if (index === 2) chooseImage()
 }
 
 function chooseImage() {
@@ -372,9 +348,7 @@ function persist(amount, keepOpen) {
     return false
   }
   let raw = ''
-  if (mode.value === 'draft') {
-    raw = resolveDraft(token.value, String(amount), isIncome.value, bankNameOf(), leafName.value, buildRemark())
-  } else if (mode.value === 'edit') {
+  if (mode.value === 'edit') {
     raw = updateBill(editId.value, dateValue.value, String(amount), isIncome.value, bankNameOf(), leafName.value, buildRemark(), reimb.value, starred.value)
   } else {
     raw = saveBillEx(dateValue.value, String(amount), isIncome.value, bankNameOf(), leafName.value, buildRemark(), reimb.value, starred.value)
@@ -382,14 +356,10 @@ function persist(amount, keepOpen) {
   let resp = {}
   try { resp = JSON.parse(raw || '{}') } catch (e) { resp = { success: false } }
   if (!resp.success) {
-    uni.showToast({ title: resp.error === 'draft not found' ? '草稿已失效' : '保存失败', icon: 'none' })
+    uni.showToast({ title: '保存失败', icon: 'none' })
     return false
   }
   uni.showToast({ title: keepOpen ? '已记一笔' : '已入账', icon: 'success' })
-  // 用户修正回流：把"商户 → 实际选择分类"记下来，下次同商户自动建议
-  if (mode.value === 'draft' && draftMerchant.value) {
-    learnCategory(draftMerchant.value, leafName.value)
-  }
   return true
 }
 
@@ -410,19 +380,6 @@ function onAgain() {
   remark.value = ''
 }
 
-function discardDraftNow() {
-  uni.showModal({
-    title: '不记这笔',
-    content: '确认丢弃这条待确认账单？',
-    success: (res) => {
-      if (res.confirm) {
-        discardDraft(token.value)
-        uni.navigateBack()
-      }
-    }
-  })
-}
-
 function goBack() {
   uni.navigateBack()
 }
@@ -437,7 +394,8 @@ function goCategories() {
   /* 固定视口高度：键盘区常驻可视区域，分类宫格在剩余空间内自行滚动 */
   height: 100vh;
   overflow: hidden;
-  background: transparent;
+  /* 与首页、抽屉统一：极淡主题色底 */
+  background-color: var(--c-page-wash);
   display: flex;
   flex-direction: column;
 }
@@ -460,7 +418,7 @@ function goCategories() {
   align-items: center;
   justify-content: center;
   &:active {
-    background-color: var(--c-bg);
+    background-color: var(--c-primary-tint);
   }
 }
 /* 页签：单线滑动切换 */
@@ -479,7 +437,7 @@ function goCategories() {
   transition: color 0.2s ease, font-weight 0.2s ease;
 }
 .nav-tab-active {
-  color: var(--c-text);
+  color: var(--c-primary-deep);
   font-weight: 700;
 }
 .nav-tab-in.nav-tab-active {
@@ -492,33 +450,11 @@ function goCategories() {
   width: 130rpx;
   height: 6rpx;
   border-radius: 4rpx;
-  background-color: var(--c-text);
+  background: var(--grad-primary);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
 }
 .nav-line-in {
   background-color: var(--c-in);
-}
-.draft-tip {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  margin: 12rpx 28rpx 0;
-  background-color: rgba(255, 248, 236, 0.72);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  border-radius: 16rpx;
-  padding: 14rpx 20rpx;
-}
-.draft-tip-text {
-  flex: 1;
-  margin-left: 10rpx;
-  font-size: 24rpx;
-  color: #b26a2c;
-}
-.draft-tip-link {
-  font-size: 24rpx;
-  color: var(--c-primary-deep);
-  font-weight: 600;
 }
 .cat-scroll {
   flex: 1;
@@ -555,11 +491,11 @@ function goCategories() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: box-shadow 0.15s ease, background-color 0.15s ease;
+  transition: background-color 0.15s ease;
 }
 .cat-circle-active {
   /* 参考图式选中态：淡色圆底承载实体图标 */
-  background-color: rgba(247, 166, 0, 0.15);
+  background-color: var(--c-primary-tint);
 }
 .cat-circle .app-icon {
   opacity: 0.95;
@@ -567,7 +503,7 @@ function goCategories() {
 .cat-name {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: #6b7280;
+  color: var(--c-sub);
   max-width: 130rpx;
   overflow: hidden;
   white-space: nowrap;
@@ -575,7 +511,7 @@ function goCategories() {
   transition: color 0.15s ease;
 }
 .cat-name-active {
-  color: #c87f00;
+  color: var(--c-primary-deep);
   font-weight: 600;
 }
 .sub-row {
@@ -585,12 +521,12 @@ function goCategories() {
   padding: 8rpx 32rpx;
 }
 .sub-chip {
-  background-color: #f4f6fa;
+  background-color: var(--c-fill);
   border-radius: 32rpx;
   padding: 12rpx 26rpx;
   margin: 8rpx 16rpx 8rpx 0;
   font-size: 25rpx;
-  color: #5b6170;
+  color: var(--c-sub);
 }
 .sub-chip-inner {
   display: flex;
@@ -601,9 +537,10 @@ function goCategories() {
   margin-left: 8rpx;
 }
 .sub-chip-active {
-  background-color: var(--c-primary-weak);
-  color: var(--c-primary-deep);
+  background: var(--grad-primary);
+  color: #ffffff;
   font-weight: 600;
+  box-shadow: var(--shadow-primary-sm);
 }
 .grid-bottom-space {
   height: 20rpx;
@@ -685,14 +622,12 @@ function goCategories() {
   margin-left: 0;
 }
 .chip-active {
-  background-color: var(--c-primary-weak);
+  background: var(--grad-primary);
+  box-shadow: var(--shadow-primary-sm);
 }
 .chip-active .chip-text {
-  color: var(--c-primary-deep);
+  color: #ffffff;
   font-weight: 600;
-}
-.chip-star-active {
-  background-color: var(--c-primary-weak);
 }
 /* 键盘：白色键帽 + 底边立体感 */
 .keys {
@@ -705,57 +640,57 @@ function goCategories() {
   width: 162rpx;
   height: 86rpx;
   border-radius: 18rpx;
-  background-color: #ffffff;
+  background-color: var(--c-key-bg);
   margin-bottom: 10rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 3rpx 0 #e5e8ef;
+  box-shadow: 0 3rpx 0 var(--c-key-edge);
   transition: transform 0.06s ease, box-shadow 0.06s ease;
 }
 .key-hover {
   transform: translateY(2rpx);
-  box-shadow: 0 1rpx 0 #e5e8ef;
-  background-color: #fafbfd;
+  box-shadow: 0 1rpx 0 var(--c-key-edge);
+  background-color: var(--c-key-press);
 }
 .key-fn {
-  background-color: #e9ebf2;
-  box-shadow: 0 3rpx 0 #dcdfe8;
+  background-color: var(--c-key-fn-bg);
+  box-shadow: 0 3rpx 0 var(--c-key-fn-edge);
 }
 .key-fn-hover {
   transform: translateY(2rpx);
-  box-shadow: 0 1rpx 0 #dcdfe8;
-  background-color: #e2e5ee;
+  box-shadow: 0 1rpx 0 var(--c-key-fn-edge);
+  background-color: var(--c-key-fn-edge);
 }
 .key-text {
   font-size: 38rpx;
-  color: #2a2f3a;
+  color: var(--c-key-fg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 .key-fn .key-text {
-  color: #4a5060;
+  color: var(--c-key-fn-fg);
 }
 .key-again {
-  background-color: #e9ebf2;
-  box-shadow: 0 3rpx 0 #dcdfe8;
+  background-color: var(--c-primary-weak);
+  box-shadow: 0 3rpx 0 var(--c-primary-tint);
 }
 .key-text-again {
   font-size: 29rpx;
-  color: #6b7280;
+  color: var(--c-primary-deep);
   font-weight: 600;
 }
 .key-save {
-  background: linear-gradient(180deg, #ff7a72 0%, #f0655e 100%);
-  box-shadow: 0 3rpx 0 #d84a44, 0 8rpx 18rpx rgba(240, 101, 94, 0.3);
+  background: var(--grad-primary);
+  box-shadow: 0 3rpx 0 var(--c-primary-press), var(--shadow-primary);
 }
 .key-save-hover {
   transform: translateY(2rpx);
-  background: linear-gradient(180deg, #f4695f 0%, #e8574f 100%);
-  box-shadow: 0 1rpx 0 #d84a44, 0 4rpx 10rpx rgba(240, 101, 94, 0.28);
+  background: var(--c-primary-press);
+  box-shadow: 0 1rpx 0 var(--c-primary-press);
 }
 .key-text-save {
-  color: #ffffff;
+  color: var(--c-ink-on-primary);
   font-size: 31rpx;
   font-weight: 700;
   letter-spacing: 2rpx;

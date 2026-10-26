@@ -1,10 +1,17 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="uts.sdk.modules.muyianBillListener">
 
     <!--
         无障碍自恢复：adb 授予此签名权限后，App 可自行把无障碍服务补回系统启用列表。
         未在清单声明时 pm grant 会静默无效（checkPermission 恒为拒绝）。
     -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+
+    <!-- 后台保活前台服务：Android 8+ 需要 FOREGROUND_SERVICE，14+ 还需按类型声明 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 电池优化白名单：直接弹系统"不限制"确认框所需的权限 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application>
 
@@ -39,6 +46,31 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!--
+            支付后的底部确认弹层：透明 Activity，由无障碍服务直接拉起。
+            不用 SYSTEM_ALERT_WINDOW，所以没有悬浮窗权限这一环。
+            taskAffinity 置空 + excludeFromRecents：弹层独立成任务、不留在最近任务里，
+            收起后用户直接回到支付 App。
+        -->
+        <activity
+            android:name="muyian.bill.listener.BillSheetActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+            后台保活前台服务：低优先级常驻通知维持进程，降低锁屏/后台时被系统回收的概率。
+            stopWithTask=false：用户从最近任务划掉应用后服务仍保持运行（可由用户关闭）。
+        -->
+        <service
+            android:name="muyian.bill.listener.MuyianKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
 
     </application>
 

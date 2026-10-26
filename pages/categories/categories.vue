@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view :class="['page', themeClass]">
     <wd-navbar :left-arrow="true" :fixed="true" :placeholder="true" :safe-area-inset-top="true" @click-left="goBack">
       <template #title>
         <view class="cat-tabs">
@@ -13,15 +13,10 @@
           </view>
         </view>
       </template>
-      <template #right>
-        <view class="nav-right-btn" @tap="showHelp">
-          <app-icon name="help-circle" color="#1d2129" :size="19"></app-icon>
-        </view>
-      </template>
     </wd-navbar>
 
     <view class="hint-bar">
-      <app-icon name="edit-3" color="#9aa0ab" :size="14"></app-icon>
+      <app-icon name="edit-3" :color="theme.primaryDeep" :size="14"></app-icon>
       <text class="hint-text">长按分类拖动排序，单击可修改图标与名称</text>
     </view>
 
@@ -46,7 +41,7 @@
           @tap="openEditTop(i)"
         >
           <view class="cat-icon-circle" :style="iconCircleStyle(c)">
-            <app-icon :name="c.icon || 'grid'" :color="iconStrokeColor(c)" :size="20" :solid="true"></app-icon>
+            <app-icon :name="c.icon || 'grid'" color="#ffffff" :size="20" :solid="true"></app-icon>
           </view>
           <text class="cat-name">{{ c.name }}</text>
           <text v-if="(c.subs || []).length" class="cat-sub-count">{{ c.subs.length }} 个子类</text>
@@ -73,8 +68,8 @@
             @longpress="startDrag('sub', si, i)"
             @tap="openEditSub(i, si)"
           >
-            <view class="sub-icon-circle">
-              <app-icon :name="s.icon || 'grid'" color="#7a8194" :size="19" :solid="true"></app-icon>
+            <view class="sub-icon-circle" :style="{ backgroundColor: subTint(i) }">
+              <app-icon :name="s.icon || 'grid'" :color="subColor(i)" :size="19" :solid="true"></app-icon>
             </view>
             <text class="sub-name">{{ s.name }}</text>
           </view>
@@ -97,20 +92,38 @@
         <text class="dlg-title">{{ dlgTitle }}</text>
         <view class="icon-grid">
           <view
-            v-for="ic in ICON_CHOICES"
+            v-for="(ic, ii) in ICON_CHOICES"
             :key="ic"
             :class="['icon-cell', dlgIcon === ic ? 'icon-cell-active' : '']"
+            :style="{ backgroundColor: iconTint(ii) }"
             @tap="dlgIcon = ic"
           >
-            <app-icon :name="ic" color="#5b6170" :size="19" :solid="true"></app-icon>
+            <app-icon :name="ic" :color="iconColor(ii)" :size="19" :solid="true"></app-icon>
           </view>
         </view>
-        <wd-input
-          v-model="dlgName"
-          :maxlength="8"
-          placeholder="分类名称"
-          custom-class="dlg-input"
-        ></wd-input>
+        <view class="dlg-field-label">
+          <text class="dlg-field-name">分类名称</text>
+          <text :class="['dlg-count', dlgName.length >= 8 ? 'dlg-count-max' : '']">{{ dlgName.length }}/8</text>
+        </view>
+        <view :class="['dlg-field', inputFocused ? 'dlg-field-focus' : '']">
+          <wd-input
+            v-model="dlgName"
+            :maxlength="8"
+            :no-border="true"
+            placeholder="给分类起个名字"
+            placeholder-class="dlg-placeholder"
+            custom-class="dlg-input"
+            custom-input-class="dlg-input-inner"
+            @focus="inputFocused = true"
+            @blur="inputFocused = false"
+          >
+            <template #prefix>
+              <view class="dlg-input-ic">
+                <app-icon name="edit-3" color="#ffffff" :size="15" :stroke-width="2.2"></app-icon>
+              </view>
+            </template>
+          </wd-input>
+        </view>
         <view class="dlg-btns">
           <wd-button plain custom-class="dlg-btn" @click="dlgShow = false">取消</wd-button>
           <wd-button
@@ -122,13 +135,24 @@
         </view>
       </view>
     </wd-popup>
+
+    <!-- 一级分类更多操作 -->
+    <wd-action-sheet
+      v-model="actionShow"
+      :actions="actionItems"
+      cancel-text="取消"
+      :z-index="300"
+      :safe-area-inset-bottom="true"
+      @select="onActionSelect"
+    ></wd-action-sheet>
   </view>
 </template>
 
 <script setup>
-import { ref, computed, getCurrentInstance } from 'vue'
+import { ref, computed, getCurrentInstance, onUnmounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { getCategories, saveCategories, listByType, ICON_CHOICES, DEFAULT_ICON, PALETTE } from '@/common/cats.js'
+import { getCategories, saveCategories, listByType, ICON_CHOICES, DEFAULT_ICON, PALETTE, gradOf, tintOf } from '@/common/cats.js'
+import { theme, themeClass, refreshTheme } from '@/common/theme.js'
 
 const type = ref('expense')
 const expanded = ref(-1)
@@ -143,6 +167,13 @@ const dlgIndex = ref(-1)
 const dlgSubIndex = ref(-1)
 const dlgName = ref('')
 const dlgIcon = ref(DEFAULT_ICON)
+// 输入框聚焦态：驱动主题色的边框/光晕，关闭弹窗或失焦时复原
+const inputFocused = ref(false)
+
+// 一级分类更多操作菜单（wot action sheet）
+const actionShow = ref(false)
+const actionIndex = ref(-1)
+const actionItems = ref([])
 
 const dlgTitle = computed(() => {
   if (dlgMode.value === 'addTop') return '添加一级分类'
@@ -161,11 +192,19 @@ function catColor(i) {
 function iconCircleStyle(c) {
   const idx = list.value.findIndex(x => x.name === c.name)
   const color = PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
-  return { backgroundColor: color + '14' }
+  return { background: gradOf(color) }
 }
-function iconStrokeColor(c) {
-  const idx = list.value.findIndex(x => x.name === c.name)
-  return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
+function subColor(i) {
+  return PALETTE[i % PALETTE.length]
+}
+function subTint(i) {
+  return tintOf(subColor(i), 0.86)
+}
+function iconColor(i) {
+  return PALETTE[i % PALETTE.length]
+}
+function iconTint(i) {
+  return tintOf(iconColor(i), 0.88)
 }
 
 function refresh() {
@@ -183,10 +222,6 @@ function switchType(t) {
   expanded.value = -1
 }
 
-function showHelp() {
-  uni.showToast({ title: '长按拖动排序；单击修改图标与名称', icon: 'none' })
-}
-
 function toggleExpand(i) {
   expanded.value = expanded.value === i ? -1 : i
 }
@@ -200,6 +235,32 @@ function onCardTouch(e) {
   const t = e.touches && e.touches[0]
   if (t) lastTouch = { x: t.clientX, y: t.clientY }
 }
+
+/* ---------- 拖动时锁住页面滚动 ---------- */
+let scrollLockHandler = null
+
+/**
+ * 拖动期间在 document 上挂非 passive 的 touchmove 拦截。
+ * 只靠行上的 e.preventDefault() 不够：WebView 可能已经在合成线程开始原生滚动，
+ * 会出现"行在拖、页面也跟着滚"的双重拖动。
+ */
+function lockPageScroll() {
+  if (scrollLockHandler || typeof document === 'undefined') return
+  scrollLockHandler = (e) => {
+    if (e.cancelable) e.preventDefault()
+  }
+  document.addEventListener('touchmove', scrollLockHandler, { passive: false })
+}
+
+function unlockPageScroll() {
+  if (!scrollLockHandler) return
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('touchmove', scrollLockHandler, { passive: false })
+  }
+  scrollLockHandler = null
+}
+
+onUnmounted(unlockPageScroll)
 
 function startDrag(kind, from, parentIdx = -1) {
   if (drag.value) return
@@ -218,6 +279,7 @@ function startDrag(kind, from, parentIdx = -1) {
       dy: 0,
       rects
     }
+    lockPageScroll()
     if (uni.vibrateShort) {
       try { uni.vibrateShort() } catch (e) { /* ignore */ }
     }
@@ -233,11 +295,13 @@ function dragStyle(kind, i) {
   const d = drag.value
   if (!d || d.kind !== kind || i !== d.from) return {}
   return {
-    transform: 'translateY(' + d.dy + 'px) scale(1.04)',
+    transform: 'translateY(' + d.dy + 'px)',
     zIndex: 10,
     position: 'relative',
-    boxShadow: '0 10rpx 30rpx rgba(60,50,20,0.18)',
-    backgroundColor: '#ffffff'
+    borderRadius: '16rpx',
+    // 拖动中的行用主题淡底托住，别用纯白块把玻璃卡盖住
+    backgroundColor: 'var(--c-primary-weak)',
+    boxShadow: '0 12rpx 30rpx rgba(60, 50, 20, 0.2)'
   }
 }
 
@@ -262,6 +326,7 @@ function onDragMove(e) {
 }
 
 function onDragEnd() {
+  unlockPageScroll()
   const d = drag.value
   if (!d) return
   drag.value = null
@@ -284,6 +349,7 @@ function openAddTop() {
   dlgMode.value = 'addTop'
   dlgName.value = ''
   dlgIcon.value = DEFAULT_ICON
+  inputFocused.value = false
   dlgShow.value = true
 }
 
@@ -292,6 +358,7 @@ function openAddSub(topIdx) {
   dlgIndex.value = topIdx
   dlgName.value = ''
   dlgIcon.value = DEFAULT_ICON
+  inputFocused.value = false
   dlgShow.value = true
 }
 
@@ -301,6 +368,7 @@ function openEditTop(i) {
   dlgIndex.value = i
   dlgName.value = list.value[i].name
   dlgIcon.value = list.value[i].icon || DEFAULT_ICON
+  inputFocused.value = false
   dlgShow.value = true
 }
 
@@ -312,6 +380,7 @@ function openEditSub(topIdx, subIdx) {
   const sub = list.value[topIdx].subs[subIdx]
   dlgName.value = sub.name
   dlgIcon.value = sub.icon || DEFAULT_ICON
+  inputFocused.value = false
   dlgShow.value = true
 }
 
@@ -400,35 +469,23 @@ function removeSub(topIdx, subIdx) {
   })
 }
 
-/* 一级分类的"更多"操作：点行内右侧按钮（长按已用于拖拽） */
+/* 一级分类的"更多"操作：只留删除；展开用行尾箭头，排序用长按拖拽 */
 function onRowMenu(i) {
-  uni.showActionSheet({
-    itemList: ['展开/收起子类', '上移', '下移', '删除'],
-    success: (res) => {
-      if (res.tapIndex === 0) expanded.value = expanded.value === i ? -1 : i
-      else if (res.tapIndex === 1) move(i, -1)
-      else if (res.tapIndex === 2) move(i, 1)
-      else if (res.tapIndex === 3) removeTop(i)
-    }
-  })
+  actionIndex.value = i
+  actionItems.value = [{ name: '删除', color: 'var(--c-out)' }]
+  actionShow.value = true
 }
 
-function move(i, delta) {
-  const arr = type.value === 'income' ? data.value.income : data.value.expense
-  const j = i + delta
-  if (j < 0 || j >= arr.length) {
-    uni.showToast({ title: '已经到头了', icon: 'none' })
-    return
-  }
-  const tmp = arr[i]
-  arr[i] = arr[j]
-  arr[j] = tmp
-  persist()
+function onActionSelect({ index }) {
+  const i = actionIndex.value
+  if (i < 0) return
+  if (index === 0) removeTop(i)
 }
 
 function goBack() { uni.navigateBack() }
 
 onShow(() => {
+  refreshTheme()
   refresh()
 })
 </script>
@@ -436,19 +493,16 @@ onShow(() => {
 <style lang="scss">
 .page {
   min-height: 100vh;
-  background: transparent;
-}
-.nav-right-btn {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background-color: var(--c-bg);
 }
 .cat-tabs {
   display: flex;
   flex-direction: row;
+  justify-content: center;
+  width: 100%;
+  /* wd-navbar 的 title 槽是 60% 宽、行高为导航栏高度，这里显式垂直居中 */
+  height: 100%;
+  align-items: center;
 }
 .cat-tab {
   display: flex;
@@ -468,27 +522,28 @@ onShow(() => {
   width: 48rpx;
   height: 6rpx;
   border-radius: 4rpx;
-  background-color: var(--c-text);
+  background: var(--grad-primary);
 }
 .hint-bar {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  background-color: #f4f2ec;
+  background: var(--grad-primary-soft);
   padding: 16rpx 0;
 }
 .hint-text {
   margin-left: 8rpx;
   font-size: 24rpx;
-  color: #9aa0ab;
+  color: var(--c-primary-deep);
 }
 .cat-card {
   background-color: var(--c-card);
   margin: 24rpx 24rpx 0;
   border-radius: 28rpx;
   box-shadow: var(--shadow-card);
-  padding: 6rpx 28rpx 28rpx;
+  /* 容器不加左右内边距：内边距放到每一行，拖动时行底色才能铺到卡片边缘 */
+  padding: 6rpx 0 28rpx;
 }
 .drag-active {
   user-select: none;
@@ -503,21 +558,22 @@ onShow(() => {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 24rpx 0;
+  padding: 24rpx 28rpx;
 }
 .drag-target {
   background-color: var(--c-primary-weak);
   border-radius: 16rpx;
 }
 .cat-icon-circle {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 18rpx;
+  width: 66rpx;
+  height: 66rpx;
+  border-radius: 20rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: 20rpx;
   flex-shrink: 0;
+  box-shadow: 0 5rpx 12rpx rgba(60, 50, 20, 0.16);
 }
 .cat-name {
   font-size: 30rpx;
@@ -526,8 +582,11 @@ onShow(() => {
 }
 .cat-sub-count {
   margin-left: 14rpx;
-  font-size: 22rpx;
-  color: var(--c-dim);
+  font-size: 21rpx;
+  color: var(--c-primary-deep);
+  background-color: var(--c-primary-weak);
+  border-radius: 9rpx;
+  padding: 3rpx 10rpx;
 }
 .cat-ops {
   display: flex;
@@ -548,7 +607,7 @@ onShow(() => {
   background-color: var(--glass-bg);
   border-radius: 22rpx;
   padding: 24rpx 18rpx;
-  margin: 0 0 20rpx;
+  margin: 0 28rpx 20rpx;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -572,7 +631,7 @@ onShow(() => {
 .sub-name {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: #5b6170;
+  color: var(--c-sub);
   max-width: 140rpx;
   overflow: hidden;
   white-space: nowrap;
@@ -607,25 +666,99 @@ onShow(() => {
   flex-wrap: wrap;
   max-height: 330rpx;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+/* 图标区滚动条在弹窗里很碍眼，直接隐藏（仍可滚动） */
+.icon-grid::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 .icon-cell {
-  width: 76rpx;
-  height: 76rpx;
-  border-radius: 18rpx;
+  /* 弹窗内容宽 576rpx：74 + 8 边距 = 82rpx/列，正好排 7 列，右侧几乎不留白 */
+  width: 74rpx;
+  height: 74rpx;
+  border-radius: 20rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 4rpx;
-  background-color: var(--glass-bg);
 }
 .icon-cell-active {
+  box-shadow: 0 0 0 3rpx var(--c-primary) inset, var(--shadow-primary-sm);
+  transform: scale(1.04);
+}
+/* 名称输入：主题化表单字段（图标 + 计数 + 聚焦光晕） */
+.dlg-field-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24rpx 8rpx 0;
+}
+.dlg-field-name {
+  font-size: 23rpx;
+  color: var(--c-sub);
+  letter-spacing: 1rpx;
+}
+.dlg-count {
+  font-size: 22rpx;
+  color: var(--c-dim);
+  font-variant-numeric: tabular-nums;
+}
+.dlg-count-max {
+  color: var(--c-primary-deep);
+  font-weight: 600;
+}
+.dlg-field {
+  margin-top: 12rpx;
+  padding: 0 18rpx;
+  border-radius: 24rpx;
   background-color: var(--c-primary-weak);
-  box-shadow: 0 0 0 3rpx var(--c-primary) inset;
+  border: 2rpx solid transparent;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.dlg-field-focus {
+  background-color: var(--c-card);
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 6rpx var(--c-primary-tint), var(--shadow-primary-sm);
 }
 .dlg-input {
-  margin-top: 22rpx;
-  background-color: #f4f6fa;
-  border-radius: 16rpx;
+  background-color: transparent !important;
+  padding: 0 !important;
+}
+.dlg-input .wd-input__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 96rpx;
+}
+.dlg-input .wd-input__value {
+  align-items: center;
+}
+.dlg-input .wd-input__prefix {
+  margin-right: 16rpx;
+}
+.dlg-input .wd-input__inner {
+  height: 96rpx;
+  padding-left: 0;
+  font-size: 30rpx;
+  font-weight: 500;
+  color: var(--c-text);
+}
+.dlg-placeholder {
+  color: var(--c-dim);
+  font-weight: 400;
+}
+.dlg-input-ic {
+  width: 46rpx;
+  height: 46rpx;
+  border-radius: 14rpx;
+  background: var(--grad-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-primary-sm);
 }
 .dlg-btns {
   display: flex;
@@ -636,14 +769,15 @@ onShow(() => {
   flex: 1;
   margin: 0 8rpx;
 }
-.dlg-btn.plain {
+.dlg-btn.is-plain {
   color: var(--c-sub) !important;
-  border-color: var(--c-dim) !important;
-  background-color: #ffffff !important;
+  border-color: var(--c-line) !important;
+  background-color: var(--c-card) !important;
 }
 .dlg-btn-primary {
-  background-color: var(--c-primary) !important;
+  background: var(--grad-primary) !important;
   color: #ffffff !important;
+  box-shadow: var(--shadow-primary-sm);
 }
 .dlg-btn-danger {
   background-color: var(--c-out) !important;

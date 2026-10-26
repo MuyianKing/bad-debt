@@ -9,7 +9,6 @@
  */
 
 const KEY_BILLS = 'muyian_web_bills'
-const KEY_DRAFTS = 'muyian_web_drafts'
 const KEY_SEQ = 'muyian_web_seq'
 
 function pad2(n) {
@@ -30,24 +29,6 @@ function loadBills() {
 function saveBills(list) {
   try {
     uni.setStorageSync(KEY_BILLS, JSON.stringify(list))
-  } catch (e) {
-    // ignore
-  }
-}
-
-function loadDrafts() {
-  try {
-    const raw = uni.getStorageSync(KEY_DRAFTS)
-    const map = raw ? JSON.parse(raw) : {}
-    return map && typeof map === 'object' ? map : {}
-  } catch (e) {
-    return {}
-  }
-}
-
-function saveDrafts(map) {
-  try {
-    uni.setStorageSync(KEY_DRAFTS, JSON.stringify(map))
   } catch (e) {
     // ignore
   }
@@ -139,53 +120,46 @@ export function isNotificationListenerEnabled() {
 
 export function openNotificationListenerSettings() {}
 
-/* ---------- 草稿 ---------- */
-
-export function getPendingDrafts() {
-  const map = loadDrafts()
-  const list = Object.keys(map).map(k => map[k])
-  list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-  return JSON.stringify(list)
-}
-
-export function getDraft(token) {
-  const d = loadDrafts()[token]
-  return d ? JSON.stringify(d) : ''
-}
-
-export function resolveDraft(token, money, isIncome, bankName, costType, orderRemark) {
-  const amount = amountOf(money)
-  if (!(amount > 0)) return '{"success":false,"error":"invalid money"}'
-  const map = loadDrafts()
-  const d = map[token]
-  if (!d) return '{"success":false,"error":"draft not found"}'
-  const bill = buildBill({
-    date: d.year + '-' + pad2(d.month) + '-' + pad2(d.day),
-    amount,
-    isIncome,
-    bankName: bankName || d.bankName,
-    costType,
-    orderRemark,
-    reimb: false,
-    starred: false,
-    source: 'screen'
-  })
-  bill.createdAt = d.createdAt || bill.createdAt
-  const bills = loadBills()
-  bills.unshift(bill)
-  saveBills(bills)
-  delete map[token]
-  saveDrafts(map)
-  return '{"success":true,"id":' + bill.id + '}'
-}
-
-export function discardDraft(token) {
-  const map = loadDrafts()
-  if (!map[token]) return false
-  delete map[token]
-  saveDrafts(map)
+/** H5 由浏览器接管通知权限，这里恒按已开启处理，避免设置页误显示"请求权限" */
+export function areNotificationsEnabled() {
   return true
 }
+
+/* ---------- 后台运行（H5 无对应端能力，仅保证接口对齐） ---------- */
+
+export function isKeepAliveEnabled() {
+  return false
+}
+
+export function setKeepAliveEnabled(enabled) {
+  return Boolean(enabled)
+}
+
+/* ---------- 底部确认弹层（H5 无端能力，仅保证接口对齐） ---------- */
+
+export function hasOverlayPermission() {
+  return false
+}
+
+export function requestOverlayPermission() {
+  return false
+}
+
+/** H5 没有原生弹层，主题色由 CSS 变量接管，这里只保持接口协议一致 */
+export function setCardThemeColor(color) {
+  return true
+}
+
+/** H5 不存在系统电池优化，按"不限制"处理，避免出现误导性提示 */
+export function isIgnoringBatteryOptimizations() {
+  return true
+}
+
+export function requestIgnoreBatteryOptimizations() {
+  return '{"success":false,"granted":false,"error":"h5 unsupported"}'
+}
+
+export function openAppSettings() {}
 
 /* ---------- 记账 ---------- */
 
@@ -256,47 +230,7 @@ export function deleteBill(id) {
 
 /* ---------- 测试注入 ---------- */
 
-/** 简易"支付成功"页解析：完成标记 + 金额，5 分钟内同金额去重 */
+/** H5 没有原生确认弹层，无法完成"支付后弹层"闭环；仅保持接口协议一致 */
 export function emitTestBill(text) {
-  const content = String(text || '')
-  if (!/(支付成功|付款成功|收款成功|交易成功)/.test(content)) {
-    return '{"accepted":false,"reason":"not a payment page"}'
-  }
-  const m = content.match(/(?:￥|¥|金额)\s*([0-9]+(?:\.[0-9]{1,2})?)|([0-9]+(?:\.[0-9]{1,2})?)\s*元/)
-  if (!m) {
-    return '{"accepted":false,"reason":"not a payment page"}'
-  }
-  const amount = parseFloat(m[1] || m[2])
-  // 与原生 parseBill 同规则：收入词与支出词同时出现按支出算，退款词优先
-  const hasExpense = /(支出|付款|支付|消费|扣款|转出|提现|买单|代扣)/.test(content)
-  const hasIncome = /(退款|退回|返还|收入|收款|到账|入账|转入)/.test(content)
-  const isRefund = /(退款|退回|返还)/.test(content)
-  const income = isRefund || (hasIncome && !hasExpense)
-  const now = Date.now()
-  const map = loadDrafts()
-  // 草稿级去重：同金额 2 分钟窗口
-  for (const k of Object.keys(map)) {
-    const d = map[k]
-    if (Math.abs(Math.abs(d.money) - amount) < 0.01 && now - (d.createdAt || 0) < 2 * 60 * 1000) {
-      return '{"accepted":false,"reason":"duplicate capture"}'
-    }
-  }
-  const t = new Date()
-  const draft = {
-    token: 'web-' + now + '-' + Math.floor(Math.random() * 100000),
-    money: income ? amount : -amount,
-    bankName: '微信',
-    costType: income ? '收入' : '消费',
-    orderRemark: '',
-    clock: (t.getMonth() + 1) + '月' + t.getDate() + '日 ' + pad2(t.getHours()) + ':' + pad2(t.getMinutes()),
-    year: t.getFullYear(),
-    month: t.getMonth() + 1,
-    day: t.getDate(),
-    sourcePkg: 'com.tencent.mm',
-    createdAt: now,
-    notificationId: nextId()
-  }
-  map[draft.token] = draft
-  saveDrafts(map)
-  return JSON.stringify({ accepted: true, draft })
+  return '{"accepted":false,"reason":"h5 unsupported"}'
 }

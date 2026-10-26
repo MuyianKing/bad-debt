@@ -30,21 +30,39 @@ export function isNotificationListenerEnabled() {
 
 export function openNotificationListenerSettings() {}
 
-export function getPendingDrafts() {
-  return '[]'
+export function areNotificationsEnabled() {
+  return true
 }
 
-export function getDraft(token) {
-  return ''
-}
-
-export function resolveDraft(token, money, isIncome, bankName, costType, orderRemark) {
-  return '{"success":false,"error":"h5 unsupported"}'
-}
-
-export function discardDraft(token) {
+export function isKeepAliveEnabled() {
   return false
 }
+
+export function setKeepAliveEnabled(enabled) {
+  return Boolean(enabled)
+}
+
+export function hasOverlayPermission() {
+  return false
+}
+
+export function requestOverlayPermission() {
+  return false
+}
+
+export function setCardThemeColor(color) {
+  return true
+}
+
+export function isIgnoringBatteryOptimizations() {
+  return true
+}
+
+export function requestIgnoreBatteryOptimizations() {
+  return '{"success":false,"granted":false,"error":"h5 unsupported"}'
+}
+
+export function openAppSettings() {}
 
 export function saveManualBill(money, isIncome, bankName, costType, orderRemark) {
   return '{"success":false,"error":"h5 unsupported"}'

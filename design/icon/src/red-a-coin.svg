@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bgA" x1="0.12" y1="0" x2="0.88" y2="1"><stop offset="0" stop-color="#f0483a"/><stop offset="0.4" stop-color="#c01226"/><stop offset="1" stop-color="#66050e"/></linearGradient>
+  <radialGradient id="glowA" cx="0.28" cy="0.14" r="0.68"><stop offset="0" stop-color="#ff9d78" stop-opacity="0.52"/><stop offset="1" stop-color="#ff9d78" stop-opacity="0"/></radialGradient>
+  
+  <linearGradient id="gold" x1="0.12" y1="0.02" x2="0.86" y2="0.98"><stop offset="0" stop-color="#ffeeb4"/><stop offset="0.28" stop-color="#ffd75c"/><stop offset="0.6" stop-color="#f5b31c"/><stop offset="1" stop-color="#d08605"/></linearGradient>
+  <linearGradient id="goldRim" x1="0.1" y1="0.1" x2="0.9" y2="0.9"><stop offset="0" stop-color="#ffeaa0"/><stop offset="0.4" stop-color="#f4b722"/><stop offset="1" stop-color="#b97503"/></linearGradient>
+  <radialGradient id="coinSheen" cx="0.3" cy="0.2" r="0.8"><stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="1" stop-color="#8a4b00" stop-opacity="0.24"/></radialGradient>
+  <linearGradient id="holeFill" x1="0.2" y1="0" x2="0.8" y2="1"><stop offset="0" stop-color="#8f0d1b"/><stop offset="1" stop-color="#4a030a"/></linearGradient>
+  <linearGradient id="holeShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0.45"/><stop offset="0.4" stop-color="#000000" stop-opacity="0"/></linearGradient>
+  
+  <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0.7"><stop offset="0" stop-color="#ff9a78"/><stop offset="0.45" stop-color="#ff6144"/><stop offset="1" stop-color="#dd3222"/></linearGradient>
+</defs>
+<rect width="1024" height="1024" rx="232" fill="url(#bgA)"/>
+<rect width="1024" height="1024" rx="232" fill="url(#glowA)"/>
+
+<path d="M 40 806 C 190 862 322 738 512 754 C 700 770 812 674 984 712" fill="none" stroke="#ffd24d" stroke-width="95" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+    <path d="M 40 806 C 190 862 322 738 512 754 C 700 770 812 674 984 712" fill="none" stroke="url(#ribbon)" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
+
+<g transform="rotate(-8 512 500)">
+    <circle cx="512" cy="500" r="264" fill="url(#gold)"/>
+    <circle cx="512" cy="500" r="264" fill="url(#coinSheen)"/>
+    <circle cx="512" cy="500" r="259" fill="none" stroke="url(#goldRim)" stroke-width="26"/>
+    <circle cx="512" cy="500" r="224" fill="none" stroke="#a86c04" stroke-width="8" opacity="0.5"/>
+    <circle cx="512" cy="500" r="233" fill="none" stroke="#fff3c6" stroke-width="6" opacity="0.55"/>
+    <rect x="446" y="434" width="132" height="132" rx="13" fill="url(#holeFill)"/>
+    <rect x="446" y="434" width="132" height="132" rx="13" fill="url(#holeShade)"/>
+  </g>
+
+<path d="M 236 244 Q 245.12 272.88 274 282 Q 245.12 291.12 236 320 Q 226.88 291.12 198 282 Q 226.88 272.88 236 244 Z" fill="#ffe89a" opacity="0.95"/>
+<path d="M 792 272 Q 797.76 290.24 816 296 Q 797.76 301.76 792 320 Q 786.24 301.76 768 296 Q 786.24 290.24 792 272 Z" fill="#fff0b8" opacity="0.8"/>
+<path d="M 812 732 Q 819.2 754.8 842 762 Q 819.2 769.2 812 792 Q 804.8 769.2 782 762 Q 804.8 754.8 812 732 Z" fill="#ffe08a" opacity="0.75"/>
+</svg>

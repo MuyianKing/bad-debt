@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <radialGradient id="bgY" cx="0.42" cy="0.3" r="0.9"><stop offset="0" stop-color="#ffc733"/><stop offset="0.44" stop-color="#f0920a"/><stop offset="1" stop-color="#964600"/></radialGradient>
+  <radialGradient id="glowY" cx="0.3" cy="0.08" r="0.6"><stop offset="0" stop-color="#fff4c8" stop-opacity="0.55"/><stop offset="1" stop-color="#fff4c8" stop-opacity="0"/></radialGradient>
+  
+  <linearGradient id="gold" x1="0.12" y1="0.02" x2="0.86" y2="0.98"><stop offset="0" stop-color="#ffeeb4"/><stop offset="0.28" stop-color="#ffd75c"/><stop offset="0.6" stop-color="#f5b31c"/><stop offset="1" stop-color="#d08605"/></linearGradient>
+  <linearGradient id="goldRim" x1="0.1" y1="0.1" x2="0.9" y2="0.9"><stop offset="0" stop-color="#ffeaa0"/><stop offset="0.4" stop-color="#f4b722"/><stop offset="1" stop-color="#b97503"/></linearGradient>
+  <radialGradient id="coinSheen" cx="0.3" cy="0.2" r="0.8"><stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/><stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/><stop offset="1" stop-color="#8a4b00" stop-opacity="0.24"/></radialGradient>
+  <linearGradient id="holeFill" x1="0.2" y1="0" x2="0.8" y2="1"><stop offset="0" stop-color="#8f0d1b"/><stop offset="1" stop-color="#4a030a"/></linearGradient>
+  <linearGradient id="holeShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0.45"/><stop offset="0.4" stop-color="#000000" stop-opacity="0"/></linearGradient>
+  <radialGradient id="floorY" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#5f2f00" stop-opacity="0.4"/><stop offset="1" stop-color="#5f2f00" stop-opacity="0"/></radialGradient>
+  <radialGradient id="roseLight" cx="0.36" cy="0.24" r="0.64"><stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+  <radialGradient id="holeAmber" cx="0.5" cy="0.42" r="0.75"><stop offset="0" stop-color="#b96300"/><stop offset="1" stop-color="#7d3c00"/></radialGradient>
+</defs>
+<rect width="1024" height="1024" rx="232" fill="url(#bgY)"/>
+<rect width="1024" height="1024" rx="232" fill="url(#glowY)"/>
+<ellipse cx="512" cy="742" rx="300" ry="56" fill="url(#floorY)"/>
+
+<!-- 外圈莲瓣 -->
+<g transform="rotate(0 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#b01120"/></g><g transform="rotate(30 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#bf1424"/></g><g transform="rotate(60 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#b01120"/></g><g transform="rotate(90 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#bf1424"/></g><g transform="rotate(120 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#b01120"/></g><g transform="rotate(150 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#bf1424"/></g><g transform="rotate(180 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#b01120"/></g><g transform="rotate(210 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#bf1424"/></g><g transform="rotate(240 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#b01120"/></g><g transform="rotate(270 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#bf1424"/></g><g transform="rotate(300 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#b01120"/></g><g transform="rotate(330 512 500)"><path d="M 684 470
+    C 739.76 436 802.08 464.8 848 500
+    C 802.08 535.2 739.76 564 684 530 Z"
+    fill="#bf1424"/></g>
+<!-- 内圈莲瓣 -->
+<g transform="rotate(22.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#ec4232"/></g><g transform="rotate(67.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#d8262b"/></g><g transform="rotate(112.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#ec4232"/></g><g transform="rotate(157.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#d8262b"/></g><g transform="rotate(202.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#ec4232"/></g><g transform="rotate(247.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#d8262b"/></g><g transform="rotate(292.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#ec4232"/></g><g transform="rotate(337.5 512 500)"><path d="M 678 470
+    C 720.84 442 768.72 468.1 804 500
+    C 768.72 531.9 720.84 558 678 530 Z"
+    fill="#d8262b"/></g>
+
+<!-- 金铜钱 -->
+<g transform="rotate(0 512 500)">
+    <circle cx="512" cy="500" r="158" fill="url(#gold)"/>
+    <circle cx="512" cy="500" r="158" fill="url(#coinSheen)"/>
+    <circle cx="512" cy="500" r="153" fill="none" stroke="url(#goldRim)" stroke-width="26"/>
+    <circle cx="512" cy="500" r="126" fill="none" stroke="#a86c04" stroke-width="8" opacity="0.5"/>
+    <circle cx="512" cy="500" r="135" fill="none" stroke="#fff3c6" stroke-width="6" opacity="0.55"/>
+    <rect x="475.5" y="463.5" width="73" height="73" rx="7" fill="url(#holeAmber)"/>
+    <rect x="475.5" y="463.5" width="73" height="73" rx="7" fill="url(#holeShade)"/>
+  </g>
+
+<path d="M 812 240 Q 818.72 261.28 840 268 Q 818.72 274.72 812 296 Q 805.28 274.72 784 268 Q 805.28 261.28 812 240 Z" fill="#fffbe8" opacity="0.9"/>
+<path d="M 214 266 Q 218.8 281.2 234 286 Q 218.8 290.8 214 306 Q 209.2 290.8 194 286 Q 209.2 281.2 214 266 Z" fill="#fffbe8" opacity="0.6"/>
+</svg>

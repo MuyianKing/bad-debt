@@ -1,32 +1,29 @@
 <template>
-  <view class="page">
+  <view :class="['page', themeClass]">
     <wd-navbar
       :left-arrow="true"
       :fixed="true"
       :placeholder="true"
       :safe-area-inset-top="true"
-      custom-class="cal-navbar glass-nav"
+      :bordered="navSolid"
+      :custom-style="navStyle"
+      :custom-class="'cal-navbar' + (navSolid ? ' is-scrolled' : '')"
       @click-left="goBack"
     >
       <template #title>
         <picker mode="date" fields="month" :value="pickerValue" @change="onMonthChange">
           <view class="cal-title">
             <text class="cal-title-text">{{ year }}.{{ pad2(month) }}</text>
-            <app-icon name="chevron-down" color="#1d2129" :size="14"></app-icon>
+            <app-icon name="chevron-down" :color="theme.ink" :size="14"></app-icon>
           </view>
         </picker>
-      </template>
-      <template #right>
-        <view class="nav-right-btn" @tap="goToday">
-          <app-icon name="clock" color="#1d2129" :size="19"></app-icon>
-        </view>
       </template>
     </wd-navbar>
 
     <!-- 月历 -->
     <view class="card glass">
       <view class="week-head">
-        <text v-for="w in weekHeads" :key="w" class="week-head-cell">{{ w }}</text>
+        <text v-for="(w, wi) in weekHeads" :key="w" :class="['week-head-cell', wi >= 5 ? 'week-head-weekend' : '']">{{ w }}</text>
       </view>
       <view class="cal-grid">
         <view
@@ -35,8 +32,8 @@
           class="cal-cell"
           @tap="selectDay(cell)"
         >
-          <view v-if="cell.day > 0" :class="['cal-cell-inner', isToday(cell) ? 'cal-cell-today' : '']">
-            <view :class="['cal-day-pill', isToday(cell) ? 'cal-day-pill-today' : '']">
+          <view v-if="cell.day > 0" :class="['cal-cell-inner', isSelected(cell) ? 'cal-cell-selected' : '']">
+            <view :class="['cal-day-pill', cell.isToday && !isSelected(cell) ? 'cal-day-pill-today' : '']">
               <text class="cal-day">{{ cell.day }}</text>
             </view>
             <text v-if="cell.text" :class="['cal-mark', cell.kind]">{{ cell.text }}</text>
@@ -56,35 +53,57 @@
         <text>{{ m.label }}</text>
       </view>
     </view>
-    <view class="month-summary">
-      <text class="ms-item">收入 <text class="ms-in">{{ fmtMoney(incomeTotal) }}</text></text>
-      <text class="ms-dot">·</text>
-      <text class="ms-item">支出 <text class="ms-out">{{ fmtMoney(expenseTotal) }}</text></text>
-      <text class="ms-dot">·</text>
-      <text class="ms-item">结余 <text :class="incomeTotal - expenseTotal < 0 ? 'ms-out' : 'ms-in'">{{ fmtMoney(incomeTotal - expenseTotal) }}</text></text>
+    <view class="day-head">
+      <text class="day-head-title">{{ dayTitle }}</text>
+      <view class="day-head-totals">
+        <template v-if="mode === 'income'">
+          <text class="ms-item">收 <text class="ms-in">{{ fmtMoney(dayIncome) }}</text></text>
+        </template>
+        <template v-else-if="mode === 'expense'">
+          <text class="ms-item">支 <text class="ms-out">{{ fmtMoney(dayExpense) }}</text></text>
+        </template>
+        <template v-else>
+          <text class="ms-item">支 <text class="ms-out">{{ fmtMoney(dayExpense) }}</text></text>
+          <text class="ms-dot">·</text>
+          <text class="ms-item">收 <text class="ms-in">{{ fmtMoney(dayIncome) }}</text></text>
+          <text class="ms-dot">·</text>
+          <text class="ms-item">结 <text :class="dayBalance < 0 ? 'ms-out' : 'ms-in'">{{ fmtMoney(dayBalance) }}</text></text>
+        </template>
+      </view>
     </view>
 
-    <!-- 账单列表 -->
+    <!-- 账单列表：只展示当前选中日期 -->
     <view class="list-area">
-      <bill-list :groups="groups" @row="onRow" @rowlong="onRowLong"></bill-list>
-      <view v-if="!groups.length" class="empty">
-        <view class="empty-ic">
-          <app-icon name="calendar" color="#dfe2ec" :size="46" :stroke-width="1.5"></app-icon>
-        </view>
-        <text class="empty-text">本月还没有账单</text>
+      <bill-list :groups="groups" :hide-head="true" @row="onRow" @rowlong="onRowLong"></bill-list>
+    <view v-if="!groups.length" class="empty">
+      <view class="empty-ic">
+        <app-icon name="calendar" :color="theme.primary" :size="44" :stroke-width="1.6"></app-icon>
       </view>
+      <text class="empty-text">{{ emptyText }}</text>
+    </view>
     </view>
 
     <view class="bottom-safe"></view>
     <app-fab position="bottom-center" @click="goAdd"></app-fab>
+
+    <!-- 账单操作菜单 -->
+    <wd-action-sheet
+      v-model="actionShow"
+      :actions="actionItems"
+      cancel-text="取消"
+      :z-index="300"
+      :safe-area-inset-bottom="true"
+      @select="onActionSelect"
+    ></wd-action-sheet>
   </view>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
-import { fmtMoney, fmtNum, pad2, groupByDay } from '@/common/fmt.js'
+import { onShow, onPageScroll } from '@dcloudio/uni-app'
+import { fmtMoney, fmtNum, pad2, groupByDay, dayGroupTitle, daysInMonth } from '@/common/fmt.js'
 import { lunarText } from '@/common/lunar.js'
+import { theme, themeClass, refreshTheme } from '@/common/theme.js'
 // #ifdef APP-PLUS
 import { getMonthBills, deleteBill } from '@/uni_modules/muyian-bill-listener'
 // #endif
@@ -98,6 +117,19 @@ const month = ref(now.getMonth() + 1)
 const bills = ref([])
 const mode = ref('both')
 const selectedDay = ref(now.getDate())
+// 账单操作菜单（wot action sheet）
+const actionShow = ref(false)
+const actionBill = ref(null)
+const actionItems = ref([])
+// 顶栏滚动态：默认透明让光斑透到状态栏，滚动后转毛玻璃避免列表从标题下穿过
+const navSolid = ref(false)
+// wd-navbar 的 custom-class 进不去组件内层样式域，底色只能走 custom-style
+const navStyle = computed(() =>
+  'transition: background-color 0.18s ease;' +
+  (navSolid.value
+    ? 'background-color: var(--glass-nav-bg);-webkit-backdrop-filter: blur(18px) saturate(1.6);backdrop-filter: blur(18px) saturate(1.6);'
+    : 'background-color: transparent;')
+)
 const weekHeads = ['一', '二', '三', '四', '五', '六', '日']
 const modes = [
   { value: 'both', label: '收&支' },
@@ -107,9 +139,24 @@ const modes = [
 ]
 
 const pickerValue = computed(() => year.value + '-' + pad2(month.value))
-const expenseTotal = computed(() => bills.value.filter(b => Number(b.money) < 0).reduce((s, b) => s + Math.abs(Number(b.money)), 0))
-const incomeTotal = computed(() => bills.value.filter(b => Number(b.money) > 0).reduce((s, b) => s + Number(b.money), 0))
-const groups = computed(() => groupByDay(bills.value, year.value, month.value))
+/** 选中日的全部账单 */
+const dayBillsAll = computed(() => bills.value.filter(b => Number(b.day) === Number(selectedDay.value)))
+/** 列表随「收&支 / 结余 / 收入 / 支出」过滤；结余同收&支，展示全部 */
+const dayBills = computed(() => {
+  if (mode.value === 'income') return dayBillsAll.value.filter(b => Number(b.money) > 0)
+  if (mode.value === 'expense') return dayBillsAll.value.filter(b => Number(b.money) < 0)
+  return dayBillsAll.value
+})
+const dayExpense = computed(() => dayBills.value.filter(b => Number(b.money) < 0).reduce((s, b) => s + Math.abs(Number(b.money)), 0))
+const dayIncome = computed(() => dayBills.value.filter(b => Number(b.money) > 0).reduce((s, b) => s + Number(b.money), 0))
+const dayBalance = computed(() => dayIncome.value - dayExpense.value)
+const dayTitle = computed(() => dayGroupTitle(year.value, month.value, selectedDay.value))
+const emptyText = computed(() => {
+  if (mode.value === 'income') return '这一天还没有收入'
+  if (mode.value === 'expense') return '这一天还没有支出'
+  return '这一天还没有账单'
+})
+const groups = computed(() => groupByDay(dayBills.value, year.value, month.value))
 
 /** 每日金额表 */
 const dayMap = computed(() => {
@@ -159,12 +206,16 @@ function makeCell(d) {
     text = lunarText(year.value, month.value, d)
     kind = 'lunar'
   }
-  return { day: d, text, kind }
+  const t = new Date()
+  const isToday =
+    t.getFullYear() === Number(year.value) &&
+    t.getMonth() + 1 === Number(month.value) &&
+    t.getDate() === d
+  return { day: d, text, kind, isToday }
 }
 
-function isToday(cell) {
-  const t = new Date()
-  return cell.day > 0 && t.getFullYear() === Number(year.value) && t.getMonth() + 1 === Number(month.value) && t.getDate() === cell.day
+function isSelected(cell) {
+  return cell.day > 0 && Number(cell.day) === Number(selectedDay.value)
 }
 
 function load() {
@@ -173,22 +224,23 @@ function load() {
   } catch (e) { bills.value = [] }
 }
 
+/** 切月后重新定位选中日：本月回到今天，其他月份回到 1 号 */
+function resetSelectedDay() {
+  const t = new Date()
+  const isThisMonth = t.getFullYear() === Number(year.value) && t.getMonth() + 1 === Number(month.value)
+  const day = isThisMonth ? t.getDate() : 1
+  selectedDay.value = Math.min(day, daysInMonth(year.value, month.value))
+}
+
 function onMonthChange(e) {
   const v = e.detail && e.detail.value ? String(e.detail.value) : ''
   const parts = v.split('-')
   if (parts.length >= 2) {
     year.value = Number(parts[0])
     month.value = Number(parts[1])
+    resetSelectedDay()
     load()
   }
-}
-
-function goToday() {
-  const t = new Date()
-  year.value = t.getFullYear()
-  month.value = t.getMonth() + 1
-  selectedDay.value = t.getDate()
-  load()
 }
 
 function selectDay(cell) {
@@ -196,13 +248,19 @@ function selectDay(cell) {
 }
 
 function onRow(bill) {
-  uni.showActionSheet({
-    itemList: ['编辑', '删除'],
-    success: (res) => {
-      if (res.tapIndex === 0) goEdit(bill)
-      else if (res.tapIndex === 1) askDelete(bill)
-    }
-  })
+  actionBill.value = bill
+  actionItems.value = [
+    { name: '编辑' },
+    { name: '删除', color: 'var(--c-out)' }
+  ]
+  actionShow.value = true
+}
+
+function onActionSelect({ index }) {
+  const bill = actionBill.value
+  if (!bill) return
+  if (index === 0) goEdit(bill)
+  else if (index === 1) askDelete(bill)
 }
 
 function onRowLong(bill) {
@@ -239,7 +297,14 @@ function goEdit(bill) {
 function goAdd() { uni.navigateTo({ url: '/pages/add/add' }) }
 function goBack() { uni.navigateBack() }
 
+onPageScroll((e) => {
+  const top = Number(e.scrollTop) || 0
+  if (top > 8 && !navSolid.value) navSolid.value = true
+  else if (top <= 8 && navSolid.value) navSolid.value = false
+})
+
 onShow(() => {
+  refreshTheme()
   load()
 })
 </script>
@@ -247,26 +312,20 @@ onShow(() => {
 <style lang="scss">
 .page {
   min-height: 100vh;
-  background: transparent;
+  background-color: var(--c-bg);
 }
 .cal-title {
   display: flex;
   flex-direction: row;
   align-items: center;
+  /* wd-navbar 的 title 槽是 60% 宽的盒子，flex 行必须显式居中，否则文字贴左 */
+  justify-content: center;
 }
 .cal-title-text {
   font-size: 34rpx;
   font-weight: 700;
   color: var(--c-text);
   margin-right: 8rpx;
-}
-.nav-right-btn {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 .card {
   background-color: var(--c-card);
@@ -285,6 +344,10 @@ onShow(() => {
   text-align: center;
   font-size: 24rpx;
   color: var(--c-sub);
+}
+.week-head-weekend {
+  color: var(--c-primary-deep);
+  font-weight: 600;
 }
 .cal-grid {
   display: flex;
@@ -307,8 +370,17 @@ onShow(() => {
   align-items: center;
   justify-content: center;
 }
-.cal-cell-today {
+.cal-cell-inner.cal-cell-selected {
   background-color: var(--c-primary-weak);
+  border-radius: 22rpx;
+}
+.cal-cell-selected .cal-day-pill {
+  background: var(--grad-primary);
+  box-shadow: var(--shadow-primary-sm);
+}
+.cal-cell-selected .cal-day {
+  color: #ffffff;
+  font-weight: 700;
 }
 .cal-day-pill {
   min-width: 44rpx;
@@ -320,7 +392,11 @@ onShow(() => {
   padding: 0 6rpx;
 }
 .cal-day-pill-today {
-  background-color: var(--c-primary);
+  background-color: var(--c-primary-tint);
+}
+.cal-day-pill-today .cal-day {
+  color: var(--c-primary-deep);
+  font-weight: 700;
 }
 .cal-day {
   font-size: 29rpx;
@@ -328,10 +404,6 @@ onShow(() => {
   font-weight: 500;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-}
-.cal-day-pill-today .cal-day {
-  color: var(--c-ink-on-primary);
-  font-weight: 700;
 }
 .cal-mark {
   margin-top: 5rpx;
@@ -354,6 +426,11 @@ onShow(() => {
 .cal-mark.lunar {
   color: var(--c-dim);
 }
+/* 选中格的农历文字也跟着高亮换色：浅灰在浅黄底上会显得没被选中 */
+.cal-cell-selected .cal-mark.lunar {
+  color: var(--c-primary-deep);
+  font-weight: 500;
+}
 .mode-bar {
   display: flex;
   flex-direction: row;
@@ -372,20 +449,30 @@ onShow(() => {
   color: var(--c-sub);
 }
 .mode-pill-active {
-  background-color: #ffffff;
-  color: var(--c-text);
+  background: var(--grad-primary);
+  color: #ffffff;
   font-weight: 700;
-  box-shadow: 0 2rpx 10rpx rgba(35, 46, 111, 0.08);
+  box-shadow: var(--shadow-primary-sm);
 }
-.month-summary {
+.day-head {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
-  margin: 24rpx 24rpx 0;
+  justify-content: space-between;
+  margin: 26rpx 30rpx 6rpx;
+}
+.day-head-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.day-head-totals {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
 }
 .ms-item {
-  font-size: 26rpx;
+  font-size: 24rpx;
   color: var(--c-sub);
 }
 .ms-in {
@@ -397,11 +484,11 @@ onShow(() => {
   font-weight: 600;
 }
 .ms-dot {
-  margin: 0 18rpx;
+  margin: 0 12rpx;
   color: var(--c-dim);
 }
 .list-area {
-  margin-top: 24rpx;
+  margin-top: 10rpx;
 }
 .empty {
   padding: 100rpx 0;
@@ -412,10 +499,8 @@ onShow(() => {
 .empty-ic {
   width: 130rpx;
   height: 130rpx;
-  border-radius: 50%;
-  background-color: var(--glass-bg);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  border-radius: 42rpx;
+  background-color: var(--c-primary-weak);
   display: flex;
   align-items: center;
   justify-content: center;

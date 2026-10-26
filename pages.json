@@ -35,30 +35,9 @@
       }
     },
     {
-      "path": "pages/rank/rank",
-      "style": {
-        "navigationBarTitleText": "分类排行",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/report/report",
-      "style": {
-        "navigationBarTitleText": "日报表",
-        "navigationStyle": "custom"
-      }
-    },
-    {
       "path": "pages/categories/categories",
       "style": {
         "navigationBarTitleText": "分类管理",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/confirm/confirm",
-      "style": {
-        "navigationBarTitleText": "确认账单",
         "navigationStyle": "custom"
       }
     },
@@ -74,7 +53,7 @@
     "navigationStyle": "custom",
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "孽账",
-    "navigationBarBackgroundColor": "#FFFFFF",
-    "backgroundColor": "#F7F8FA"
+    "navigationBarBackgroundColor": "#F7F4EC",
+    "backgroundColor": "#F7F4EC"
   }
 }

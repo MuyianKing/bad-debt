@@ -16,22 +16,6 @@ export function isNotificationListenerEnabled(): boolean {
 
 export function openNotificationListenerSettings(): void {}
 
-export function getPendingDrafts(): string {
-  return "[]";
-}
-
-export function getDraft(token: string): string {
-  return "";
-}
-
-export function resolveDraft(token: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string {
-  return '{"success":false,"error":"android only"}';
-}
-
-export function discardDraft(token: string): boolean {
-  return false;
-}
-
 export function saveManualBill(money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string {
   return '{"success":false,"error":"android only"}';
 }

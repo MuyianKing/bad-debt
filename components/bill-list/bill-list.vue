@@ -1,7 +1,7 @@
 <template>
   <view>
     <view v-for="g in groups" :key="g.day" class="bl-group glass">
-      <view class="bl-head">
+      <view v-if="!hideHead" class="bl-head">
         <text class="bl-title">{{ g.title }}</text>
         <view class="bl-head-right">
           <text v-if="g.expense > 0" class="bl-sum bl-out">支 ¥{{ money(g.expense) }}</text>
@@ -16,8 +16,8 @@
         @longpress="$emit('rowlong', b)"
       >
         <view class="bl-row-left">
-          <view class="bl-icon" :style="{ backgroundColor: bgOf(b) }">
-            <app-icon :name="iconOf(b.costType)" :color="strokeOf(b)" :size="17" :solid="true"></app-icon>
+          <view class="bl-icon" :style="{ background: bgOf(b) }">
+            <app-icon :name="iconOf(b.costType)" color="#ffffff" :size="18" :solid="true"></app-icon>
           </view>
           <view class="bl-name-col">
             <view class="bl-name-row">
@@ -39,12 +39,13 @@
 
 <script>
 import { fmtMoney } from '@/common/fmt.js'
-import { iconOf, colorOf, parentOf } from '@/common/cats.js'
+import { iconOf, colorOf, parentOf, gradOf } from '@/common/cats.js'
 
 export default {
   name: 'bill-list',
   props: {
-    groups: { type: Array, default: () => [] }
+    groups: { type: Array, default: () => [] },
+    hideHead: { type: Boolean, default: false }
   },
   emits: ['row', 'rowlong'],
   methods: {
@@ -54,21 +55,10 @@ export default {
     iconOf(name) {
       return iconOf(name)
     },
-    strokeOf(b) {
-      const top = parentOf(b.costType) || b.costType
-      return colorOf(top, Number(b.money) < 0 ? 'expense' : 'income')
-    },
+    /** 分类色 -> 渐变图标块（白色实体图标压在上面） */
     bgOf(b) {
       const top = parentOf(b.costType) || b.costType
-      const c = colorOf(top, Number(b.money) < 0 ? 'expense' : 'income')
-      return this.hexToTint(c)
-    },
-    hexToTint(hex) {
-      const r = parseInt(hex.slice(1, 3), 16)
-      const g = parseInt(hex.slice(3, 5), 16)
-      const b = parseInt(hex.slice(5, 7), 16)
-      const mix = (c) => Math.round(c + (255 - c) * 0.88)
-      return 'rgb(' + mix(r) + ',' + mix(g) + ',' + mix(b) + ')'
+      return gradOf(colorOf(top, Number(b.money) < 0 ? 'expense' : 'income'))
     },
     displayName(b) {
       const remark = this.remarkText(b)
@@ -115,15 +105,19 @@ export default {
   color: var(--c-text);
 }
 .bl-sum {
-  margin-left: 20rpx;
-  font-size: 24rpx;
+  margin-left: 14rpx;
+  font-size: 22rpx;
+  padding: 5rpx 14rpx;
+  border-radius: 10rpx;
   font-variant-numeric: tabular-nums;
 }
 .bl-sum.bl-out {
-  color: var(--c-out);
+  color: var(--c-out-deep);
+  background-color: var(--c-out-weak);
 }
 .bl-sum.bl-in {
   color: var(--c-in);
+  background-color: var(--c-in-weak);
 }
 .bl-row {
   display: flex;
@@ -143,17 +137,18 @@ export default {
   min-width: 0;
 }
 .bl-icon {
-  width: 58rpx;
-  height: 58rpx;
-  border-radius: 50%;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 20rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: 22rpx;
   flex-shrink: 0;
+  box-shadow: 0 6rpx 14rpx rgba(60, 50, 20, 0.16);
 }
 .bl-icon .app-icon {
-  opacity: 0.95;
+  opacity: 1;
 }
 .bl-name-col {
   flex: 1;

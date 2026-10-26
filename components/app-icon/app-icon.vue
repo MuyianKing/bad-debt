@@ -15,7 +15,7 @@ export default {
     name: { type: String, required: true },
     color: { type: String, default: '#333333' },
     size: { type: [Number, String], default: 22 },
-    strokeWidth: { type: [Number, String], default: 1.8 },
+    strokeWidth: { type: [Number, String], default: 2 },
     solid: { type: Boolean, default: false }
   },
   computed: {

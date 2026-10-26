@@ -69,36 +69,76 @@ export function openNotificationListenerSettings(): void {
   c.startActivity(intent);
 }
 
-export function getPendingDrafts(): string {
+export function areNotificationsEnabled(): boolean {
   const c = UTSAndroid.getAppContext();
   if (c == null) {
-    return "[]";
+    return true;
   }
-  return MuyianBillCore.getPendingDrafts(c);
+  return MuyianBillCore.areNotificationsEnabled(c);
 }
 
-export function getDraft(token: string): string {
-  const c = UTSAndroid.getAppContext();
-  if (c == null) {
-    return "";
-  }
-  return MuyianBillCore.getDraft(c, token);
-}
-
-export function resolveDraft(token: string, money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string {
-  const c = UTSAndroid.getAppContext();
-  if (c == null) {
-    return '{"success":false,"error":"context is null"}';
-  }
-  return MuyianBillCore.resolveDraft(c, token, money, isIncome, bankName, costType, orderRemark);
-}
-
-export function discardDraft(token: string): boolean {
+export function isKeepAliveEnabled(): boolean {
   const c = UTSAndroid.getAppContext();
   if (c == null) {
     return false;
   }
-  return MuyianBillCore.discardDraft(c, token);
+  return MuyianBillCore.isKeepAliveEnabled(c);
+}
+
+export function setKeepAliveEnabled(enabled: boolean): boolean {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return false;
+  }
+  return MuyianBillCore.setKeepAliveEnabled(c, enabled);
+}
+
+export function hasOverlayPermission(): boolean {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return false;
+  }
+  return MuyianBillCore.hasOverlayPermission(c);
+}
+
+export function requestOverlayPermission(): boolean {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return false;
+  }
+  return MuyianBillCore.requestOverlayPermission(c);
+}
+
+export function setCardThemeColor(color: string): boolean {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return false;
+  }
+  return MuyianBillCore.setCardThemeColor(c, color);
+}
+
+export function isIgnoringBatteryOptimizations(): boolean {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return false;
+  }
+  return MuyianBillCore.isIgnoringBatteryOptimizations(c);
+}
+
+export function requestIgnoreBatteryOptimizations(): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"success":false,"granted":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.requestIgnoreBatteryOptimizations(c);
+}
+
+export function openAppSettings(): void {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return;
+  }
+  MuyianBillCore.openAppSettings(c);
 }
 
 export function saveManualBill(money: string, isIncome: boolean, bankName: string, costType: string, orderRemark: string): string {
