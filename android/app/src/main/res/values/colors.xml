@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="muyian_bg">#F7F4EC</color>
+    <color name="muyian_black">#000000</color>
+    <!-- 首页 hero 顶部一带的平均色，用于启动时窗口底色，避免奶油底闪一下 -->
+    <color name="hero_wukong">#F5A823</color>
+    <color name="hero_nezha">#E85546</color>
+    <color name="hero_shaseng">#2F2F31</color>
+</resources>

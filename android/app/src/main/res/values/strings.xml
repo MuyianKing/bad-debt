@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="muyian_acc_label">孽账自动记账</string>
+    <string name="muyian_acc_description">解析支付完成页面的金额与收支，生成本地待确认账单。全程离线，不上传任何数据。</string>
+</resources>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Muyian.Base" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/muyian_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#F7A600</item>
+    </style>
+
+    <style name="Theme.Muyian" parent="Theme.Muyian.Base" />
+
+    <!-- 应用窗口底色按用户主题取首页 hero 平均色；系统启动帧仍是 values-v31 里的固定奶油色 -->
+    <style name="Theme.Muyian.Wukong" parent="Theme.Muyian">
+        <item name="android:windowBackground">@color/hero_wukong</item>
+    </style>
+
+    <style name="Theme.Muyian.Nezha" parent="Theme.Muyian">
+        <item name="android:windowBackground">@color/hero_nezha</item>
+    </style>
+
+    <style name="Theme.Muyian.Shaseng" parent="Theme.Muyian">
+        <item name="android:windowBackground">@color/hero_shaseng</item>
+    </style>
+</resources>
