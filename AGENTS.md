@@ -20,7 +20,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [docs/00-product.md](docs/00-product.md) | 产品定位、确认弹层、隐私与采集通道红线 |
-| [docs/10-build.md](docs/10-build.md) | HBuilderX/依赖/ABI、自定义调试基座、最近任务隐藏、启动图、H5 运行 |
+| [docs/10-build.md](docs/10-build.md) | HBuilderX/依赖/ABI、自定义调试基座、相机模块、最近任务隐藏、启动图、H5 运行 |
 | [docs/20-ui-basics.md](docs/20-ui-basics.md) | 组件库、导航与安全区、布尔 prop、rpx、图标、设计令牌、纯色约束、分段开关、统计面板、图表、新增页面 |
 | [docs/21-theme-and-glass.md](docs/21-theme-and-glass.md) | 三主题切换、深色主题、彩色图标、毛玻璃与统一底色 |
 | [docs/22-layout-interactions.md](docs/22-layout-interactions.md) | 首页侧滑抽屉、角色系统与头图、内页沉浸式、负层光斑、分类拖拽 |
@@ -37,6 +37,6 @@
 - 新页面已在 `pages.json` 注册，easycom 规则未被破坏。
 - 新增插件 API 三文件 + web 桩 + H5 实现齐备，页面 stub 成对且签名一致。
 - 无新增网络请求；金额符号与 `costType` 叶子名未被破坏。
-- 改到 `hybrid.kt` 或根目录 `AndroidManifest.xml` 时，提示用户重新制作自定义调试基座。
+- 改到 `hybrid.kt`、根目录 `AndroidManifest.xml` 或 `manifest.json` 的 `modules`/`permissions` 时，提示用户重新制作自定义调试基座。
 - 改到配色/组件样式时，三个主题（悟空黄、哪吒红、沙僧黑）各过一遍。
 - 新增角色/表情只改 `common/mascots.js` 与素材，页面不写死角色名、图片路径或按主题写 if/else。

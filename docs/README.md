@@ -7,7 +7,7 @@
 | 文档 | 覆盖范围 | 什么时候读 |
 | --- | --- | --- |
 | [00-product.md](00-product.md) | 产品定位、账单确认闭环、隐私、采集通道 | 涉及入账流程、权限、数据来源、任何新依赖时 |
-| [10-build.md](10-build.md) | HBuilderX、依赖、ABI、基座、最近任务、启动图、H5 | 改工程配置、manifest、打包、运行方式时 |
+| [10-build.md](10-build.md) | HBuilderX、依赖、ABI、基座、相机模块、最近任务、启动图、H5 | 改工程配置、manifest、打包、运行方式时 |
 | [20-ui-basics.md](20-ui-basics.md) | 组件库、导航、布尔 prop、rpx、图标、令牌、纯色、统计面板、图表 | 写页面或改任何样式前 |
 | [21-theme-and-glass.md](21-theme-and-glass.md) | 三主题、深色主题、彩色图标、毛玻璃 | 改配色、卡片、浮层、主题相关代码时 |
 | [22-layout-interactions.md](22-layout-interactions.md) | 首页抽屉、角色系统、沉浸式顶栏、光斑、分类拖拽 | 改首页布局、角色/表情、导航栏、拖拽交互时 |
