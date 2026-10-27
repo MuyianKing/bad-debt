@@ -45,14 +45,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Bills
-import com.muyian.debt.data.Lunar
+import com.muyian.debt.data.CalendarModel
+import com.muyian.debt.data.Stats
 import com.muyian.debt.data.daysInMonth
 import com.muyian.debt.data.dayGroupTitle
 import com.muyian.debt.data.fmtMoney
-import com.muyian.debt.data.fmtNum
 import com.muyian.debt.data.groupByDay
 import com.muyian.debt.data.pad2
 import com.muyian.debt.ui.components.BillList
@@ -60,7 +60,9 @@ import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.RiseIn
+import com.muyian.debt.ui.components.TopBar
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
@@ -89,7 +91,7 @@ fun CalendarScreen(app: AppState) {
         selectedDay = if (same) minOf(t.get(Calendar.DAY_OF_MONTH), daysInMonth(year, month)) else 1
     }
 
-    LaunchedEffect(app.resumeToken) { load() }
+    LaunchedEffect(app.resumeToken, app.billsVersion) { load() }
 
     val dayAll = bills.filter { it.day == selectedDay }
     val dayBills = when (mode) {
@@ -97,9 +99,10 @@ fun CalendarScreen(app: AppState) {
         "expense" -> dayAll.filter { it.money < 0 }
         else -> dayAll
     }
-    val dayExpense = dayBills.filter { it.money < 0 }.sumOf { abs(it.money) }
-    val dayIncome = dayBills.filter { it.money > 0 }.sumOf { it.money }
-    val dayBalance = dayIncome - dayExpense
+    val dayTotals = remember(dayBills) { Stats.totals(dayBills) }
+    val dayExpense = dayTotals.expense
+    val dayIncome = dayTotals.income
+    val dayBalance = dayTotals.balance
     val dayMood = if (dayIncome > 0 && dayIncome >= dayExpense) "success" else "idle"
     val dayTitle = dayGroupTitle(year, month, selectedDay)
     val dayLine = when {
@@ -118,100 +121,36 @@ fun CalendarScreen(app: AppState) {
     }
     val groups = remember(dayBills, year, month) { groupByDay(dayBills, year, month) }
 
-    val dayMap = remember(bills) {
-        val map = HashMap<Int, Pair<Double, Double>>()
-        for (b in bills) {
-            val old = map[b.day] ?: (0.0 to 0.0)
-            map[b.day] = if (b.money < 0) old.first + abs(b.money) to old.second
-            else old.first to old.second + b.money
-        }
-        map
-    }
-
-    val cells = remember(year, month, dayMap, mode) {
-        val out = ArrayList<Int>()
-        val first = Calendar.getInstance().apply { set(year, month - 1, 1) }
-        var lead = first.get(Calendar.DAY_OF_WEEK) - 2 // 周一为一周开始
-        if (lead < 0) lead = 6
-        for (i in 0 until lead) out.add(0)
-        for (d in 1..daysInMonth(year, month)) out.add(d)
-        while (out.size % 7 != 0) out.add(0)
-        out
-    }
-
-    fun markOf(day: Int): Pair<String, String> {
-        val stat = dayMap[day]
-        var text = ""
-        var kind = ""
-        if (stat != null) {
-            when (mode) {
-                "both" -> {
-                    if (stat.first > 0) { text = "-${fmtNum(stat.first)}"; kind = "out" }
-                    else if (stat.second > 0) { text = "+${fmtNum(stat.second)}"; kind = "in" }
-                }
-                "balance" -> {
-                    val net = stat.second - stat.first
-                    if (net != 0.0) { text = fmtNum(net); kind = if (net < 0) "out" else "in" }
-                }
-                "income" -> if (stat.second > 0) { text = "+${fmtNum(stat.second)}"; kind = "in" }
-                "expense" -> if (stat.first > 0) { text = "-${fmtNum(stat.first)}"; kind = "out" }
-            }
-        }
-        if (text.isEmpty()) {
-            text = Lunar.lunarText(year, month, day)
-            kind = "lunar"
-        }
-        return text to kind
-    }
-
-    fun askDelete(bill: Bill) {
-        app.confirm(
-            "删除账单",
-            "删除这笔「${bill.costType} ${fmtMoney(abs(bill.money))}元」的记录？",
-            "删除"
-        ) {
-            Bills.delete(ctx, bill.id)
-            load()
-        }
-    }
-    fun showRowMenu(bill: Bill) {
-        app.actionSheet = com.muyian.debt.data.ActionSheetState(
-            listOf("编辑" to false, "删除" to true)
-        ) { index ->
-            if (index == 0) app.openAdd(bill) else askDelete(bill)
-        }
-    }
+    val dayMap = remember(bills) { CalendarModel.dayStats(bills) }
+    val cells = remember(year, month) { CalendarModel.cells(year, month) }
 
     Column(Modifier.fillMaxSize().background(p.bg)) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = rpx(20), vertical = rpx(12)),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(rpx(72)).clip(CircleShape).pressable(p.fill) { app.pop() }, contentAlignment = Alignment.Center) {
-                AppIcon("chevron-left", p.text, 22.dp)
+        TopBar(
+            title = "",
+            onBack = { app.pop() },
+            titleContent = {
+                Row(
+                    Modifier.clickable {
+                        app.showDatePicker("YM", year, month, 1) { y, m, _ ->
+                            year = y; month = m; resetSelectedDay(); load()
+                        }
+                    },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("$year.${pad2(month)}", color = p.text, fontSize = rsp(34), fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(rpx(8)))
+                    AppIcon("chevron-down", p.text, 14.dp)
+                }
             }
-            Row(
-                Modifier.weight(1f).clickable {
-                    app.showDatePicker("YM", year, month, 1) { y, m, _ ->
-                        year = y; month = m; resetSelectedDay(); load()
-                    }
-                },
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("$year.${pad2(month)}", color = p.text, fontSize = rsp(34), fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(rpx(8)))
-                AppIcon("chevron-down", p.text, 14.dp)
-            }
-            Spacer(Modifier.width(rpx(72)))
-        }
+        )
 
         Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                .pageBottomPadding()
         ) {
             Column(
                 Modifier
@@ -243,7 +182,7 @@ fun CalendarScreen(app: AppState) {
                                         val t = Calendar.getInstance()
                                         t.get(Calendar.YEAR) == year && t.get(Calendar.MONTH) + 1 == month && t.get(Calendar.DAY_OF_MONTH) == day
                                     }
-                                    val mark = markOf(day)
+                                    val mark = CalendarModel.mark(dayMap[day], mode, year, month, day)
                                     val cellBg by animateColorAsState(
                                         if (selected) p.primaryWeak else Color.Transparent,
                                         tween(180, easing = Motion.InOut),
@@ -298,17 +237,17 @@ fun CalendarScreen(app: AppState) {
                                                 fontWeight = if (selected || isToday) FontWeight.Bold else FontWeight.Medium
                                             )
                                         }
-                                        if (mark.first.isNotEmpty()) {
+                                        if (mark.text.isNotEmpty()) {
                                             Text(
-                                                mark.first,
+                                                mark.text,
                                                 color = when {
-                                                    selected && mark.second == "lunar" -> p.primaryDeep
-                                                    mark.second == "out" -> p.out
-                                                    mark.second == "in" -> p.inn
+                                                    selected && mark.kind == "lunar" -> p.primaryDeep
+                                                    mark.kind == "out" -> p.out
+                                                    mark.kind == "in" -> p.inn
                                                     else -> p.dim
                                                 },
                                                 fontSize = rsp(21),
-                                                fontWeight = if (mark.second == "out" || mark.second == "in") FontWeight.Medium else FontWeight.Normal,
+                                                fontWeight = if (mark.kind == "out" || mark.kind == "in") FontWeight.Medium else FontWeight.Normal,
                                                 maxLines = 1,
                                                 textAlign = TextAlign.Center,
                                                 overflow = TextOverflow.Ellipsis,
@@ -368,15 +307,20 @@ fun CalendarScreen(app: AppState) {
                     Modifier
                         .fillMaxWidth()
                         .then(if (dayBills.isNotEmpty()) Modifier.heightIn(min = rpx(210)) else Modifier)
-                        .padding(horizontal = rpx(28), vertical = rpx(22))
                 ) {
                     if (dayBills.isNotEmpty()) {
-                        Box(Modifier.align(Alignment.BottomEnd).padding(end = rpx(10))) {
+                        // 贴住卡片底部（圆角裁切），水平位置保持原来的内缩
+                        Box(Modifier.align(Alignment.BottomEnd).padding(end = rpx(38))) {
                             MascotFace(app, dayMood, 158)
                         }
                     }
                     RiseIn(key = selectedDay to mode, distance = rpx(10)) {
-                    Column(Modifier.fillMaxWidth().padding(end = if (dayBills.isNotEmpty()) rpx(188) else 0.dp)) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = rpx(28), vertical = rpx(22))
+                            .padding(end = if (dayBills.isNotEmpty()) rpx(188) else 0.dp)
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(dayTitle, color = p.text, fontSize = rsp(30), fontWeight = FontWeight.Bold)
                             if (dayBills.isNotEmpty()) {
@@ -430,8 +374,8 @@ fun CalendarScreen(app: AppState) {
                     BillList(
                         app = app,
                         groups = groups,
-                        onRow = { showRowMenu(it) },
-                        onRowLong = { askDelete(it) },
+                        onRow = { app.showBillActions(it) },
+                        onRowLong = { app.requestDeleteBill(it) },
                         hideHead = true,
                         flush = true
                     )

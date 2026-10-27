@@ -80,14 +80,18 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.muyian.debt.data.AddDraft
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
+import com.muyian.debt.data.BillWriteResult
 import com.muyian.debt.data.Bills
 import com.muyian.debt.data.Cats
+import com.muyian.debt.data.Files
 import com.muyian.debt.data.Category
-import com.muyian.debt.data.Screen
+import com.muyian.debt.state.Screen
 import com.muyian.debt.data.evalExpr
 import com.muyian.debt.data.fmtMoneyInput
+import com.muyian.debt.data.pad2
 import com.muyian.debt.data.todayStr
+import com.muyian.debt.state.ActionSheetState
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.Motion
@@ -101,24 +105,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
-
-private fun copyUriToFiles(context: Context, uri: Uri): String? = try {
-    val file = File(context.filesDir, "img_${System.currentTimeMillis()}.jpg")
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        file.outputStream().use { output -> input.copyTo(output) }
-    }
-    file.absolutePath
-} catch (_: Exception) {
-    null
-}
-
-private fun copyFileToFiles(context: Context, source: File): String? = try {
-    val file = File(context.filesDir, "img_${System.currentTimeMillis()}.jpg")
-    source.inputStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
-    file.absolutePath
-} catch (_: Exception) {
-    null
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -183,10 +169,10 @@ fun AddScreen(app: AppState) {
         } else text
     }
 
-    fun persist(): Boolean {
+    fun persist(): BillWriteResult {
         val value = evalExpr(draft.expr)
-        if (value.isNaN() || value <= 0) return false
-        val ok = if (draft.isEdit) {
+        if (value.isNaN() || value <= 0) return BillWriteResult.fail("先填个数")
+        return if (draft.isEdit) {
             Bills.update(
                 ctx, draft.editId, draft.dateValue, value, income,
                 leafName, buildRemark(), draft.reimb, draft.starred
@@ -197,7 +183,6 @@ fun AddScreen(app: AppState) {
                 leafName, buildRemark(), draft.reimb, draft.starred
             )
         }
-        return ok
     }
 
     fun save() {
@@ -206,10 +191,12 @@ fun AddScreen(app: AppState) {
             flash("先填个数", "empty", 900)
             return
         }
-        if (!persist()) {
-            app.showToast("保存失败")
+        val result = persist()
+        if (!result.ok) {
+            app.showToast(result.error.ifEmpty { "保存失败" })
             return
         }
+        app.bumpBills()
         leaving = true
         flash(if (draft.isEdit) "改好了" else if (income) "进账了" else "记下了")
         scope.launch {
@@ -223,10 +210,12 @@ fun AddScreen(app: AppState) {
             flash("先填个数", "empty", 900)
             return
         }
-        if (!persist()) {
-            app.showToast("保存失败")
+        val result = persist()
+        if (!result.ok) {
+            app.showToast(result.error.ifEmpty { "保存失败" })
             return
         }
+        app.bumpBills()
         flash(if (income) "进账了" else "记下了")
         setDraft(draft.copy(expr = "", remark = ""))
     }
@@ -263,7 +252,7 @@ fun AddScreen(app: AppState) {
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val f = cameraFile
         if (ok && f != null) {
-            val path = copyFileToFiles(ctx, f)
+            val path = Files.copyFileToFiles(ctx, f)
             if (path != null) {
                 setDraft(draft.copy(imgPath = path))
                 app.showToast("已添加图片")
@@ -288,7 +277,7 @@ fun AddScreen(app: AppState) {
     }
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
-            val path = copyUriToFiles(ctx, uri)
+            val path = Files.copyUriToFiles(ctx, uri)
             if (path != null) {
                 setDraft(draft.copy(imgPath = path))
                 app.showToast("已添加图片")
@@ -296,7 +285,7 @@ fun AddScreen(app: AppState) {
         }
     }
     fun chooseImage() {
-        app.actionSheet = com.muyian.debt.data.ActionSheetState(
+        app.actionSheet = ActionSheetState(
             listOf("拍照" to false, "从相册选择" to false)
         ) { index ->
             if (index == 0) {
@@ -311,7 +300,7 @@ fun AddScreen(app: AppState) {
         if (draft.imgPath.isEmpty()) {
             chooseImage()
         } else {
-            app.actionSheet = com.muyian.debt.data.ActionSheetState(
+            app.actionSheet = ActionSheetState(
                 listOf("预览图片" to false, "移除图片" to true, "更换图片" to false)
             ) { index ->
                 when (index) {
@@ -551,7 +540,7 @@ fun AddScreen(app: AppState) {
                                 parts.getOrNull(1)?.toIntOrNull() ?: 1,
                                 parts.getOrNull(2)?.toIntOrNull() ?: 1
                             ) { y, m, d ->
-                                setDraft(draft.copy(dateValue = "$y-${"%02d".format(m)}-${"%02d".format(d)}"))
+                                setDraft(draft.copy(dateValue = "$y-${pad2(m)}-${pad2(d)}"))
                             }
                         }
                         .padding(horizontal = rpx(24), vertical = rpx(11)),
@@ -640,7 +629,7 @@ private fun CatItem(app: AppState, category: Category, selected: Boolean, onClic
         label = "cat-scale"
     )
     val fg by animateColorAsState(
-        if (selected) p.primaryDeep else Color(0xFF7A8194),
+        if (selected) p.primaryDeep else p.sub,
         tween(180, easing = Motion.InOut),
         label = "cat-fg"
     )

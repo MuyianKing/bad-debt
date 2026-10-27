@@ -20,14 +20,14 @@
 
 - `Palette.dark = true` 时，所有页面、浮层、键盘、滚轮都要用深色令牌：`bg` / `pageWash` / `card` / `line` / `fill` / `raised` / `key*`。禁止写死 `Color.White`、`#fff`、`rgba(29,33,41,...)` 这类浅色值。
 - 深色主题的 `primary` 是**强调色**（亮银，用于柱条、选中描边、图标字面色）；承载白字的实底填充用 `primaryFill` / `primaryPress`（统计总览卡、记一笔保存键）。
-- `Cats.colorOf()` 与 `ui/theme/tintColor(base, dark)` 已按主题处理浅底/深底混合，页面不要自己拼浅色底。
+- `Cats.colorHexOf()` + `ui/theme/hex()` 与 `ui/theme/tintColor(base, dark)` 已按主题处理浅底/深底混合，页面不要自己拼浅色底。
 - 日期/期间选择不要用平台 `DatePickerDialog`（深色主题下是白底），统一用 `DatePickerHost`（`WheelPicker` 自绘）或 `AppState.showDatePicker()`。
 - 状态栏图标由 `MainActivity` 按「当前页面 + 首页滚动 + 主题深浅」统一设置 `LIGHT_STATUS_BAR`；页面不要自己改。
 - **新增页面或改配色时必须三个主题各看一遍**（悟空黄、哪吒红、沙僧黑）。
 
 ## 彩色图标
 
-- 分类图标在账单列表、统计、分类管理三处用分类色做圆角块（约 30% 圆角），里面压白色实体图标；分类色取 `Cats.colorOf()`，不要另建色板。
+- 分类图标在账单列表、统计、分类管理三处用分类色做圆角块（约 30% 圆角），里面压白色实体图标；分类色取 `Cats.colorHexOf()` 后经 `hex()` 转 `Color`，不要另建色板。
 - 子类/图标选择器用 `tintColor(色, dark)` 淡底 + 同色实体图标（层级更轻）。
 - **记一笔页的分类宫格是例外**：保持克制的原版样式——圆形透明底 + 灰色实体图标，选中项用 `primaryTint` 淡圆底 + `primaryDeep` 主题色图标。
 - 区块标题的图标用实心字形直接着主题色（无底座）；设置项/抽屉这类列表里的功能图标用白色图标压纯色块上。

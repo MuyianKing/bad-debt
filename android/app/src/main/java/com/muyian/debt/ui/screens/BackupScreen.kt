@@ -11,17 +11,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -45,98 +40,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
-import com.muyian.debt.data.Bill
+import com.muyian.debt.state.AppState
+import com.muyian.debt.data.Backup
+import com.muyian.debt.data.BackupInfo
+import com.muyian.debt.data.BackupParseResult
 import com.muyian.debt.data.Bills
-import com.muyian.debt.data.Cats
-import com.muyian.debt.data.pad2
+import com.muyian.debt.data.Dates
+import com.muyian.debt.data.FilePick
+import com.muyian.debt.data.OpenResult
+import com.muyian.debt.data.PickKind
+import com.muyian.debt.data.PickResult
+import com.muyian.debt.data.ReadResult
+import com.muyian.debt.data.RestoreResult
+import com.muyian.debt.data.SaveResult
+import com.muyian.debt.state.Screen
 import com.muyian.debt.ui.components.GhostButton
 import com.muyian.debt.ui.components.GroupTitle
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.PrimaryButton
+import com.muyian.debt.ui.components.StatCell
+import com.muyian.debt.ui.components.TopBar
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon as Icon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import muyian.bill.listener.MuyianBillCore
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.Calendar
-
-private data class BackupInfo(
-    val name: String = "",
-    val exportedAt: Long = 0,
-    val bills: List<JSONObject> = emptyList(),
-    val categories: JSONObject = JSONObject()
-)
-
-private data class MissingCat(
-    val type: String,
-    val topName: String,
-    val topIcon: String,
-    val subName: String,
-    val subIcon: String
-)
-
-private data class BackupResult(
-    val inserted: Int = 0,
-    val skipped: Int = 0,
-    val catAdded: Int = 0,
-    val failed: Boolean = false
-)
-
-private fun billJson(b: Bill): JSONObject = JSONObject()
-    .put("id", b.id)
-    .put("year", b.year)
-    .put("month", b.month)
-    .put("day", b.day)
-    .put("clock", b.clock)
-    .put("money", b.money)
-    .put("bankName", b.bankName)
-    .put("costType", b.costType)
-    .put("orderRemark", b.orderRemark)
-    .put("source", b.source)
-    .put("sourcePkg", b.sourcePkg)
-    .put("createdAt", b.createdAt)
-    .put("reimb", b.reimb)
-    .put("starred", b.starred)
-    .put("orderNo", b.orderNo)
-
-private fun sanitizeBills(arr: JSONArray): List<JSONObject> {
-    val out = ArrayList<JSONObject>()
-    for (i in 0 until arr.length()) {
-        val o = arr.optJSONObject(i) ?: continue
-        val money = o.optDouble("money", 0.0)
-        if (money == 0.0 || money.isNaN()) continue
-        val y = o.optInt("year")
-        val mo = o.optInt("month")
-        val d = o.optInt("day")
-        if (y < 1970 || mo !in 1..12 || d !in 1..31) continue
-        out.add(
-            JSONObject()
-                .put("id", o.optLong("id", 0L))
-                .put("year", y)
-                .put("month", mo)
-                .put("day", d)
-                .put("clock", o.optString("clock", ""))
-                .put("money", money)
-                .put("bankName", o.optString("bankName", ""))
-                .put("costType", o.optString("costType", if (money > 0) "收入" else "消费"))
-                .put("orderRemark", o.optString("orderRemark", ""))
-                .put("source", o.optString("source", "manual"))
-                .put("sourcePkg", o.optString("sourcePkg", ""))
-                .put("createdAt", o.optLong("createdAt", 0L))
-                .put("reimb", o.optInt("reimb", 0))
-                .put("starred", o.optInt("starred", 0))
-                .put("orderNo", o.optString("orderNo", ""))
-        )
-    }
-    return out
-}
 
 @Composable
 fun BackupScreen(app: AppState) {
@@ -150,19 +81,7 @@ fun BackupScreen(app: AppState) {
     var restoredCount by remember { mutableIntStateOf(0) }
     var backup by remember { mutableStateOf(BackupInfo()) }
     var missingCatCount by remember { mutableIntStateOf(0) }
-    var result by remember { mutableStateOf(BackupResult()) }
-
-    fun stamp(): String {
-        val c = Calendar.getInstance()
-        return "${c.get(Calendar.YEAR)}${pad2(c.get(Calendar.MONTH) + 1)}${pad2(c.get(Calendar.DAY_OF_MONTH))}_" +
-            "${pad2(c.get(Calendar.HOUR_OF_DAY))}${pad2(c.get(Calendar.MINUTE))}"
-    }
-
-    fun formatTs(ts: Long): String {
-        val c = Calendar.getInstance().apply { timeInMillis = ts }
-        return "${c.get(Calendar.YEAR)}-${pad2(c.get(Calendar.MONTH) + 1)}-${pad2(c.get(Calendar.DAY_OF_MONTH))} " +
-            "${pad2(c.get(Calendar.HOUR_OF_DAY))}:${pad2(c.get(Calendar.MINUTE))}"
-    }
+    var result by remember { mutableStateOf(RestoreResult(0, 0, 0, false)) }
 
     fun onExport() {
         if (exporting || importing) return
@@ -171,167 +90,62 @@ fun BackupScreen(app: AppState) {
             app.showToast("还没有账单可以导出")
             return
         }
-        val billsArr = JSONArray()
-        for (b in all) billsArr.put(billJson(b))
-        val payload = JSONObject()
-            .put("app", "muyian")
-            .put("kind", "backup")
-            .put("version", 1)
-            .put("exportedAt", System.currentTimeMillis())
-            .put("categories", JSONObject(Cats.toJson(app.categories)))
-            .put("bills", billsArr)
-        val name = "孽账备份_${stamp()}.json"
-        val resp = try {
-            JSONObject(MuyianBillCore.openBackupExport(ctx, payload.toString(), name))
-        } catch (_: Exception) {
-            JSONObject()
+        val name = "孽账备份_${Dates.stamp()}.json"
+        when (val r = FilePick.openExport(ctx, Backup.payload(all, app.categories).toString(), name)) {
+            OpenResult.Ok -> exporting = true
+            is OpenResult.Error -> app.showToast(r.message)
         }
-        if (!resp.optBoolean("success")) {
-            app.showToast("无法打开保存界面：${resp.optString("error", "未知原因")}")
-            return
-        }
-        exporting = true
     }
 
     LaunchedEffect(exporting) {
         if (!exporting) return@LaunchedEffect
-        val start = System.currentTimeMillis()
-        while (true) {
-            delay(400)
-            val st = try { JSONObject(MuyianBillCore.getBackupSaveState(ctx)) } catch (_: Exception) { JSONObject() }
-            when (st.optString("state")) {
-                "saved" -> { exporting = false; app.showToast("已导出：${st.optString("name", "备份文件")}"); return@LaunchedEffect }
-                "cancelled" -> { exporting = false; app.showToast("已取消导出"); return@LaunchedEffect }
-                "error" -> { exporting = false; app.showToast("导出失败：${st.optString("error", "未知原因")}"); return@LaunchedEffect }
-            }
-            if (System.currentTimeMillis() - start > 120_000) {
+        when (val r = FilePick.awaitSave(ctx)) {
+            is SaveResult.Saved -> {
                 exporting = false
-                app.showToast("保存超时，请重试")
-                return@LaunchedEffect
+                app.showToast("已导出：${r.name.ifEmpty { "备份文件" }}")
             }
+            SaveResult.Cancelled -> { exporting = false; app.showToast("已取消导出") }
+            is SaveResult.Error -> { exporting = false; app.showToast("导出失败：${r.message}") }
+            SaveResult.Timeout -> { exporting = false; app.showToast("保存超时，请重试") }
         }
     }
 
     fun onPickBackup() {
         if (picking || importing || exporting) return
-        val resp = try { JSONObject(MuyianBillCore.openBackupPicker(ctx)) } catch (_: Exception) { JSONObject() }
-        if (!resp.optBoolean("success")) {
-            app.showToast("无法打开文件选择器：${resp.optString("error", "未知原因")}")
-            return
+        when (val r = FilePick.open(ctx, PickKind.BACKUP)) {
+            OpenResult.Ok -> picking = true
+            is OpenResult.Error -> app.showToast(r.message)
         }
-        picking = true
-    }
-
-    fun collectMissingCategories(cats: JSONObject): List<MissingCat> {
-        val missing = ArrayList<MissingCat>()
-        for (type in listOf("expense", "income")) {
-            val src = cats.optJSONArray(type) ?: continue
-            val dst = app.categories.list(type)
-            for (i in 0 until src.length()) {
-                val top = src.optJSONObject(i) ?: continue
-                val topName = top.optString("name", "")
-                if (topName.isEmpty()) continue
-                val topIcon = top.optString("icon", "grid").ifEmpty { "grid" }
-                val hit = dst.firstOrNull { it.name == topName }
-                if (hit == null) {
-                    missing.add(MissingCat(type, topName, topIcon, "", ""))
-                    val subs = top.optJSONArray("subs")
-                    if (subs != null) {
-                        for (j in 0 until subs.length()) {
-                            val s = subs.optJSONObject(j) ?: continue
-                            val sn = s.optString("name", "")
-                            if (sn.isNotEmpty()) {
-                                missing.add(MissingCat(type, topName, topIcon, sn, s.optString("icon", "grid").ifEmpty { "grid" }))
-                            }
-                        }
-                    }
-                } else {
-                    val subs = top.optJSONArray("subs") ?: continue
-                    for (j in 0 until subs.length()) {
-                        val s = subs.optJSONObject(j) ?: continue
-                        val sn = s.optString("name", "")
-                        if (sn.isEmpty()) continue
-                        if (hit.subs.none { it.name == sn }) {
-                            missing.add(MissingCat(type, topName, topIcon, sn, s.optString("icon", "grid").ifEmpty { "grid" }))
-                        }
-                    }
-                }
-            }
-        }
-        return missing
-    }
-
-    fun applyMissingCategories(cats: JSONObject): Int {
-        val missing = collectMissingCategories(cats)
-        if (missing.isEmpty()) return 0
-        val data = app.categoryData()
-        for (m in missing) {
-            val list = data.list(m.type)
-            var top = list.firstOrNull { it.name == m.topName }
-            if (top == null) {
-                top = com.muyian.debt.data.Category(m.topName, m.topIcon)
-                list.add(top)
-            }
-            if (m.subName.isNotEmpty() && top.subs.none { it.name == m.subName }) {
-                top.subs.add(com.muyian.debt.data.SubCat(m.subName, m.subIcon))
-            }
-        }
-        app.saveCategories(data)
-        return missing.size
     }
 
     fun handlePicked(path: String, name: String) {
-        val r = try { JSONObject(MuyianBillCore.readBackupText(ctx, path)) } catch (_: Exception) { JSONObject() }
-        if (!r.optBoolean("ok")) {
-            app.showToast(r.optString("error", "读取备份失败"))
-            return
+        val text = when (val r = FilePick.readBackup(ctx, path)) {
+            is ReadResult.Ok -> r.text
+            is ReadResult.Error -> {
+                app.showToast(r.message)
+                return
+            }
         }
-        val data = try { JSONObject(r.optString("text", "{}")) } catch (_: Exception) { JSONObject() }
-        if (data.optString("app") != "muyian" || data.optJSONArray("bills") == null) {
-            app.showToast("不是孽账的备份文件")
-            return
+        when (val parsed = Backup.parse(text, name)) {
+            is BackupParseResult.Error -> app.showToast(parsed.message)
+            is BackupParseResult.Ok -> {
+                backup = parsed.info
+                missingCatCount = Backup.missingCategories(backup.categories, app.categories).size
+                step = "preview"
+            }
         }
-        if (data.optInt("version", 0) != 1) {
-            app.showToast("备份版本不支持：${data.optInt("version", 0)}")
-            return
-        }
-        val bills = sanitizeBills(data.optJSONArray("bills") ?: JSONArray())
-        if (bills.isEmpty()) {
-            app.showToast("备份里没有可恢复的账单")
-            return
-        }
-        backup = BackupInfo(
-            name = name,
-            exportedAt = data.optLong("exportedAt", 0L),
-            bills = bills,
-            categories = data.optJSONObject("categories") ?: JSONObject()
-        )
-        missingCatCount = collectMissingCategories(backup.categories).size
-        step = "preview"
     }
 
     LaunchedEffect(picking) {
         if (!picking) return@LaunchedEffect
-        val start = System.currentTimeMillis()
-        while (true) {
-            delay(500)
-            val st = try { JSONObject(MuyianBillCore.getImportPickState(ctx)) } catch (_: Exception) { JSONObject() }
-            when (st.optString("state")) {
-                "picked" -> {
-                    val path = st.optString("path", "")
-                    val name = st.optString("name", "")
-                    picking = false
-                    handlePicked(path, name)
-                    return@LaunchedEffect
-                }
-                "cancelled" -> { picking = false; app.showToast("已取消选择"); return@LaunchedEffect }
-                "error" -> { picking = false; app.showToast("选择文件失败：${st.optString("error", "未知原因")}"); return@LaunchedEffect }
-            }
-            if (System.currentTimeMillis() - start > 90_000) {
+        when (val r = FilePick.awaitPick(ctx)) {
+            is PickResult.Picked -> {
                 picking = false
-                app.showToast("等待超时，请重新选择")
-                return@LaunchedEffect
+                handlePicked(r.path, r.name)
             }
+            PickResult.Cancelled -> { picking = false; app.showToast("已取消选择") }
+            is PickResult.Error -> { picking = false; app.showToast("选择文件失败：${r.message}") }
+            PickResult.Timeout -> { picking = false; app.showToast("等待超时，请重新选择") }
         }
     }
 
@@ -339,32 +153,18 @@ fun BackupScreen(app: AppState) {
         if (importing || backup.bills.isEmpty()) return
         importing = true
         restoredCount = 0
-        val catAdded = applyMissingCategories(backup.categories)
-        val list = backup.bills
+        val merge = Backup.mergeMissing(
+            app.categories,
+            Backup.missingCategories(backup.categories, app.categories)
+        )
+        app.saveCategories(merge.data)
         scope.launch {
-            var inserted = 0
-            var skipped = 0
-            var failed = false
-            var i = 0
-            while (i < list.size) {
-                val end = minOf(i + 400, list.size)
-                val part = JSONArray()
-                for (j in i until end) part.put(list[j])
-                val resp = try { JSONObject(MuyianBillCore.commitBackupBills(ctx, part.toString())) } catch (_: Exception) { JSONObject() }
-                if (!resp.optBoolean("success")) {
-                    failed = true
-                    break
-                }
-                inserted += resp.optInt("inserted", 0)
-                skipped += resp.optInt("skipped", 0)
-                i = end
-                restoredCount = i
-                delay(30)
-            }
+            val outcome = Backup.commit(ctx, backup.bills) { restoredCount = it }
             importing = false
-            result = BackupResult(inserted, skipped, catAdded, failed)
+            result = RestoreResult(outcome.inserted, outcome.skipped, merge.added, outcome.failed)
             step = "done"
-            if (!failed) app.showToast("已恢复 $inserted 条")
+            app.bumpBills()
+            if (!outcome.failed) app.showToast("已恢复 ${outcome.inserted} 条")
         }
     }
 
@@ -372,34 +172,14 @@ fun BackupScreen(app: AppState) {
         step = "idle"
         backup = BackupInfo()
         missingCatCount = 0
-        result = BackupResult()
+        result = RestoreResult(0, 0, 0, false)
     }
 
-    val stats = remember(backup) {
-        var expense = 0
-        var income = 0
-        var minDay = ""
-        var maxDay = ""
-        for (o in backup.bills) {
-            if (o.optDouble("money", 0.0) < 0) expense++ else income++
-            val day = "${o.optInt("year")}-${pad2(o.optInt("month"))}-${pad2(o.optInt("day"))}"
-            if (minDay.isEmpty() || day < minDay) minDay = day
-            if (day > maxDay) maxDay = day
-        }
-        intArrayOf(backup.bills.size, expense, income) to (minDay to maxDay)
-    }
+    val stats = remember(backup) { Backup.stats(backup.bills) }
+
 
     Column(Modifier.fillMaxSize().background(p.bg)) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = rpx(20), vertical = rpx(12)),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(rpx(72)).clip(CircleShape).pressable(p.fill) { app.pop() }, contentAlignment = Alignment.Center) {
-                Icon("chevron-left", p.text, rpx(22))
-            }
-            Text("备份·恢复", color = p.text, fontSize = rsp(32), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(rpx(72)))
-        }
+        TopBar(title = "备份·恢复", onBack = { app.pop() })
 
         AnimatedContent(
             targetState = step,
@@ -415,7 +195,7 @@ fun BackupScreen(app: AppState) {
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                .pageBottomPadding()
         ) {
             if (current == "idle") {
                 GroupTitle("导出备份")
@@ -466,7 +246,7 @@ fun BackupScreen(app: AppState) {
                 ) {
                     PrimaryButton(
                         text = "导入钱迹账单",
-                        onClick = { app.navigate(com.muyian.debt.data.Screen.Import) },
+                        onClick = { app.navigate(Screen.Import) },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -491,15 +271,15 @@ fun BackupScreen(app: AppState) {
                     }
                     Spacer(Modifier.height(rpx(20)))
                     Row(Modifier.fillMaxWidth()) {
-                        BStat(stats.first[0].toString(), "账单", p.text)
-                        BStat(stats.first[1].toString(), "支出", p.out)
-                        BStat(stats.first[2].toString(), "收入", p.inn)
-                        BStat(missingCatCount.toString(), "补全分类", p.text)
+                        StatCell(stats.total.toString(), "账单", p.text)
+                        StatCell(stats.expense.toString(), "支出", p.out)
+                        StatCell(stats.income.toString(), "收入", p.inn)
+                        StatCell(missingCatCount.toString(), "补全分类", p.text)
                     }
                     Spacer(Modifier.height(rpx(14)))
-                    Text("${stats.second.first} ~ ${stats.second.second}", color = p.sub, fontSize = rsp(23), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text("${stats.minDay} ~ ${stats.maxDay}", color = p.sub, fontSize = rsp(23), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     if (backup.exportedAt > 0) {
-                        Text("导出时间：${formatTs(backup.exportedAt)}", color = p.sub, fontSize = rsp(23), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = rpx(8)))
+                        Text("导出时间：${Dates.format(backup.exportedAt)}", color = p.sub, fontSize = rsp(23), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = rpx(8)))
                     }
                     Spacer(Modifier.height(rpx(16)))
                     Box(Modifier.fillMaxWidth().height(rpx(1)).background(p.lineSoft))
@@ -601,14 +381,5 @@ private fun BackupCard(
         Text(desc, color = p.sub, fontSize = rsp(24), lineHeight = rsp(43))
         Spacer(Modifier.height(rpx(22)))
         content()
-    }
-}
-
-@Composable
-private fun RowScope.BStat(num: String, label: String, color: Color) {
-    val p = LocalPalette.current
-    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(num, color = color, fontSize = rsp(42), fontWeight = FontWeight.Bold)
-        Text(label, color = p.dim, fontSize = rsp(21), modifier = Modifier.padding(top = rpx(4)))
     }
 }

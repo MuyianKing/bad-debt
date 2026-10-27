@@ -87,17 +87,3 @@ fun WheelColumn(
         }
     }
 }
-
-@Composable
-fun WheelRow(
-    content: @Composable (Modifier) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        content(Modifier)
-    }
-}

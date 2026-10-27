@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -54,7 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Bills
 import com.muyian.debt.data.Cats
@@ -73,7 +74,13 @@ import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.components.stagger
+import com.muyian.debt.data.DonutSlice
+import com.muyian.debt.data.Stats
+import com.muyian.debt.ui.components.TopBar
+import com.muyian.debt.ui.components.navBottomPadding
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.hex
+import com.muyian.debt.ui.theme.tintColor
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
 import java.util.Calendar
@@ -86,14 +93,6 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
-
-private data class DonutSeg(
-    val name: String,
-    val value: Double,
-    val bills: List<Bill>,
-    val pct: String,
-    val color: Color
-)
 
 @Composable
 fun StatsScreen(app: AppState) {
@@ -108,7 +107,7 @@ fun StatsScreen(app: AppState) {
     var chartType by remember { mutableStateOf("bar") }
     var donutKind by remember { mutableStateOf("expense") }
     var selectedSegName by remember { mutableStateOf("") }
-    var detailSeg by remember { mutableStateOf<DonutSeg?>(null) }
+    var detailSeg by remember { mutableStateOf<DonutSlice?>(null) }
     val listState = rememberLazyListState()
     val navSolid = remember {
         androidx.compose.runtime.derivedStateOf {
@@ -122,13 +121,12 @@ fun StatsScreen(app: AppState) {
         selectedSegName = ""
     }
 
-    LaunchedEffect(app.resumeToken) { load() }
+    LaunchedEffect(app.resumeToken, app.billsVersion) { load() }
 
-    val expenseBills = bills.filter { it.money < 0 }
-    val incomeBills = bills.filter { it.money > 0 }
-    val expenseTotal = expenseBills.sumOf { kotlin.math.abs(it.money) }
-    val incomeTotal = incomeBills.sumOf { it.money }
-    val balance = incomeTotal - expenseTotal
+    val totals = remember(bills) { Stats.totals(bills) }
+    val expenseTotal = totals.expense
+    val incomeTotal = totals.income
+    val balance = totals.balance
     val expenseShown = countUp(expenseTotal)
     val incomeShown = countUp(incomeTotal)
     val balanceShown = countUp(balance)
@@ -138,7 +136,7 @@ fun StatsScreen(app: AppState) {
         barGrow.snapTo(0f)
         barGrow.animateTo(1f, tween(700, easing = Motion.Out))
     }
-    LaunchedEffect(expenseBills, incomeBills, donutKind) {
+    LaunchedEffect(bills, donutKind) {
         donutGrow.snapTo(0f)
         donutGrow.animateTo(1f, tween(760, easing = Motion.Out))
     }
@@ -148,134 +146,42 @@ fun StatsScreen(app: AppState) {
         else -> "idle"
     }
 
-    val chartSlots = run {
-        val t = Calendar.getInstance().apply { timeInMillis = nowStamp }
-        if (range == "month") {
-            val isCurrent = t.get(Calendar.YEAR) == year && t.get(Calendar.MONTH) + 1 == month
-            if (isCurrent) t.get(Calendar.DAY_OF_MONTH)
-            else {
-                val isFuture = year > t.get(Calendar.YEAR) || (year == t.get(Calendar.YEAR) && month > t.get(Calendar.MONTH) + 1)
-                if (isFuture) 0 else daysInMonth(year, month)
-            }
-        } else {
-            if (year == t.get(Calendar.YEAR)) t.get(Calendar.MONTH) + 1 else if (year > t.get(Calendar.YEAR)) 0 else 12
-        }
+    val chartSlots = remember(range, year, month, nowStamp) {
+        Stats.chartSlots(range, year, month, nowStamp)
     }
-
-    val barSums = remember(expenseBills, chartSlots, range) {
-        val sums = DoubleArray(chartSlots)
-        for (b in expenseBills) {
-            val idx = if (range == "month") b.day - 1 else b.month - 1
-            if (idx in 0 until chartSlots) sums[idx] += kotlin.math.abs(b.money)
-        }
-        sums.toList()
+    val barSums = remember(bills, range, chartSlots) {
+        Stats.barValues(bills, range, chartSlots)
     }
     val maxBar = barSums.maxOrNull() ?: 0.0
-    val axisMax = remember(maxBar) {
-        if (maxBar <= 0) 0.0 else {
-            val unit = 10.0.pow(max(0.0, floor(log10(maxBar / 4))))
-            ceil(maxBar / 4 / unit) * 4 * unit
-        }
-    }
-    val yTicks = if (axisMax <= 0) listOf(0.0) else listOf(axisMax, axisMax * 0.75, axisMax * 0.5, axisMax * 0.25, 0.0)
-    val xLabels = remember(range, month, chartSlots) {
-        if (chartSlots <= 0) listOf("", "", "")
-        else if (range == "month") {
-            val head = "$month-01"
-            val mid = "$month-${pad2(ceil(chartSlots / 2.0).toInt())}"
-            val end = "$month-${pad2(chartSlots)}"
-            if (chartSlots == 1) listOf(head, "", "")
-            else listOf(head, if (mid == head || mid == end) "" else mid, end)
-        } else {
-            if (chartSlots == 1) listOf("1月", "", "")
-            else {
-                val mid = "${ceil(chartSlots / 2.0).toInt()}月"
-                listOf("1月", if (mid == "1月" || mid == "${chartSlots}月") "" else mid, "${chartSlots}月")
-            }
-        }
-    }
-
-    val reportRows = remember(bills, range, month) {
-        val byMonth = range == "year"
-        val map = LinkedHashMap<Int, Pair<Double, Double>>()
-        for (b in bills) {
-            val key = if (byMonth) b.month else b.day
-            val old = map[key] ?: (0.0 to 0.0)
-            map[key] = if (b.money < 0) old.first + kotlin.math.abs(b.money) to old.second
-            else old.first to old.second + b.money
-        }
-        map.entries.sortedByDescending { it.key }.map { (key, sums) ->
-            Triple(if (byMonth) "${key}月" else "${pad2(month)}-${pad2(key)}", sums.first, sums.second)
-        }
-    }
-
+    // 均值分母是已显示的格数：月视图=本月已过天数，年视图=今年已过月份
+    val chartAvg = remember(barSums) { if (barSums.isEmpty()) 0.0 else barSums.average() }
+    val axisMax = remember(maxBar) { Stats.axisMax(maxBar) }
+    val yTicks = remember(axisMax) { Stats.yTicks(axisMax) }
+    val xLabels = remember(range, month, chartSlots) { Stats.xLabels(range, month, chartSlots) }
+    val reportRows = remember(bills, range, month) { Stats.reportRows(bills, range, month) }
     val donutSegments = remember(bills, donutKind, app.categories) {
-        val type = donutKind
-        val list = if (type == "expense") expenseBills else incomeBills
-        val map = LinkedHashMap<String, MutableList<Bill>>()
-        for (b in list) {
-            val name = Cats.topNameOf(app.categories, b.costType, type)
-            map.getOrPut(name) { mutableListOf() }.add(b)
-        }
-        val groups = map.map { (name, bs) ->
-            name to (bs.sumOf { kotlin.math.abs(it.money) } to bs)
-        }.sortedByDescending { it.second.first }
-        val total = groups.sumOf { it.second.first }
-        if (total <= 0) emptyList()
-        else {
-            val top = groups.take(8)
-            val rest = groups.drop(8)
-            val out = ArrayList<DonutSeg>()
-            for ((name, pair) in top) {
-                out.add(
-                    DonutSeg(
-                        name, pair.first, pair.second,
-                        String.format("%.1f%%", pair.first / total * 100),
-                        Cats.colorOf(app.categories, name, type)
-                    )
-                )
-            }
-            val restValue = rest.sumOf { it.second.first }
-            if (restValue > 0) {
-                out.add(
-                    DonutSeg(
-                        "其他", restValue, rest.flatMap { it.second.second },
-                        String.format("%.1f%%", restValue / total * 100),
-                        Color(0xFFC8CCD4)
-                    )
-                )
-            }
-            out
-        }
+        Stats.donutSlices(bills, donutKind, app.categories)
     }
     val donutTotal = donutSegments.sumOf { it.value }
     val selectedSeg = donutSegments.firstOrNull { it.name == selectedSegName }
 
     fun shift(delta: Int) {
-        if (range == "month") {
-            var m = month + delta
-            var y = year
-            if (m < 1) { m = 12; y-- }
-            if (m > 12) { m = 1; y++ }
-            month = m; year = y
-        } else year += delta
+        val (y, m) = Stats.shift(range, year, month, delta)
+        year = y
+        month = m
         load()
     }
 
     Column(Modifier.fillMaxSize().background(p.bg)) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .background(if (navSolid.value) (if (p.dark) Color(0xE60A0A0B) else Color(0xB8FFFFFF)) else Color.Transparent)
-        ) {
-            Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = rpx(20), vertical = rpx(12)),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(rpx(72)).clip(CircleShape).pressable(p.fill) { app.pop() }, contentAlignment = Alignment.Center) {
-                    AppIcon("chevron-left", p.text, 22.dp)
-                }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        TopBar(
+            title = "",
+            onBack = { app.pop() },
+            solid = navSolid.value,
+            titleContent = {
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(Modifier.size(rpx(44)).clip(CircleShape).pressable(p.fill) { shift(-1) }, contentAlignment = Alignment.Center) {
                         AppIcon("chevron-left", p.sub, 16.dp)
                     }
@@ -298,6 +204,8 @@ fun StatsScreen(app: AppState) {
                         AppIcon("chevron-right", p.sub, 16.dp)
                     }
                 }
+            },
+            actions = {
                 MiniToggle(listOf("月", "年"), if (range == "month") "月" else "年") {
                     val newRange = if (it == "月") "month" else "year"
                     if (newRange != range) {
@@ -306,13 +214,13 @@ fun StatsScreen(app: AppState) {
                     }
                 }
             }
-        }
+        )
 
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                bottom = rpx(60) + navBottomPadding()
             )
         ) {
             item {
@@ -407,7 +315,33 @@ fun StatsScreen(app: AppState) {
                             chartType = if (it == "柱状") "bar" else "line"
                         }
                     }
-                    Spacer(Modifier.height(rpx(24)))
+                    if (chartAvg > 0) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = rpx(10)),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val avgColor = p.sub.copy(alpha = 0.6f)
+                            Canvas(Modifier.width(rpx(34)).height(rpx(10))) {
+                                drawLine(
+                                    color = avgColor,
+                                    start = Offset(0f, size.height / 2),
+                                    end = Offset(size.width, size.height / 2),
+                                    strokeWidth = 1.5.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(
+                                        floatArrayOf(5.dp.toPx(), 4.dp.toPx())
+                                    )
+                                )
+                            }
+                            Spacer(Modifier.width(rpx(10)))
+                            Text(
+                                "${if (range == "month") "日均" else "月均"} ${fmtMoney(chartAvg)}",
+                                color = p.dim,
+                                fontSize = rsp(22)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(rpx(16)))
                     if (maxBar <= 0) {
                         Column(Modifier.fillMaxWidth().padding(vertical = rpx(34)), horizontalAlignment = Alignment.CenterHorizontally) {
                             EmptyCopy("该期间暂无支出", "记一笔后显示每日趋势")
@@ -489,6 +423,23 @@ fun StatsScreen(app: AppState) {
                                             }
                                         }
                                     }
+                                    // 平均参考线：与柱子同步从底部升起
+                                    if (chartAvg > 0) {
+                                        val avgColor = p.sub.copy(alpha = 0.6f)
+                                        Canvas(Modifier.fillMaxSize()) {
+                                            val ratio = (chartAvg / axisMax).toFloat().coerceIn(0f, 1f)
+                                            val y = size.height * (1 - ratio * barGrow.value)
+                                            drawLine(
+                                                color = avgColor,
+                                                start = Offset(0f, y),
+                                                end = Offset(size.width, y),
+                                                strokeWidth = 1.5.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(
+                                                    floatArrayOf(6.dp.toPx(), 5.dp.toPx())
+                                                )
+                                            )
+                                        }
+                                    }
                                 }
                                 Row(Modifier.fillMaxWidth().padding(top = rpx(14))) {
                                     Text(xLabels[0], color = p.dim, fontSize = rsp(24), modifier = Modifier.weight(1f))
@@ -543,13 +494,13 @@ fun StatsScreen(app: AppState) {
                                 Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(rpx(12)))
-                                    .background(if (selectedSegName == seg.name) com.muyian.debt.ui.theme.tintColor(seg.color, p.dark) else Color.Transparent)
+                                    .background(if (selectedSegName == seg.name) tintColor(hex(seg.colorHex), p.dark) else Color.Transparent)
                                     .clickable { detailSeg = seg }
                                     .padding(vertical = rpx(18), horizontal = rpx(6)),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
-                                    Modifier.size(rpx(60)).clip(RoundedCornerShape(rpx(18))).background(seg.color),
+                                    Modifier.size(rpx(60)).clip(RoundedCornerShape(rpx(18))).background(hex(seg.colorHex)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     AppIcon(Cats.iconOf(app.categories, seg.name, donutKind), Color.White, 18.dp, solid = true)
@@ -571,7 +522,7 @@ fun StatsScreen(app: AppState) {
                                                 )
                                                 .fillMaxHeight()
                                                 .clip(RoundedCornerShape(rpx(3)))
-                                                .background(seg.color)
+                                                .background(hex(seg.colorHex))
                                         )
                                     }
                                 }
@@ -619,17 +570,17 @@ fun StatsScreen(app: AppState) {
                         for ((idx, row) in reportRows.withIndex()) {
                             if (idx > 0) DividerLine(color = p.lineSoft)
                             Row(Modifier.fillMaxWidth().padding(vertical = rpx(20)), verticalAlignment = Alignment.CenterVertically) {
-                                Text(row.first, color = p.sub, fontSize = rsp(28), modifier = Modifier.weight(1.2f))
+                                Text(row.label, color = p.sub, fontSize = rsp(28), modifier = Modifier.weight(1.2f))
                                 Text(
-                                    if (row.second > 0) fmtMoney(row.second) else "-",
-                                    color = if (row.second > 0) p.out else p.dim,
+                                    if (row.expense > 0) fmtMoney(row.expense) else "-",
+                                    color = if (row.expense > 0) p.out else p.dim,
                                     fontSize = rsp(28),
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Text(
-                                    if (row.third > 0) fmtMoney(row.third) else "-",
-                                    color = if (row.third > 0) p.inn else p.dim,
+                                    if (row.income > 0) fmtMoney(row.income) else "-",
+                                    color = if (row.income > 0) p.inn else p.dim,
                                     fontSize = rsp(28),
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.weight(1f)
@@ -658,7 +609,7 @@ fun StatsScreen(app: AppState) {
         ) {
                 Box(Modifier.padding(top = rpx(16), bottom = rpx(4)).width(rpx(72)).height(rpx(8)).clip(RoundedCornerShape(rpx(4))).background(p.line).align(Alignment.CenterHorizontally))
                 Row(Modifier.fillMaxWidth().padding(horizontal = rpx(32), vertical = rpx(18)), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(rpx(60)).clip(RoundedCornerShape(rpx(18))).background(seg.color), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(rpx(60)).clip(RoundedCornerShape(rpx(18))).background(hex(seg.colorHex)), contentAlignment = Alignment.Center) {
                         AppIcon(Cats.iconOf(app.categories, seg.name, donutKind), Color.White, 18.dp, solid = true)
                     }
                     Spacer(Modifier.width(rpx(18)))
@@ -714,11 +665,11 @@ fun StatsScreen(app: AppState) {
 
 @Composable
 private fun Donut(
-    segments: List<DonutSeg>,
+    segments: List<DonutSlice>,
     selected: String,
     onSelect: (String) -> Unit,
     total: Double,
-    selectedSeg: DonutSeg?,
+    selectedSeg: DonutSlice?,
     totalLabel: String,
     progress: Float
 ) {
@@ -768,7 +719,8 @@ private fun Donut(
                 val mid = Math.toRadians((arcStart + shown / 2).toDouble())
                 val cx = c + Math.cos(mid).toFloat() * off
                 val cy = c + Math.sin(mid).toFloat() * off
-                val color = if (selIdx >= 0 && !isSel) seg.color.copy(alpha = 0.45f) else seg.color
+                val segColor = hex(seg.colorHex)
+                val color = if (selIdx >= 0 && !isSel) segColor.copy(alpha = 0.45f) else segColor
                 val gap = min(1.4f, shown * 0.4f)
                 if (shown > gap) {
                     drawArc(

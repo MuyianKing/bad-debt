@@ -1,11 +1,11 @@
-# 原生核心约束（hybrid.kt）
+# 原生核心约束（muyian.bill.listener）
 
-> 动 `android/app/src/main/java/muyian/bill/listener/hybrid.kt` 之前必读。改完重新构建安装即可，但会影响无障碍/通知监听等系统级行为，必须在真机上回归。
+> 动 `android/app/src/main/java/muyian/bill/listener/` 之前必读。改完重新构建安装即可，但会影响无障碍/通知监听等系统级行为，必须在真机上回归。
 
 ## API 约定
 
 - 原生核心包名 `muyian.bill.listener`，对外入口是 `object MuyianBillCore`，方法全部 `@JvmStatic`、同步返回。复杂结构用 **JSON 字符串**传递，页面侧通过 `data/Bills.kt`、`data/Qianji.kt` 的解析函数消费。
-- 新增原生能力直接在 `hybrid.kt` 里加 `@JvmStatic` 方法，并同步补 `data/` 侧的类型化封装；不要引入反射桥接或第三方依赖。
+- 新增原生能力写入同包对应文件（采集/解析写 `hybrid.kt`，DB 写 `BillDb.kt`，权限写 `SystemPerms.kt`，xlsx 写 `XlsxReader.kt`，通知写 `PendingNotices.kt`），由 `MuyianBillCore` 加 `@JvmStatic` 转调，并同步补 `data/` 侧的类型化封装；不要引入反射桥接或第三方依赖。
 - Kotlin 侧只用 Android 框架 API + `org.json`，禁止引入第三方库。
 - 核心职责：白名单/黑名单过滤、解析正则、去重（单号 24 小时 / 捕获级 5 分钟 / 弹层层 2 分钟 / 账单级 2 分钟 / 支付路线 15 分钟 / 宿主结果页指纹 24 小时）、底部确认弹层、后台保活、SAF 选文件、SQLite。改解析逻辑必须保持这些窗口语义。
 
@@ -14,7 +14,7 @@
 - `BillSheetActivity` 是透明 `Activity`（`Theme.Translucent.NoTitleBar`），由无障碍服务 `startActivity` 拉起；**不用 `WindowManager` 绘制浮窗**，但 `android/app/src/main/AndroidManifest.xml` 必须声明 `SYSTEM_ALERT_WINDOW`——它对应「显示在其他应用上层」，不是用来画悬浮卡的，禁止删除。MIUI/HyperOS 还有独立的「后台弹出界面」AppOp（10021），两个开关都允许才能后台启动 Activity。
 - 设置页拆成两项：`hasOverlayPermission` / `requestOverlayPermission` 管「显示在其他应用上层」，`getPopupPermissionState` / `openPopupPermissionSettings` 管「后台弹出界面」；后者只在 `miui = true`（小米/Redmi/POCO）时显示，op 10021 用隐藏的 `AppOpsManager.checkOpNoThrow(int, ...)` 读取，读不到时用「亮屏但弹层被系统拦住」的持久化标记（`popup_blocked_at`，7 天）兜底，避免把「未检测」误报成「已允许」。
 - 布局全部用 Android 框架 View，禁止引入 UI 库；分类只读账单里的 `costType` 字符串，原生仍不感知分类体系。必须有 60 秒超时、熄屏收起、返回键取消；取消/超时/弹层显示后熄屏一律丢弃这一笔，不落草稿。
-- **弹层从一开始就拉不起来时（熄屏/锁屏、ROM 拦截、启动看门狗 5 秒超时），由 `MuyianBillCore.postPendingNotice()` 发一条高优先级「待确认」通知兜底**：通知携带 `EXTRA_BILL` / `EXTRA_CATS` / `EXTRA_ACCENT` / `EXTRA_NOTICE_ID`，点击用 `PendingIntent` 直接打开 `BillSheetActivity`（`VISIBILITY_PRIVATE` + 不含金额的 `publicVersion` 防锁屏泄露），确认仍只能在弹层里点保存；`BillSheetActivity` 创建/销毁时取消对应通知，避免取消后还残留。
+- **弹层从一开始就拉不起来时（熄屏/锁屏、ROM 拦截、启动看门狗 5 秒超时），由 `PendingNotices.post()`（`MuyianBillCore` 内部转调）发一条高优先级「待确认」通知兜底**：通知携带 `EXTRA_BILL` / `EXTRA_CATS` / `EXTRA_ACCENT` / `EXTRA_NOTICE_ID`，点击用 `PendingIntent` 直接打开 `BillSheetActivity`（`VISIBILITY_PRIVATE` + 不含金额的 `publicVersion` 防锁屏泄露），确认仍只能在弹层里点保存；`BillSheetActivity` 创建/销毁时取消对应通知，避免取消后还残留。
 - `android:taskAffinity=""` + `excludeFromRecents="true"` 让它独立成任务且不进最近任务。**不要再引入 `DraftCard` / `WindowManager` 浮窗 / 兜底草稿 / `isOverlayEnabled` 开关；待确认通知只做弹层入口，不得在通知里写库或提供「直接入账」入口。**
 
 ## 弹层后台启动 Activity 的前提
@@ -30,7 +30,7 @@
 - 采集前必须校验 `rootInActiveWindow.packageName` 与事件包名一致：切回宿主 App 的一瞬间 root 可能还停在支付 App，直接采信会把支付结果页算到宿主头上，造成重复弹层。
 - `flow` 状态落盘在 `capture_flows`，进程被杀后 15 分钟内仍能跨 App 去重。锁顺序：路线状态只在 `routeLock` 内访问，`flows`/弹层队列只在 `sheetLock` 内访问；先取 `routeLock`、释放后再取 `sheetLock`，禁止反向嵌套。
 
-## hybrid.kt 写法与兼容
+## 原生核心写法与兼容
 
 - 只用 Android 框架 API + `org.json`；新增系统能力优先用公开 API，兼容旧系统时保留版本判断分支。
 - 弃用 API（`AccessibilityNodeInfo.recycle()`、`stopForeground(boolean)`、`Notification.Builder(Context)` / `setPriority()`、`startActivityForResult()`、`SOFT_INPUT_ADJUST_RESIZE`、`statusBarColor` / `navigationBarColor`）必须保留原有版本判断分支，不要强行升级；调用处用 `@Suppress("DEPRECATION")` 标注。重写弃用成员（如 `onBackPressed()`）要用 `@Suppress("OVERRIDE_DEPRECATION")`。

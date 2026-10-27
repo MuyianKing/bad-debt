@@ -21,13 +21,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,7 +61,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 import androidx.compose.material3.Text
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
@@ -64,7 +69,7 @@ import com.muyian.debt.ui.theme.rsp
 
 private val mascotCache = HashMap<String, Bitmap?>()
 
-private fun mascotBitmap(context: Context, asset: String): Bitmap? =
+private fun mascotBitmap(context: Context, asset: String): Bitmap? = synchronized(mascotCache) {
     mascotCache.getOrPut(asset) {
         try {
             context.assets.open(asset).use { BitmapFactory.decodeStream(it) }
@@ -72,6 +77,41 @@ private fun mascotBitmap(context: Context, asset: String): Bitmap? =
             null
         }
     }
+}
+
+/** 本地图片（头图/账单图）的解码缓存，多处页面共用。 */
+@Composable
+fun rememberFileBitmap(path: String?): Bitmap? {
+    val clean = path?.removePrefix("file://").orEmpty()
+    return remember(clean) {
+        if (clean.isEmpty()) null
+        else try {
+            BitmapFactory.decodeFile(clean)
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+/** 底部导航栏高度；页面底部留白统一用它，不再各写一遍 WindowInsets。 */
+@Composable
+fun navBottomPadding(): Dp =
+    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+/** 列表页底部留白：60rpx + 系统导航栏。 */
+@Composable
+fun Modifier.pageBottomPadding(extra: Dp = 0.dp): Modifier =
+    padding(bottom = rpx(60) + navBottomPadding() + extra)
+
+/** 吸顶导航背景：滚动后转实底，避免 Stats/首页各写一套色值。 */
+@Composable
+fun Modifier.navBarBackground(solid: Boolean): Modifier {
+    val p = LocalPalette.current
+    return background(
+        if (solid) (if (p.dark) p.bg.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.72f))
+        else Color.Transparent
+    )
+}
 
 @Composable
 fun Modifier.glass(
@@ -253,7 +293,7 @@ fun AppSwitch(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> 
                 .size(rpx(40))
                 .shadow(2.dp, CircleShape, clip = false)
                 .clip(CircleShape)
-                .background(if (p.dark) Color(0xFFF2F2F4) else Color.White)
+                .background(if (p.dark) p.keyFg else Color.White)
         )
     }
 }
@@ -356,8 +396,12 @@ fun IconBlock(
 }
 
 @Composable
-fun Chevron(color: Color = LocalPalette.current.dim, size: Int = 16) {
-    AppIcon("chevron-right", color, size.dp)
+fun RowScope.StatCell(num: String, label: String, color: Color) {
+    val p = LocalPalette.current
+    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(num, color = color, fontSize = rsp(42), fontWeight = FontWeight.Bold)
+        Text(label, color = p.dim, fontSize = rsp(21), modifier = Modifier.padding(top = rpx(4)))
+    }
 }
 
 @Composable
@@ -381,13 +425,15 @@ fun TopBar(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     solid: Boolean = false,
-    content: @Composable (() -> Unit)? = null
+    titleContent: (@Composable () -> Unit)? = null,
+    actions: (@Composable RowScope.() -> Unit)? = null
 ) {
     val p = LocalPalette.current
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(if (solid) (if (p.dark) Color(0xE60A0A0B) else Color(0xB8FFFFFF)) else Color.Transparent)
+            .navBarBackground(solid)
+            .statusBarsPadding()
             .padding(horizontal = rpx(20), vertical = rpx(12)),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -401,7 +447,7 @@ fun TopBar(
             AppIcon("chevron-left", p.text, 22.dp)
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            if (content != null) content() else Text(
+            if (titleContent != null) titleContent() else Text(
                 title,
                 color = p.text,
                 fontSize = rsp(32),
@@ -410,7 +456,11 @@ fun TopBar(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Spacer(Modifier.width(rpx(72)))
+        if (actions != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, content = actions)
+        } else {
+            Spacer(Modifier.width(rpx(72)))
+        }
     }
 }
 

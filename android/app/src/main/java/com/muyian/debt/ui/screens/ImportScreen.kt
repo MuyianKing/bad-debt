@@ -14,15 +14,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -47,37 +43,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
+import com.muyian.debt.data.CommitOutcome
+import com.muyian.debt.data.FilePick
+import com.muyian.debt.data.ImportFlow
+import com.muyian.debt.data.ImportLoadResult
+import com.muyian.debt.data.ImportSummary
+import com.muyian.debt.data.OpenResult
+import com.muyian.debt.data.PickKind
+import com.muyian.debt.data.PickResult
 import com.muyian.debt.data.Qianji
 import com.muyian.debt.data.fmtNum
 import com.muyian.debt.ui.components.GhostButton
 import com.muyian.debt.ui.components.GroupTitle
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.PrimaryButton
+import com.muyian.debt.ui.components.StatCell
+import com.muyian.debt.ui.components.TopBar
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon as Icon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import muyian.bill.listener.MuyianBillCore
-import org.json.JSONArray
-import org.json.JSONObject
-import kotlin.math.roundToInt
-
-private data class ImportSummary(
-    val total: Int = 0,
-    val expense: Int = 0,
-    val income: Int = 0,
-    val skipped: Int = 0,
-    val minDay: String = "",
-    val maxDay: String = "",
-    val dupInDb: Int = 0
-)
-
-private data class ImportResult(val inserted: Int = 0, val skipped: Int = 0, val failed: Boolean = false)
 
 @Composable
 fun ImportScreen(app: AppState) {
@@ -92,147 +82,59 @@ fun ImportScreen(app: AppState) {
     var summary by remember { mutableStateOf(ImportSummary()) }
     var mappings by remember { mutableStateOf<List<Qianji.MappingRow>>(emptyList()) }
     var rows by remember { mutableStateOf<List<Qianji.SheetRow>>(emptyList()) }
-    var result by remember { mutableStateOf(ImportResult()) }
+    var result by remember { mutableStateOf(CommitOutcome()) }
 
     val leafColumns = remember(app.categories) { Qianji.buildLeafColumns(app.categories) }
 
-    fun fetchAllRows(): List<List<String>>? {
-        val all = ArrayList<List<String>>()
-        var off = 0
-        var nativeTotal = 0
-        while (true) {
-            val resp = try {
-                JSONObject(MuyianBillCore.getImportSheetRows(off.toString(), "500"))
-            } catch (_: Exception) {
-                return null
-            }
-            val arr = resp.optJSONArray("rows") ?: return null
-            nativeTotal = resp.optInt("total", 0)
-            for (i in 0 until arr.length()) {
-                val r = arr.optJSONArray(i) ?: continue
-                val list = ArrayList<String>(r.length())
-                for (j in 0 until r.length()) list.add(r.optString(j, ""))
-                all.add(list)
-            }
-            off += 500
-            if (off >= nativeTotal || arr.length() == 0) break
-        }
-        return if (all.size == nativeTotal) all else null
-    }
-
     fun handlePicked(path: String, name: String) {
-        if (path.isEmpty()) {
-            app.showToast("文件路径无效，请重试")
-            return
+        when (val loaded = ImportFlow.load(ctx, path, name, leafColumns)) {
+            is ImportLoadResult.Error -> app.showToast(loaded.message)
+            is ImportLoadResult.Ok -> {
+                summary = loaded.summary
+                mappings = loaded.mappings
+                rows = loaded.rows
+                fileName = loaded.fileName
+                step = "review"
+            }
         }
-        val sheet = try { JSONObject(MuyianBillCore.readImportSheet(path)) } catch (_: Exception) { JSONObject() }
-        if (!sheet.optBoolean("ok")) {
-            app.showToast(sheet.optString("error", "读取文件失败"))
-            return
-        }
-        val headerArr = sheet.optJSONArray("header") ?: JSONArray()
-        val header = ArrayList<String>()
-        for (i in 0 until headerArr.length()) header.add(headerArr.optString(i, ""))
-        val raw = fetchAllRows()
-        if (raw == null) {
-            app.showToast("读取表格失败，请重选文件")
-            return
-        }
-        val parsed = Qianji.parseSheet(header, raw)
-        if (!parsed.ok) {
-            app.showToast(parsed.error)
-            return
-        }
-        if (parsed.rows.isEmpty()) {
-            app.showToast("文件里没有可导入的账单")
-            return
-        }
-        var dupInDb = 0
-        val orderNos = Qianji.orderNos(parsed.rows)
-        if (orderNos.isNotEmpty()) {
-            val arr = JSONArray()
-            orderNos.forEach { arr.put(it) }
-            val dup = try { JSONObject(MuyianBillCore.countExistingOrders(ctx, arr.toString())) } catch (_: Exception) { JSONObject() }
-            dupInDb = dup.optInt("count", 0)
-        }
-        summary = ImportSummary(
-            parsed.total, parsed.expense, parsed.income, parsed.skipped,
-            parsed.minDay, parsed.maxDay, dupInDb
-        )
-        fileName = name.ifEmpty { "钱迹账单.xlsx" }
-        mappings = Qianji.buildMappings(parsed.cats, leafColumns)
-        rows = parsed.rows
-        step = "review"
     }
 
     LaunchedEffect(picking) {
         if (!picking) return@LaunchedEffect
-        val start = System.currentTimeMillis()
-        while (true) {
-            delay(500)
-            val st = try { JSONObject(MuyianBillCore.getImportPickState(ctx)) } catch (_: Exception) { JSONObject() }
-            when (st.optString("state")) {
-                "picked" -> {
-                    val path = st.optString("path", "")
-                    val name = st.optString("name", "")
-                    picking = false
-                    handlePicked(path, name)
-                    return@LaunchedEffect
-                }
-                "cancelled" -> { picking = false; app.showToast("已取消选择"); return@LaunchedEffect }
-                "error" -> { picking = false; app.showToast("选择文件失败：${st.optString("error", "未知原因")}"); return@LaunchedEffect }
-            }
-            if (System.currentTimeMillis() - start > 90_000) {
+        when (val r = FilePick.awaitPick(ctx)) {
+            is PickResult.Picked -> {
                 picking = false
-                app.showToast("等待超时，请重新选择")
-                return@LaunchedEffect
+                handlePicked(r.path, r.name)
             }
+            PickResult.Cancelled -> { picking = false; app.showToast("已取消选择") }
+            is PickResult.Error -> { picking = false; app.showToast("选择文件失败：${r.message}") }
+            PickResult.Timeout -> { picking = false; app.showToast("等待超时，请重新选择") }
         }
     }
 
     fun onPick() {
         if (picking || importing) return
-        val resp = try { JSONObject(MuyianBillCore.openImportPicker(ctx)) } catch (_: Exception) { JSONObject() }
-        if (!resp.optBoolean("success")) {
-            app.showToast("无法打开文件选择器：${resp.optString("error", "未知原因")}")
-            return
+        when (val r = FilePick.open(ctx, PickKind.QIANJI)) {
+            OpenResult.Ok -> picking = true
+            is OpenResult.Error -> app.showToast(r.message)
         }
-        picking = true
     }
 
     fun startImport() {
         if (importing || rows.isEmpty()) return
-        val allJson = try { JSONArray(Qianji.buildBillsJson(rows, mappings)) } catch (_: Exception) { JSONArray() }
-        if (allJson.length() == 0) {
-            app.showToast("没有可导入的账单")
-            return
-        }
         importing = true
         importedCount = 0
         scope.launch {
-            var inserted = 0
-            var skipped = 0
-            var failed = false
-            var i = 0
-            while (i < allJson.length()) {
-                val part = JSONArray()
-                val end = minOf(i + 200, allJson.length())
-                for (j in i until end) part.put(allJson.getJSONObject(j))
-                val resp = try { JSONObject(MuyianBillCore.commitImportBills(ctx, part.toString())) } catch (_: Exception) { JSONObject() }
-                if (!resp.optBoolean("success")) {
-                    failed = true
-                    break
-                }
-                inserted += resp.optInt("inserted", 0)
-                skipped += resp.optInt("skipped", 0)
-                i = end
-                importedCount = i
-                delay(30)
-            }
+            val outcome = ImportFlow.commit(ctx, ImportFlow.billsJson(rows, mappings)) { importedCount = it }
             importing = false
-            result = ImportResult(inserted, skipped, failed)
+            if (outcome.error == "没有可导入的账单") {
+                app.showToast(outcome.error)
+                return@launch
+            }
+            result = outcome
             step = "done"
-            if (!failed) app.showToast("已导入 $inserted 条")
+            app.bumpBills()
+            if (!outcome.failed) app.showToast("已导入 ${outcome.inserted} 条")
         }
     }
 
@@ -241,20 +143,11 @@ fun ImportScreen(app: AppState) {
         summary = ImportSummary()
         mappings = emptyList()
         rows = emptyList()
-        result = ImportResult()
+        result = CommitOutcome()
     }
 
     Column(Modifier.fillMaxSize().background(p.bg)) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = rpx(20), vertical = rpx(12)),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(rpx(72)).clip(CircleShape).pressable(p.fill) { app.pop() }, contentAlignment = Alignment.Center) {
-                Icon("chevron-left", p.text, rpx(22))
-            }
-            Text("导入账单", color = p.text, fontSize = rsp(32), fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(rpx(72)))
-        }
+        TopBar(title = "导入账单", onBack = { app.pop() })
 
         AnimatedContent(
             targetState = step,
@@ -270,7 +163,7 @@ fun ImportScreen(app: AppState) {
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                .pageBottomPadding()
         ) {
             if (current == "pick") {
                 GroupTitle("从钱迹导入")
@@ -345,10 +238,10 @@ fun ImportScreen(app: AppState) {
                     }
                     Spacer(Modifier.height(rpx(20)))
                     Row(Modifier.fillMaxWidth()) {
-                        StatItem(rows.size.toString(), "账单", p.text)
-                        StatItem(summary.expense.toString(), "支出", p.out)
-                        StatItem(summary.income.toString(), "收入", p.inn)
-                        StatItem(summary.skipped.toString(), "跳过", p.text)
+                        StatCell(rows.size.toString(), "账单", p.text)
+                        StatCell(summary.expense.toString(), "支出", p.out)
+                        StatCell(summary.income.toString(), "收入", p.inn)
+                        StatCell(summary.skipped.toString(), "跳过", p.text)
                     }
                     Spacer(Modifier.height(rpx(18)))
                     Text("${summary.minDay} ~ ${summary.maxDay}", color = p.sub, fontSize = rsp(23), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
@@ -494,14 +387,5 @@ fun ImportScreen(app: AppState) {
             }
         }
         }
-    }
-}
-
-@Composable
-private fun RowScope.StatItem(num: String, label: String, color: Color) {
-    val p = LocalPalette.current
-    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(num, color = color, fontSize = rsp(44), fontWeight = FontWeight.Bold)
-        Text(label, color = p.dim, fontSize = rsp(21), modifier = Modifier.padding(top = rpx(4)))
     }
 }

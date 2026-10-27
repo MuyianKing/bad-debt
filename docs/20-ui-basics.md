@@ -4,11 +4,11 @@
 
 ## 页面结构与导航
 
-- 单 Activity：`MainActivity` + `AppState` 的导航栈（`Screen` 枚举、`stack`、`current`、`navigate()`、`pop()`）。页面切换由根节点的 `AnimatedContent` 统一处理，进出栈动画按 `navForward` 区分。
-- 新增页面必须同时在 `data/AppState.kt` 的 `Screen` 里加枚举值，并在 `MainActivity` 的 `when (screen)` 中渲染；不要在页面内部自己写 `Activity` 跳转。
+- 单 Activity：`MainActivity` + `state/AppState` 的导航栈（`Screen` 枚举、`stack`、`current`、`navigate()`、`pop()`）。页面切换由根节点的 `AnimatedContent` 统一处理，进出栈动画按 `navForward` 区分。
+- 新增页面必须同时在 `state/AppState.kt` 的 `Screen` 里加枚举值，并在 `MainActivity` 的 `when (screen)` 中渲染；不要在页面内部自己写 `Activity` 跳转。
 - 全局浮层（Toast、确认框、操作菜单、滚轮选择器、日期选择器、图片预览）由 `AppState` 的状态位驱动，`MainActivity` 末尾固定挂 `AppToastHost` / `ConfirmDialogHost` / `ActionSheetHost` / `PickerSheetHost` / `DatePickerHost` / `ImagePreviewHost`，页面只调 `app.showToast()` / `app.confirm()` / `app.showPicker()` 等方法。
 - 页面根节点用 `statusBarsPadding()` 让顶栏避开状态栏；可滚动内容底部用 `WindowInsets.navigationBars.asPaddingValues()` 补安全区；带输入法的页面用 `imePadding()`。不要写死状态栏高度。
-- 内页统一用 `ui/components/Basics.kt` 的 `TopBar(title, onBack, solid, content)`；滚动后把 `solid` 置 true 切到半透明底，避免列表从标题下穿过。
+- 内页统一用 `ui/components/Basics.kt` 的 `TopBar(title, onBack, solid, titleContent, actions)`；滚动后把 `solid` 置 true 切到半透明底，避免列表从标题下穿过。
 
 ## 设计单位
 
@@ -32,7 +32,7 @@
 ## 通用组件
 
 - `Modifier.glass(shape, alpha)`：半透明玻璃卡；`Modifier.solidCard(shape)`：实底卡；`Modifier.pressable(color, onClick)`：按压反馈。
-- `GroupTitle`（区块标题）、`AppFab`、`AppSwitch`（开关）、`MiniToggle`、`StateChip`、`IconBlock`、`Chevron`、`DividerLine`、`EmptyCopy`、`TopBar`、`PrimaryButton`、`GhostButton`。
+- `GroupTitle`（区块标题）、`AppFab`、`AppSwitch`（开关）、`MiniToggle`、`StateChip`、`IconBlock`、`StatCell`、`DividerLine`、`EmptyCopy`、`TopBar`、`PrimaryButton`、`GhostButton`。
 - `BillList` / `BillRow`：按日分组账单列表，首页与日历页共用；`flush` 为 true 时去掉自带卡片底，供嵌进外层卡片。
 - `MascotFace` / `MascotImage`：角色表情渲染；`WheelPicker`：滚轮选择器。
 - 新增同类基础件优先扩展这些文件，不要在各页面复制一份。
@@ -44,6 +44,7 @@
 - 空状态只留两行文案，不放图标。
 - 区块标题图标用实心字形直接着主题色，不要彩色方块底座。
 - 柱状图必须有 25% 递增的网格线，且**柱高按 `axisMax`（取整后的刻度上限）换算**，不能按实际最大值换算，否则柱顶与左侧刻度对不上；报表表格日期左对齐、金额右对齐、表头弱化到 `rsp(20)` 的 `dim` 色。
+- 柱状/折线图统一叠加一条虚线均值参考线，颜色用 `p.sub` 降透明度，与柱子/折线共用 `barGrow` 从底部升起；均值分母只算已显示的格数（月视图=本月已过天数，年视图=今年已过月份），图例「日均 / 月均 + 金额」右对齐放在标题行下方，不要在图内叠加标签。
 
 ## 图表
 

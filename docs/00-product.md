@@ -4,7 +4,7 @@
 
 ## 定位
 
-- Android 无障碍自动记账 App：**Kotlin + Jetpack Compose**，系统能力与数据层在原生核心 `hybrid.kt`（包名 `muyian.bill.listener`）。
+- Android 无障碍自动记账 App：**Kotlin + Jetpack Compose**，系统能力与原生数据层在 `muyian/bill/listener/` 同包文件（包名 `muyian.bill.listener`）。
 
 ## 解析成功不等于入账
 

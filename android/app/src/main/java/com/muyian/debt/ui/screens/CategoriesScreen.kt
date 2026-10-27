@@ -78,7 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Cats
 import com.muyian.debt.data.Category
 import com.muyian.debt.data.CategoryData
@@ -89,6 +89,9 @@ import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.state.ActionSheetState
+import com.muyian.debt.ui.components.TopBar
+import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
@@ -368,14 +371,14 @@ fun CategoriesScreen(app: AppState) {
                 expanded = dlgIndex
             }
             "editTop" -> {
-                if (arr.anyIndexed { idx, c -> idx != dlgIndex && c.name == name }) { app.showToast("分类已存在"); return }
+                if (arr.withIndex().any { (idx, c) -> idx != dlgIndex && c.name == name }) { app.showToast("分类已存在"); return }
                 arr.getOrNull(dlgIndex)?.let {
                     arr[dlgIndex] = it.copy(name = name, icon = icon)
                 }
             }
             "editSub" -> {
                 val top = arr.getOrNull(dlgIndex) ?: return
-                if (top.subs.anyIndexed { idx, s -> idx != dlgSubIndex && s.name == name }) {
+                if (top.subs.withIndex().any { (idx, s) -> idx != dlgSubIndex && s.name == name }) {
                     app.showToast("子类已存在"); return
                 }
                 if (dlgSubIndex in top.subs.indices) {
@@ -416,65 +419,62 @@ fun CategoriesScreen(app: AppState) {
     }
 
     fun rowMenu(i: Int) {
-        app.actionSheet = com.muyian.debt.data.ActionSheetState(listOf("删除" to true)) {
+        app.actionSheet = ActionSheetState(listOf("删除" to true)) {
             removeTop(i)
         }
     }
 
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(p.bg)) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = rpx(20), vertical = rpx(12)),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(rpx(72)).clip(CircleShape).pressable(p.fill) { app.pop() }, contentAlignment = Alignment.Center) {
-                AppIcon("chevron-left", p.text, 22.dp)
-            }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                for (t in listOf("expense" to "支出", "income" to "收入")) {
-                    val active = type == t.first
-                    val tabFg by animateColorAsState(
-                        if (active) p.text else p.dim,
-                        tween(180, easing = Motion.InOut),
-                        label = "cat-tab-fg"
-                    )
-                    val underline by animateFloatAsState(
-                        if (active) 1f else 0f,
-                        tween(200, easing = Motion.Out),
-                        label = "cat-tab-line"
-                    )
-                    Column(
-                        Modifier
-                            .clickable {
-                                if (type != t.first) {
-                                    type = t.first
-                                    expanded = -1
-                                    subRects.clear()
-                                }
-                            }
-                            .padding(horizontal = rpx(24), vertical = rpx(6)),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            t.second,
-                            color = tabFg,
-                            fontSize = rsp(32),
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+        TopBar(
+            title = "",
+            onBack = { app.pop() },
+            titleContent = {
+                Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    for (t in listOf("expense" to "支出", "income" to "收入")) {
+                        val active = type == t.first
+                        val tabFg by animateColorAsState(
+                            if (active) p.text else p.dim,
+                            tween(180, easing = Motion.InOut),
+                            label = "cat-tab-fg"
                         )
-                        Spacer(Modifier.height(rpx(6)))
-                        Box(
+                        val underline by animateFloatAsState(
+                            if (active) 1f else 0f,
+                            tween(200, easing = Motion.Out),
+                            label = "cat-tab-line"
+                        )
+                        Column(
                             Modifier
-                                .width(rpx(48))
-                                .height(rpx(6))
-                                .graphicsLayer { alpha = underline }
-                                .clip(RoundedCornerShape(rpx(4)))
-                                .background(p.primary)
-                        )
+                                .clickable {
+                                    if (type != t.first) {
+                                        type = t.first
+                                        expanded = -1
+                                        subRects.clear()
+                                    }
+                                }
+                                .padding(horizontal = rpx(24), vertical = rpx(6)),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                t.second,
+                                color = tabFg,
+                                fontSize = rsp(32),
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Spacer(Modifier.height(rpx(6)))
+                            Box(
+                                Modifier
+                                    .width(rpx(48))
+                                    .height(rpx(6))
+                                    .graphicsLayer { alpha = underline }
+                                    .clip(RoundedCornerShape(rpx(4)))
+                                    .background(p.primary)
+                            )
+                        }
                     }
                 }
             }
-            Spacer(Modifier.width(rpx(72)))
-        }
+        )
 
         Row(
             Modifier
@@ -500,7 +500,7 @@ fun CategoriesScreen(app: AppState) {
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = rpx(160) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                .pageBottomPadding(extra = rpx(100))
         ) {
             Column(
                 Modifier
@@ -582,7 +582,7 @@ fun CategoriesScreen(app: AppState) {
                                 Modifier
                                     .size(rpx(66))
                                     .clip(RoundedCornerShape(rpx(20)))
-                                    .background(hex(Cats.PALETTE[i % Cats.PALETTE.size])),
+                                    .background(hex(Cats.paletteHex(i))),
                                 contentAlignment = Alignment.Center
                             ) { AppIcon(c.icon.ifEmpty { "grid" }, Color.White, 20.dp, solid = true) }
                             Spacer(Modifier.width(rpx(20)))
@@ -623,7 +623,7 @@ fun CategoriesScreen(app: AppState) {
                         ) {
                             SubPanel(
                                 subs = c.subs,
-                                paletteColor = hex(Cats.PALETTE[i % Cats.PALETTE.size]),
+                                paletteColor = hex(Cats.paletteHex(i)),
                                 dragKind = dragKind,
                                 dragFrom = dragFrom,
                                 subRects = subRects,
@@ -667,7 +667,7 @@ fun CategoriesScreen(app: AppState) {
                     ) {
                         for ((ii, ic) in Cats.ICON_CHOICES.withIndex()) {
                             val active = dlgIcon == ic
-                            val color = hex(Cats.PALETTE[ii % Cats.PALETTE.size])
+                            val color = hex(Cats.paletteHex(ii))
                             Box(
                                 Modifier
                                     .size(rpx(74))
@@ -836,15 +836,10 @@ private fun RowScope.DialogButton(
             .weight(1f)
             .height(rpx(84))
             .clip(RoundedCornerShape(rpx(18)))
-            .background(if (primary) bg else bg)
+            .background(bg)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(text, color = fg, fontSize = rsp(28), fontWeight = if (primary) FontWeight.SemiBold else FontWeight.Medium)
     }
-}
-
-private inline fun <T> List<T>.anyIndexed(predicate: (Int, T) -> Boolean): Boolean {
-    for (i in indices) if (predicate(i, this[i])) return true
-    return false
 }

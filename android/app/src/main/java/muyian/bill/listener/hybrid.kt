@@ -67,228 +67,6 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
 /**
- * 系统通知监听服务（辅助渠道）：收到候选App的通知后交给 MuyianBillCore 处理。
- * 覆盖无障碍方案看不到的场景：收款到账提醒只出现在通知栏、熄屏碰卡支付的交易通知等。
- * 在本插件的 AndroidManifest.xml 中注册，用户授予"通知使用权"后被系统 bind。
- */
-class BillNotificationListener : NotificationListenerService() {
-
-    override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        if (sbn == null) return
-        val notification = sbn.notification ?: return
-        val extras = notification.extras ?: return
-        val pkg = sbn.packageName ?: return
-        val title = extras.getCharSequence("android.title")?.toString() ?: ""
-        val text = extras.getCharSequence("android.text")?.toString() ?: ""
-        val subText = extras.getCharSequence("android.subText")?.toString() ?: ""
-        val bigText = extras.getCharSequence("android.bigText")?.toString() ?: ""
-        val lines = ArrayList<String>()
-        val textLines = extras.getCharSequenceArray("android.textLines")
-        if (textLines != null) {
-            for (line in textLines) {
-                if (line != null) lines.add(line.toString())
-            }
-        }
-        try {
-            MuyianBillCore.handleNotification(
-                applicationContext, pkg, title, text, subText, bigText, lines, sbn.postTime, false
-            )
-        } catch (e: Exception) {
-            Log.e("MuyianBill", "handle notification failed", e)
-        }
-    }
-}
-
-/**
- * 无障碍服务：用户在系统"无障碍"中开启后由系统 bind。
- * 监听候选支付 App 的窗口切换与内容变化，采集当前窗口全部文本
- * 交给 MuyianBillCore.handleScreen 解析（识别"支付成功"结果页）。
- * 在本插件的 AndroidManifest.xml 中注册，配置见 res/xml/muyian_accessibility_config.xml。
- */
-class MuyianBillAccessibilityService : AccessibilityService() {
-
-    companion object {
-        private const val TAG = "MuyianBill"
-        private const val THROTTLE_MS = 600L
-        private const val MAX_NODES = 400
-        private const val MAX_DEPTH = 30
-        private val executor = Executors.newSingleThreadExecutor()
-    }
-
-    private val handler = Handler(Looper.getMainLooper())
-    private val lastEventAt = HashMap<String, Long>()
-    private val lastSignature = HashMap<String, String>()
-    private val pendingPages = HashSet<String>()
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName) return
-        // 记路线只认窗口切换：宿主 App → 支付 App → 宿主 App 是判定"同一笔支付"的关键
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            MuyianBillCore.noteForeground(applicationContext, pkg)
-        }
-        // 白名单三层匹配（应用名关键词查询带缓存），非候选 App 直接放行
-        if (!MuyianBillCore.isCandidateApp(applicationContext, pkg)) return
-
-        val now = System.currentTimeMillis()
-        val last = lastEventAt[pkg] ?: 0L
-        if (now - last >= THROTTLE_MS) {
-            lastEventAt[pkg] = now
-            processWindow(pkg)
-        } else if (pendingPages.add(pkg)) {
-            // 节流窗口内的事件不能直接丢：页面可能恰好在窗口内渲染完成，
-            // 补一次延迟采集，保证每个事件突发都以一次最终解析收尾
-            handler.postDelayed(Runnable {
-                pendingPages.remove(pkg)
-                lastEventAt[pkg] = System.currentTimeMillis()
-                processWindow(pkg)
-            }, THROTTLE_MS)
-        }
-    }
-
-    private fun processWindow(pkg: String) {
-        val root = rootInActiveWindow ?: return
-        // 事件包名与当前窗口不一定一致：切回宿主 App 的一瞬间 root 可能还停在支付 App，
-        // 直接采信会把支付宝结果页算成美团的结果页，进而重复弹层
-        val rootPkg = root.packageName?.toString() ?: ""
-        if (rootPkg != pkg) return
-        val lines = ArrayList<String>()
-        collectTexts(root, lines, 0, intArrayOf(MAX_NODES))
-        if (Build.VERSION.SDK_INT < 33) {
-            @Suppress("DEPRECATION")
-            try { root.recycle() } catch (e: Exception) { }
-        }
-        if (lines.isEmpty()) return
-        val signature = MuyianBillCore.screenSignature(pkg, lines)
-        if (signature == lastSignature[pkg]) return
-        lastSignature[pkg] = signature
-        val snapshot = ArrayList(lines)
-        executor.execute(Runnable {
-            try {
-                MuyianBillCore.handleScreen(applicationContext, pkg, snapshot, false)
-            } catch (e: Exception) {
-                Log.e(TAG, "handle screen failed", e)
-            }
-        })
-    }
-
-    private fun collectTexts(node: AccessibilityNodeInfo?, out: ArrayList<String>, depth: Int, budget: IntArray) {
-        if (node == null || depth > MAX_DEPTH || budget[0] <= 0) return
-        if (node.isVisibleToUser) {
-            val text = node.text?.toString()
-            if (!text.isNullOrBlank()) out.add(text.trim())
-            val desc = node.contentDescription?.toString()
-            if (!desc.isNullOrBlank()) out.add(desc.trim())
-            budget[0]--
-        }
-        for (i in 0 until node.childCount) {
-            collectTexts(node.getChild(i), out, depth + 1, budget)
-            if (budget[0] <= 0) return
-        }
-    }
-
-    override fun onInterrupt() {
-    }
-}
-
-/**
- * 后台保活前台服务：用一条最低优先级的常驻通知把进程保持在"前台服务"状态，
- * 降低锁屏/切后台后被系统省电策略回收导致自动记账失效的概率。
- * 只维持进程存活，不读取、不上传任何数据；用户可在设置页关闭。
- * START_STICKY：被系统杀掉后由系统尝试重建，重建时若用户已关闭则立即退出。
- */
-class MuyianKeepAliveService : Service() {
-
-    companion object {
-        private const val TAG = "MuyianBill"
-        private const val CHANNEL_ID = "muyian_keep_alive"
-        private const val NOTIFICATION_ID = 2001
-
-        @JvmStatic
-        fun start(context: Context) {
-            try {
-                val intent = Intent(context, MuyianKeepAliveService::class.java)
-                if (Build.VERSION.SDK_INT >= 26) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "start keep alive service failed", e)
-            }
-        }
-
-        @JvmStatic
-        fun stop(context: Context) {
-            try {
-                context.stopService(Intent(context, MuyianKeepAliveService::class.java))
-            } catch (e: Exception) {
-                Log.w(TAG, "stop keep alive service failed", e)
-            }
-        }
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // startForegroundService 启动后必须尽快 startForeground，先挂通知再判断用户开关
-        try {
-            startForeground(NOTIFICATION_ID, buildNotification())
-        } catch (e: Exception) {
-            Log.w(TAG, "startForeground failed", e)
-        }
-        if (!MuyianBillCore.isKeepAliveEnabled(this)) {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        return START_STICKY
-    }
-
-    @Suppress("DEPRECATION") // 兼容 API < 26 的旧版通知构建分支
-    private fun buildNotification(): Notification {
-        createChannel()
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        var pi: PendingIntent? = null
-        if (launch != null) {
-            launch.addFlags(0x10000000) // Intent.FLAG_ACTIVITY_NEW_TASK
-            val flags = 0x08000000 or // PendingIntent.FLAG_UPDATE_CURRENT
-                (if (Build.VERSION.SDK_INT >= 31) 0x04000000 else 0) // FLAG_IMMUTABLE
-            pi = PendingIntent.getActivity(this, NOTIFICATION_ID, launch, flags)
-        }
-        val builder = if (Build.VERSION.SDK_INT >= 26) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            Notification.Builder(this)
-        }
-        builder.setContentTitle("孽账正在后台守护")
-            .setContentText("自动记账运行中，点击返回应用")
-            .setSmallIcon(applicationInfo.icon)
-            .setOngoing(true)
-            .setShowWhen(false)
-            .setContentIntent(pi)
-        if (Build.VERSION.SDK_INT < 26) {
-            builder.setPriority(-1) // Notification.PRIORITY_LOW
-        }
-        return builder.build()
-    }
-
-    private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val nm = getSystemService("notification") as NotificationManager
-            val channel = NotificationChannel(
-                CHANNEL_ID, "后台保活", NotificationManager.IMPORTANCE_LOW
-            )
-            channel.description = "保持应用在后台运行，避免自动记账被系统回收"
-            channel.setShowBadge(false)
-            nm.createNotificationChannel(channel)
-        }
-    }
-}
-
-/**
  * 自动记账核心引擎：
  * 候选App过滤 -> 页面黑名单 -> "支付成功"标记解析 -> 单号优先的去重 -> 底部确认弹层
  * （弹层拉不起来时发一条「待确认」通知兜底，点开仍回到同一个弹层）。
@@ -302,20 +80,7 @@ class MuyianBillCore private constructor() {
         private const val PREFS_NAME = "muyian_bill"
         private const val KEY_DEDUP = "capture_dedup"
         private const val KEY_ORDER_DEDUP = "order_dedup"
-        private const val KEY_KEEP_ALIVE = "keep_alive_enabled"
-        private const val KEY_CARD_THEME = "card_theme_color"
-        private const val KEY_NOTICE_SEQ = "pending_notice_seq"
-        private const val KEY_POPUP_BLOCKED_AT = "popup_blocked_at"
-        /** MIUI/HyperOS 的「后台弹出界面」AppOp；标准 Android 没有这个权限 */
-        private const val MIUI_POPUP_OP = 10021
-        /** 拦截标记保留 7 天，避免用户开了权限后设置页还长期挂着警告 */
-        private const val POPUP_BLOCKED_TTL_MS = 7 * 24 * 3600 * 1000L
-        /** 底部弹层默认主题色：悟空黄（与前端 --c-primary 一致） */
-        private val DEFAULT_CARD_THEME = 0xFFF7A600.toInt()
         /** 弹层拉不起来时的通知兜底渠道：点开通知仍进 BillSheetActivity，不在通知里入账 */
-        private const val CHANNEL_PENDING = "bill_pending"
-        private const val PENDING_NOTICE_BASE_ID = 20000
-        private const val PENDING_NOTICE_TTL_MS = 24 * 3600 * 1000L
 
         /** 弹层队列与去重用的内存状态：不落盘，进程结束即丢弃 */
         private val sheetLock = Any()
@@ -358,12 +123,7 @@ class MuyianBillCore private constructor() {
         private val flows = ArrayList<CaptureFlow>()
         private var flowsLoaded = false
         /** 通知 ID 自增序号：同一时刻可能有多笔兜底通知，不能互相覆盖 */
-        private var pendingNoticeSeq = 0
         /** 建表/补列只在本进程首次开库时执行一次，避免每次查询都抛 3 次 ALTER 异常 */
-        private val dbLock = Any()
-        @Volatile
-        private var schemaReady = false
-        private const val DB_NAME = "muyian.db"
         private const val CAPTURE_DEDUP_WINDOW_MS = 5 * 60 * 1000L
         /** 单号是交易唯一凭证：同单号 24 小时内不再弹层 */
         private const val ORDER_DEDUP_WINDOW_MS = 24 * 3600 * 1000L
@@ -528,6 +288,64 @@ class MuyianBillCore private constructor() {
         /** 应用名关键词白名单的判定缓存：无障碍事件高频，避免每次都查 PackageManager */
         private val labelCache = ConcurrentHashMap<String, Boolean>()
 
+        /* ---------- 系统权限/自愈：实现见 SystemPerms ---------- */
+        @JvmStatic
+        fun isKeepAliveEnabled(context: Context): Boolean = SystemPerms.isKeepAliveEnabled(context)
+
+        @JvmStatic
+        fun setKeepAliveEnabled(context: Context, enabled: Boolean): Boolean =
+            SystemPerms.setKeepAliveEnabled(context, enabled)
+
+        @JvmStatic
+        fun hasOverlayPermission(context: Context): Boolean = SystemPerms.hasOverlayPermission(context)
+
+        @JvmStatic
+        fun requestOverlayPermission(context: Context): Boolean = SystemPerms.requestOverlayPermission(context)
+
+        @JvmStatic
+        fun getPopupPermissionState(context: Context): String = SystemPerms.getPopupPermissionState(context)
+
+        @JvmStatic
+        fun openPopupPermissionSettings(context: Context): Boolean =
+            SystemPerms.openPopupPermissionSettings(context)
+
+        @JvmStatic
+        fun clearPopupBlocked(context: Context) = SystemPerms.clearPopupBlocked(context)
+
+        @JvmStatic
+        fun setCardThemeColor(context: Context, color: String): Boolean =
+            SystemPerms.setCardThemeColor(context, color)
+
+        @JvmStatic
+        fun getCardThemeColor(context: Context): Int = SystemPerms.getCardThemeColor(context)
+
+        @JvmStatic
+        fun isIgnoringBatteryOptimizations(context: Context): Boolean =
+            SystemPerms.isIgnoringBatteryOptimizations(context)
+
+        @JvmStatic
+        fun requestIgnoreBatteryOptimizations(context: Context): String =
+            SystemPerms.requestIgnoreBatteryOptimizations(context)
+
+        @JvmStatic
+        fun openAppSettings(context: Context): Boolean = SystemPerms.openAppSettings(context)
+
+        @JvmStatic
+        fun isAccessibilityEnabled(context: Context): Boolean = SystemPerms.isAccessibilityEnabled(context)
+
+        @JvmStatic
+        fun isNotificationListenerEnabled(context: Context): Boolean =
+            SystemPerms.isNotificationListenerEnabled(context)
+
+        @JvmStatic
+        fun areNotificationsEnabled(context: Context): Boolean = SystemPerms.areNotificationsEnabled(context)
+
+        @JvmStatic
+        fun getSelfRepairState(context: Context): String = SystemPerms.getSelfRepairState(context)
+
+        @JvmStatic
+        fun repairAccessibilityService(context: Context): String = SystemPerms.repairAccessibilityService(context)
+
         /** App 启动时调用：建好待确认通知渠道、清理旧版本遗留状态，再拉起保活服务 */
         @JvmStatic
         fun init(context: Context) {
@@ -541,7 +359,7 @@ class MuyianBillCore private constructor() {
             } catch (e: Exception) {
                 Log.w(TAG, "clean legacy prefs failed", e)
             }
-            createPendingChannel(context)
+            PendingNotices.ensureChannel(context)
             // 启动时记录一次弹层权限状态，便于排查"权限显示已开但弹层仍被拦"
             try {
                 Log.i(TAG, "popup permission state " + getPopupPermissionState(context))
@@ -551,361 +369,6 @@ class MuyianBillCore private constructor() {
             // 默认开启后台保活；用户明确关闭过则不再拉起
             if (isKeepAliveEnabled(context)) {
                 MuyianKeepAliveService.start(context)
-            }
-        }
-
-        /** 后台保活默认开启：自动记账依赖进程存活，用户可在设置页关闭 */
-        @JvmStatic
-        fun isKeepAliveEnabled(context: Context): Boolean {
-            return try {
-                prefs(context).getBoolean(KEY_KEEP_ALIVE, true)
-            } catch (e: Exception) {
-                true
-            }
-        }
-
-        /** 开关后台保活前台服务，返回是否设置成功 */
-        @JvmStatic
-        fun setKeepAliveEnabled(context: Context, enabled: Boolean): Boolean {
-            return try {
-                prefs(context).edit().putBoolean(KEY_KEEP_ALIVE, enabled).apply()
-                if (enabled) MuyianKeepAliveService.start(context) else MuyianKeepAliveService.stop(context)
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "set keep alive failed", e)
-                false
-            }
-        }
-
-        /**
-         * MIUI/HyperOS 的"后台弹出界面"开关（对应系统的"显示在其他应用上层"）。
-         * 确认弹层是 Activity，不用这个权限绘制任何窗口；但 HyperOS 把"后台启动 Activity"
-         * 绑在这个 appop 上，未允许时 startActivity 会被 ActivityTaskManager 直接 Abort。
-         */
-        @JvmStatic
-        fun hasOverlayPermission(context: Context): Boolean {
-            if (Build.VERSION.SDK_INT < 23) return true
-            return try {
-                Settings.canDrawOverlays(context)
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        /** 打开系统的"显示在其他应用上层"授权页 */
-        @JvmStatic
-        fun requestOverlayPermission(context: Context): Boolean {
-            return try {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:" + context.packageName)
-                )
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "open overlay settings failed", e)
-                false
-            }
-        }
-
-        /**
-         * 弹层弹出权限状态：
-         * overlay = "显示在其他应用上层"（SYSTEM_ALERT_WINDOW）；
-         * miuiPopup = MIUI/HyperOS 的「后台弹出界面」AppOp 10021（0=允许 1=忽略 2=拒绝 3=默认），
-         *   known=false 表示系统不提供或隐藏 API 被拦截；
-         * blocked = 最近 7 天确实发生过"亮屏但弹层被系统拦住"。
-         */
-        @JvmStatic
-        fun getPopupPermissionState(context: Context): String {
-            val o = JSONObject()
-            o.put("miui", isMiuiDevice())
-            o.put("overlay", hasOverlayPermission(context))
-            var known = false
-            var mode = -1
-            try {
-                val am = context.getSystemService("appops") as AppOpsManager
-                // 标准 SDK 只有 String 版；MIUI 的 op 10021 没有字符串名，只能走隐藏的 int 版
-                val method = AppOpsManager::class.java.getDeclaredMethod(
-                    "checkOpNoThrow", Integer.TYPE, Integer.TYPE, String::class.java
-                )
-                method.isAccessible = true
-                mode = method.invoke(am, MIUI_POPUP_OP, Process.myUid(), context.packageName) as Int
-                known = true
-            } catch (e: Exception) {
-                Log.w(TAG, "query miui popup op failed", e)
-            }
-            o.put("miuiPopup", mode)
-            o.put("miuiPopupKnown", known)
-            o.put("blocked", isPopupBlocked(context))
-            return o.toString()
-        }
-
-        /** 小米/Redmi/POCO：只有这些设备才有 MIUI 的「后台弹出界面」AppOp 10021 */
-        private fun isMiuiDevice(): Boolean {
-            val brand = Build.BRAND.lowercase(Locale.US)
-            val manufacturer = Build.MANUFACTURER.lowercase(Locale.US)
-            return brand.contains("xiaomi") || brand.contains("redmi") || brand.contains("poco") ||
-                manufacturer.contains("xiaomi")
-        }
-
-        /** 打开 MIUI 权限编辑页（列表里有「后台弹出界面」）；非 MIUI 退回应用详情页 */
-        @JvmStatic
-        fun openPopupPermissionSettings(context: Context): Boolean {
-            return try {
-                val intent = Intent("miui.intent.action.APP_PERM_EDITOR")
-                intent.putExtra("extra_pkgname", context.packageName)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "open miui permission editor failed", e)
-                openAppSettings(context)
-            }
-        }
-
-        /** 亮屏但弹层没起来（ROM 拦截后台 Activity）时记一笔，设置页据此提示 */
-        private fun markPopupBlocked(context: Context) {
-            try {
-                prefs(context).edit().putLong(KEY_POPUP_BLOCKED_AT, System.currentTimeMillis()).apply()
-            } catch (e: Exception) {
-                Log.w(TAG, "mark popup blocked failed", e)
-            }
-        }
-
-        /** 弹层成功拉起后清掉拦截标记，避免权限已开还长期显示警告 */
-        @JvmStatic
-        fun clearPopupBlocked(context: Context) {
-            try {
-                prefs(context).edit().remove(KEY_POPUP_BLOCKED_AT).apply()
-            } catch (e: Exception) {
-                Log.w(TAG, "clear popup blocked failed", e)
-            }
-        }
-
-        private fun isPopupBlocked(context: Context): Boolean {
-            return try {
-                val at = prefs(context).getLong(KEY_POPUP_BLOCKED_AT, 0L)
-                at > 0 && System.currentTimeMillis() - at < POPUP_BLOCKED_TTL_MS
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        /**
-         * 底部确认弹层的主题色：Activity 不认前端 CSS 变量，由页面切换主题时传字面色进来。
-         * color 只接受 #RRGGBB，非法值返回 false 并保留旧色。
-         */
-        @JvmStatic
-        fun setCardThemeColor(context: Context, color: String): Boolean {
-            val parsed = try {
-                Color.parseColor(if (color.startsWith("#")) color else "#$color")
-            } catch (e: IllegalArgumentException) {
-                null
-            }
-            if (parsed == null) return false
-            return try {
-                prefs(context).edit().putInt(KEY_CARD_THEME, parsed).apply()
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "set card theme failed", e)
-                false
-            }
-        }
-
-        @JvmStatic
-        fun getCardThemeColor(context: Context): Int {
-            return try {
-                prefs(context).getInt(KEY_CARD_THEME, DEFAULT_CARD_THEME)
-            } catch (e: Exception) {
-                DEFAULT_CARD_THEME
-            }
-        }
-
-        /** 电池优化白名单状态：true 表示系统不会因省电策略限制本应用后台 */
-        @JvmStatic
-        fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-            if (Build.VERSION.SDK_INT < 23) return true
-            return try {
-                val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-                pm.isIgnoringBatteryOptimizations(context.packageName)
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        /**
-         * 请求把本应用加入电池优化白名单，返回 {"success":bool,"granted":bool}。
-         * 优先弹系统的"不限制"确认框；部分 ROM 不支持该 Intent 时退化为电池优化列表页。
-         */
-        @JvmStatic
-        fun requestIgnoreBatteryOptimizations(context: Context): String {
-            val result = JSONObject()
-            if (Build.VERSION.SDK_INT < 23 || isIgnoringBatteryOptimizations(context)) {
-                result.put("success", true).put("granted", true)
-                return result.toString()
-            }
-            try {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                intent.data = Uri.parse("package:" + context.packageName)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                result.put("success", true).put("granted", false)
-                return result.toString()
-            } catch (e: Exception) {
-                Log.w(TAG, "request ignore battery optimizations failed", e)
-            }
-            return try {
-                val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(fallback)
-                result.put("success", true).put("granted", false).put("fallback", true)
-                result.toString()
-            } catch (e: Exception) {
-                Log.w(TAG, "open battery optimization settings failed", e)
-                result.put("success", false).put("granted", false).toString()
-            }
-        }
-
-        /** 打开本应用系统详情页：国产 ROM 的自启动/后台管理入口通常在这里 */
-        @JvmStatic
-        fun openAppSettings(context: Context): Boolean {
-            return try {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:" + context.packageName)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "open app settings failed", e)
-                false
-            }
-        }
-
-        @JvmStatic
-        fun isAccessibilityEnabled(context: Context): Boolean {
-            return try {
-                val expected = ComponentName(context, MuyianBillAccessibilityService::class.java)
-                val raw = Settings.Secure.getString(
-                    context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-                ) ?: return false
-                val flat = expected.flattenToString()
-                val shortFlat = expected.flattenToShortString()
-                raw.split(":").any {
-                    it == flat || it == shortFlat || ComponentName.unflattenFromString(it) == expected
-                }
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        @JvmStatic
-        fun isNotificationListenerEnabled(context: Context): Boolean {
-            return try {
-                val raw = Settings.Secure.getString(
-                    context.contentResolver, "enabled_notification_listeners"
-                )
-                if (raw == null) false
-                else raw.split(":").any { it.substringBefore('/') == context.packageName }
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        /** App 级通知开关（Android 13+ 的 POST_NOTIFICATIONS 也体现在这里）；异常时按已开启处理，避免误报 */
-        @JvmStatic
-        fun areNotificationsEnabled(context: Context): Boolean {
-            return try {
-                if (Build.VERSION.SDK_INT < 24) true
-                else {
-                    val nm = context.getSystemService("notification") as NotificationManager
-                    nm.areNotificationsEnabled()
-                }
-            } catch (e: Exception) {
-                true
-            }
-        }
-
-        /** WRITE_SECURE_SETTINGS 是否已通过 adb 授予：授权后 App 可自行开关无障碍服务（掉开关自愈） */
-        @JvmStatic
-        fun hasWriteSecureSettings(context: Context): Boolean {
-            return try {
-                context.checkPermission(
-                    "android.permission.WRITE_SECURE_SETTINGS",
-                    Process.myPid(), Process.myUid()
-                ) == PackageManager.PERMISSION_GRANTED
-            } catch (e: Exception) {
-                false
-            }
-        }
-
-        /**
-         * 自恢复状态查询，返回 {"hasPermission":bool,"serviceEnabled":bool,"packageName":"..."}。
-         * packageName 供设置页拼接 adb 授权命令展示。
-         */
-        @JvmStatic
-        fun getSelfRepairState(context: Context): String {
-            val o = JSONObject()
-            o.put("hasPermission", hasWriteSecureSettings(context))
-            o.put("serviceEnabled", isAccessibilityEnabled(context))
-            o.put("packageName", context.packageName)
-            return o.toString()
-        }
-
-        /**
-         * 无障碍服务自恢复：已授予 WRITE_SECURE_SETTINGS 时，把本应用无障碍服务
-         * 追加回系统"已启用无障碍服务"列表并打开总开关，免用户去系统设置手动重开。
-         * 只追加本应用的条目，不改动其他应用已注册的服务。
-         * 返回 {"success":bool,"serviceEnabled":bool,"error"?:string}
-         */
-        @JvmStatic
-        fun repairAccessibilityService(context: Context): String {
-            val result = JSONObject()
-            if (!hasWriteSecureSettings(context)) {
-                result.put("success", false).put("error", "no permission")
-                return result.toString()
-            }
-            var ok = false
-            try {
-                val cn = ComponentName(context, MuyianBillAccessibilityService::class.java)
-                ok = appendEnabledService(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, cn)
-                if (ok) {
-                    Settings.Secure.putInt(
-                        context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "repair accessibility service failed", e)
-                ok = false
-            }
-            result.put("success", ok)
-            result.put("serviceEnabled", isAccessibilityEnabled(context))
-            if (!ok) result.put("error", "write failed")
-            return result.toString()
-        }
-
-        /** 把一个 ComponentName 追加进 secure settings 的冒号分隔服务列表（已在列表则不动，视为成功） */
-        private fun appendEnabledService(context: Context, key: String, cn: ComponentName): Boolean {
-            return try {
-                val flat = cn.flattenToString()
-                val shortFlat = cn.flattenToShortString()
-                val raw = Settings.Secure.getString(context.contentResolver, key) ?: ""
-                val parts = ArrayList<String>()
-                var exists = false
-                for (p in raw.split(":")) {
-                    if (p.isBlank()) continue
-                    if (p == flat || p == shortFlat || ComponentName.unflattenFromString(p) == cn) {
-                        exists = true
-                    }
-                    parts.add(p)
-                }
-                if (exists) return true
-                parts.add(flat)
-                Settings.Secure.putString(context.contentResolver, key, parts.joinToString(":"))
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "append enabled service failed", e)
-                false
             }
         }
 
@@ -1842,7 +1305,7 @@ class MuyianBillCore private constructor() {
         private fun isDuplicateBill(
             context: Context, bankName: String, money: Double, createdAt: Long, orderNo: String
         ): Boolean {
-            val db = openDb(context)
+            val db = BillDb.openDb(context)
             var cursor: Cursor? = null
             try {
                 cursor = db.query("bills", null, "source in (?,?)", arrayOf("notify", "screen"), null, null, "id desc")
@@ -1992,7 +1455,7 @@ class MuyianBillCore private constructor() {
                 Log.e(TAG, "start bill sheet failed", e)
             }
             if (!started) {
-                markPopupBlocked(context)
+                SystemPerms.markPopupBlocked(context)
                 postPendingNotice(context, bill, noticeId)
                 onSheetClosed(context)
                 return
@@ -2001,7 +1464,7 @@ class MuyianBillCore private constructor() {
             // 已经起来又很快被关掉的（wasStarted）不能再补通知，避免用户取消后又收到一条。
             sheetHandler.postDelayed({
                 if (BillSheetActivity.isAlive() == false && BillSheetActivity.wasStarted(noticeId) == false) {
-                    markPopupBlocked(context)
+                    SystemPerms.markPopupBlocked(context)
                     postPendingNotice(context, bill, noticeId)
                     onSheetClosed(context)
                 }
@@ -2047,7 +1510,7 @@ class MuyianBillCore private constructor() {
             cv.put("sourcePkg", bill.optString("sourcePkg"))
             cv.put("createdAt", bill.optLong("createdAt", System.currentTimeMillis()))
             cv.put("orderNo", bill.optString("orderNo"))
-            val db = openDb(context)
+            val db = BillDb.openDb(context)
             return try {
                 db.insert("bills", null, cv) > 0
             } catch (e: Exception) {
@@ -2061,7 +1524,7 @@ class MuyianBillCore private constructor() {
         /** 卡里的"最近分类"：只读账单里的 costType 字符串，原生不感知分类体系 */
         private fun recentCostTypes(context: Context, limit: Int): ArrayList<String> {
             val out = ArrayList<String>()
-            val db = openDb(context)
+            val db = BillDb.openDb(context)
             var cursor: Cursor? = null
             try {
                 cursor = db.query("bills", arrayOf("costType"), null, null, null, null, "id desc")
@@ -2078,6 +1541,172 @@ class MuyianBillCore private constructor() {
             return out
         }
 
+        private const val BACKUP_MAX_BYTES = 50L * 1024 * 1024
+        private val backupSaveLock = Any()
+        private var backupSaveState = "idle" // idle | saving | saved | cancelled | error
+        private var backupSaveError = ""
+        private var backupSaveName = ""
+        private var backupExportContent = ""
+
+        /**
+         * 导出：页面拼好的备份 JSON 先暂存在进程内，再拉起系统"另存为"Activity 写入用户选的位置。
+         * 内容不走 Intent extra，避免大备份超过 Binder 大小限制。
+         */
+        fun openBackupExport(context: Context, content: String, name: String): String {
+            var busy = false
+            synchronized(backupSaveLock) {
+                if (backupSaveState == "saving" && BackupSaveActivity.isAlive()) {
+                    busy = true
+                } else {
+                    backupExportContent = content
+                    backupSaveState = "saving"
+                    backupSaveError = ""
+                    backupSaveName = name
+                }
+            }
+            if (busy) {
+                val busyObj = JSONObject()
+                busyObj.put("success", false).put("error", "busy")
+                return busyObj.toString()
+            }
+            return try {
+                val intent = Intent(context, BackupSaveActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.putExtra(BackupSaveActivity.EXTRA_NAME, name)
+                context.startActivity(intent)
+                val ok = JSONObject()
+                ok.put("success", true)
+                ok.toString()
+            } catch (e: Exception) {
+                Log.w(TAG, "open backup export failed", e)
+                val reason = "start failed: " + e.javaClass.name
+                synchronized(backupSaveLock) {
+                    backupSaveState = "error"
+                    backupSaveError = reason
+                    backupExportContent = ""
+                }
+                val fail = JSONObject()
+                fail.put("success", false).put("error", reason)
+                fail.toString()
+            }
+        }
+
+        /** 页面侧轮询导出状态 {"state","name","error"} */
+        fun getBackupSaveState(context: Context): String {
+            val o = JSONObject()
+            o.put("state", backupSaveState)
+            o.put("name", backupSaveName)
+            o.put("error", backupSaveError)
+            return o.toString()
+        }
+
+        /** BackupSaveActivity 读取待写内容 */
+        fun backupContent(): String {
+            return backupExportContent
+        }
+
+        fun onBackupSaved(name: String) {
+            synchronized(backupSaveLock) {
+                backupSaveState = "saved"
+                if (name.isNotEmpty()) backupSaveName = name
+                backupExportContent = ""
+            }
+        }
+
+        fun onBackupSaveCancelled() {
+            synchronized(backupSaveLock) {
+                backupSaveState = "cancelled"
+                backupExportContent = ""
+            }
+        }
+
+        fun onBackupSaveError(message: String) {
+            synchronized(backupSaveLock) {
+                backupSaveState = "error"
+                backupSaveError = message
+                backupExportContent = ""
+            }
+        }
+
+        /** 读取备份文件文本（UTF-8），超过 50MB 拒绝，返回 {"ok","text","error"} */
+        fun readBackupText(context: Context, path: String): String {
+            val result = JSONObject()
+            try {
+                val file = File(path)
+                if (!file.exists() || file.length() == 0L) {
+                    result.put("ok", false).put("error", "文件不存在或为空")
+                    return result.toString()
+                }
+                if (file.length() > BACKUP_MAX_BYTES) {
+                    result.put("ok", false).put("error", "备份文件过大（超过 50MB）")
+                    return result.toString()
+                }
+                val ins = FileInputStream(file)
+                val bos = ByteArrayOutputStream()
+                try {
+                    val buf = ByteArray(64 * 1024)
+                    var n = ins.read(buf)
+                    while (n >= 0) {
+                        bos.write(buf, 0, n)
+                        n = ins.read(buf)
+                    }
+                } finally {
+                    ins.close()
+                }
+                result.put("ok", true)
+                result.put("text", String(bos.toByteArray(), Charsets.UTF_8))
+            } catch (e: Exception) {
+                Log.e(TAG, "read backup text failed", e)
+                result.put("ok", false).put("error", "读取文件失败")
+            }
+            return result.toString()
+        }
+
+        /** 账单写入的公开入口：实现委托给 BillDb。 */
+        @JvmStatic
+        fun saveBillEx(
+            context: Context, date: String, money: String, isIncome: Boolean,
+            bankName: String, costType: String, orderRemark: String,
+            reimb: Boolean, starred: Boolean
+        ): String = BillDb.saveBillEx(
+            context, date, money, isIncome, bankName, costType, orderRemark, reimb, starred
+        )
+
+        @JvmStatic
+        fun updateBill(
+            context: Context, id: String, date: String, money: String, isIncome: Boolean,
+            bankName: String, costType: String, orderRemark: String,
+            reimb: Boolean, starred: Boolean
+        ): String = BillDb.updateBill(
+            context, id, date, money, isIncome, bankName, costType, orderRemark, reimb, starred
+        )
+
+        @JvmStatic
+        fun getYearBills(context: Context, year: String): String = BillDb.getYearBills(context, year)
+
+        @JvmStatic
+        fun getMonthBills(context: Context, year: String, month: String): String =
+            BillDb.getMonthBills(context, year, month)
+
+        @JvmStatic
+        fun deleteBill(context: Context, id: String): Boolean = BillDb.deleteBill(context, id)
+
+        @JvmStatic
+        fun countExistingOrders(context: Context, orderNosJson: String): String =
+            BillDb.countExistingOrders(context, orderNosJson)
+
+        @JvmStatic
+        fun commitImportBills(context: Context, billsJson: String): String =
+            BillDb.commitImportBills(context, billsJson)
+
+        @JvmStatic
+        fun commitBackupBills(context: Context, billsJson: String): String =
+            BillDb.commitBackupBills(context, billsJson)
+
+        @JvmStatic
+        fun getAllBills(context: Context, offset: String, limit: String): String =
+            BillDb.getAllBills(context, offset, limit)
+
         @JvmStatic
         fun saveManualBill(
             context: Context, money: String, isIncome: Boolean,
@@ -2093,194 +1722,6 @@ class MuyianBillCore private constructor() {
          * @param date "YYYY-MM-DD"
          * @return {"success":true,"id":n}
          */
-        @JvmStatic
-        fun saveBillEx(
-            context: Context, date: String, money: String, isIncome: Boolean,
-            bankName: String, costType: String, orderRemark: String,
-            reimb: Boolean, starred: Boolean
-        ): String {
-            val result = JSONObject()
-            val amount = try {
-                money.trim().toDouble()
-            } catch (e: NumberFormatException) {
-                result.put("success", false).put("error", "invalid money")
-                return result.toString()
-            }
-            if (amount <= 0) {
-                result.put("success", false).put("error", "invalid money")
-                return result.toString()
-            }
-            val now = System.currentTimeMillis()
-            val nowCal = Calendar.getInstance()
-            nowCal.timeInMillis = now
-            var cal = nowCal
-            val dateTrim = date.trim()
-            if (dateTrim.isNotEmpty()) {
-                val parts = dateSplit(dateTrim)
-                if (parts == null) {
-                    result.put("success", false).put("error", "invalid date")
-                    return result.toString()
-                }
-                cal = Calendar.getInstance()
-                cal.set(parts[0], parts[1] - 1, parts[2], 12, 0, 0)
-            }
-            val cv = ContentValues()
-            cv.put("year", cal.get(Calendar.YEAR))
-            cv.put("month", cal.get(Calendar.MONTH) + 1)
-            cv.put("day", cal.get(Calendar.DAY_OF_MONTH))
-            cv.put("clock", SimpleDateFormat("M月d日 HH:mm", Locale.CHINA).format(Date(now)))
-            cv.put("money", if (isIncome) amount else -amount)
-            cv.put("bankName", bankName)
-            cv.put("costType", if (isIncome) "收入" else if (costType.isEmpty()) "消费" else costType)
-            cv.put("orderRemark", orderRemark)
-            cv.put("source", "manual")
-            cv.put("sourcePkg", "")
-            cv.put("createdAt", now)
-            cv.put("reimb", if (reimb) 1 else 0)
-            cv.put("starred", if (starred) 1 else 0)
-            val db = openDb(context)
-            val id = try {
-                db.insert("bills", null, cv)
-            } finally {
-                db.close()
-            }
-            result.put("success", id > 0).put("id", id)
-            return result.toString()
-        }
-
-        /**
-         * 编辑已入账账单（保留 source/sourcePkg/createdAt）。
-         * @param date "YYYY-MM-DD"
-         * @return {"success":true}
-         */
-        @JvmStatic
-        fun updateBill(
-            context: Context, id: String, date: String, money: String, isIncome: Boolean,
-            bankName: String, costType: String, orderRemark: String,
-            reimb: Boolean, starred: Boolean
-        ): String {
-            val result = JSONObject()
-            val amount = try {
-                money.trim().toDouble()
-            } catch (e: NumberFormatException) {
-                result.put("success", false).put("error", "invalid money")
-                return result.toString()
-            }
-            if (amount <= 0) {
-                result.put("success", false).put("error", "invalid money")
-                return result.toString()
-            }
-            val dateTrim = date.trim()
-            val parts = dateSplit(dateTrim)
-            if (parts == null) {
-                result.put("success", false).put("error", "invalid date")
-                return result.toString()
-            }
-            val cv = ContentValues()
-            cv.put("year", parts[0])
-            cv.put("month", parts[1])
-            cv.put("day", parts[2])
-            cv.put("money", if (isIncome) amount else -amount)
-            cv.put("bankName", bankName)
-            cv.put("costType", if (isIncome) "收入" else if (costType.isEmpty()) "消费" else costType)
-            cv.put("orderRemark", orderRemark)
-            cv.put("reimb", if (reimb) 1 else 0)
-            cv.put("starred", if (starred) 1 else 0)
-            val db = openDb(context)
-            val updated = try {
-                db.update("bills", cv, "id=?", arrayOf(id.trim()))
-            } finally {
-                db.close()
-            }
-            result.put("success", updated > 0)
-            return result.toString()
-        }
-
-        private fun dateSplit(date: String): IntArray? {
-            val m = Pattern.compile("(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})").matcher(date)
-            if (!m.find()) return null
-            val y = m.group(1)!!.toInt()
-            val mo = m.group(2)!!.toInt()
-            val d = m.group(3)!!.toInt()
-            if (mo < 1 || mo > 12 || d < 1 || d > 31) return null
-            return intArrayOf(y, mo, d)
-        }
-
-        @JvmStatic
-        fun getYearBills(context: Context, year: String): String {
-            val db = openDb(context)
-            var cursor: Cursor? = null
-            val array = JSONArray()
-            try {
-                cursor = db.query(
-                    "bills", null,
-                    "year=?",
-                    arrayOf(year.trim()),
-                    null, null, "id desc"
-                )
-                var count = 0
-                while (cursor.moveToNext() && count < 5000) {
-                    array.put(billJson(cursor))
-                    count++
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "query year bills failed", e)
-            } finally {
-                cursor?.close()
-                db.close()
-            }
-            return array.toString()
-        }
-
-        @JvmStatic
-        fun getMonthBills(context: Context, year: String, month: String): String {
-            val db = openDb(context)
-            var cursor: Cursor? = null
-            val array = JSONArray()
-            try {
-                cursor = db.query(
-                    "bills", null,
-                    "year=? and month=?",
-                    arrayOf(year.trim(), month.trim()),
-                    null, null, "id desc"
-                )
-                var count = 0
-                while (cursor.moveToNext() && count < 500) {
-                    array.put(billJson(cursor))
-                    count++
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "query month bills failed", e)
-            } finally {
-                cursor?.close()
-                db.close()
-            }
-            return array.toString()
-        }
-
-        @JvmStatic
-        fun deleteBill(context: Context, id: String): Boolean {
-            val db = openDb(context)
-            return try {
-                db.delete("bills", "id=?", arrayOf(id.trim())) > 0
-            } catch (e: Exception) {
-                Log.e(TAG, "delete bill failed", e)
-                false
-            } finally {
-                db.close()
-            }
-        }
-
-        /** 测试注入：把一段文本当作"支付成功"页面跑一遍解析流水线 */
-        @JvmStatic
-        fun emitTestBill(context: Context, text: String): String {
-            val lines = ArrayList<String>()
-            for (line in text.split('\n')) {
-                lines.add(line)
-            }
-            return handleScreen(context, "com.eg.android.AlipayGphone", lines, true)
-        }
-
         // ---------- 钱迹 Excel 导入 ----------
         // 选文件由 ImportPickActivity 中转（SAF，无需存储权限）：选中的文件拷到应用私有目录
         // qianji_import.xlsx，路径与状态放在静态字段，页面侧用同步 API 轮询读取。
@@ -2399,8 +1840,7 @@ class MuyianBillCore private constructor() {
                     result.put("ok", false).put("error", "文件不存在或为空")
                     return result.toString()
                 }
-                val shared = readSharedStringsFromFile(file)
-                val sheet = readFirstSheetFromFile(file, shared)
+                val sheet = XlsxReader.read(file)
                 if (sheet.isEmpty()) {
                     result.put("ok", false).put("error", "表格里没有内容")
                     return result.toString()
@@ -2416,7 +1856,7 @@ class MuyianBillCore private constructor() {
                 val header = ArrayList<String>()
                 var c = 0
                 while (c < width) {
-                    header.add(cellOf(headerRow, c))
+                    header.add(XlsxReader.cell(headerRow, c))
                     c = c + 1
                 }
                 val data = ArrayList<ArrayList<String>>()
@@ -2429,7 +1869,7 @@ class MuyianBillCore private constructor() {
                     val values = ArrayList<String>()
                     c = 0
                     while (c < width) {
-                        values.add(cellOf(row, c))
+                        values.add(XlsxReader.cell(row, c))
                         c = c + 1
                     }
                     data.add(values)
@@ -2484,1446 +1924,21 @@ class MuyianBillCore private constructor() {
             return out.toString()
         }
 
-        /** 统计一组钱迹单号在库中已存在的条数：{"count":n} */
-        @JvmStatic
-        fun countExistingOrders(context: Context, orderNosJson: String): String {
-            var count = 0
-            val arr = try {
-                JSONArray(orderNosJson)
-            } catch (e: Exception) {
-                null
-            }
-            if (arr != null) {
-                val db = openDb(context)
-                var cursor: Cursor? = null
-                try {
-                    val existing = HashSet<String>()
-                    cursor = db.rawQuery(
-                        "select orderNo from bills where orderNo is not null and orderNo != ''", null
-                    )
-                    while (cursor.moveToNext()) {
-                        val v = cursor.getString(0)
-                        if (v != null && v.isNotEmpty()) existing.add(v)
-                    }
-                    var i = 0
-                    while (i < arr.length()) {
-                        val v = arr.optString(i, "").trim()
-                        i = i + 1
-                        if (v.isNotEmpty() && existing.contains(v)) count = count + 1
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "count existing orders failed", e)
-                } finally {
-                    cursor?.close()
-                    db.close()
-                }
-            }
-            val out = JSONObject()
-            out.put("count", count)
-            return out.toString()
-        }
-
-        /**
-         * 批量入库：billsJson 是页面映射好的账单数组（金额已带符号，收入 costType 由页面固定为"收入"）。
-         * 按 orderNo（钱迹单号）去重：库里已有或本批已插入的都跳过。单事务，返回 {"success","inserted","skipped"}。
-         */
-        @JvmStatic
-        fun commitImportBills(context: Context, billsJson: String): String {
-            val result = JSONObject()
-            val arr = try {
-                JSONArray(billsJson)
-            } catch (e: Exception) {
-                null
-            }
-            if (arr == null) {
-                result.put("success", false).put("error", "bad json")
-                return result.toString()
-            }
-            var inserted = 0
-            var skipped = 0
-            val db = openDb(context)
-            try {
-                db.beginTransaction()
-                try {
-                    val existing = HashSet<String>()
-                    var cursor: Cursor? = null
-                    try {
-                        cursor = db.rawQuery(
-                            "select orderNo from bills where orderNo is not null and orderNo != ''", null
-                        )
-                        while (cursor.moveToNext()) {
-                            val v = cursor.getString(0)
-                            if (v != null && v.isNotEmpty()) existing.add(v)
-                        }
-                    } finally {
-                        cursor?.close()
-                    }
-                    var i = 0
-                    while (i < arr.length()) {
-                        val o = arr.optJSONObject(i)
-                        i = i + 1
-                        if (o == null) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        val money = o.optString("money", "0").trim().toDoubleOrNull() ?: 0.0
-                        if (money == 0.0) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        val orderNo = o.optString("orderNo", "")
-                        if (orderNo.isNotEmpty() && existing.contains(orderNo)) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        val cv = ContentValues()
-                        cv.put("year", o.optInt("year"))
-                        cv.put("month", o.optInt("month"))
-                        cv.put("day", o.optInt("day"))
-                        cv.put("clock", o.optString("clock"))
-                        cv.put("money", money)
-                        cv.put("bankName", o.optString("bankName", "钱迹"))
-                        cv.put("costType", o.optString("costType", "消费"))
-                        cv.put("orderRemark", o.optString("orderRemark", ""))
-                        cv.put("source", "qianji")
-                        cv.put("sourcePkg", "")
-                        cv.put("createdAt", o.optLong("createdAt", System.currentTimeMillis()))
-                        cv.put("reimb", o.optInt("reimb", 0))
-                        cv.put("starred", o.optInt("starred", 0))
-                        cv.put("orderNo", orderNo)
-                        db.insert("bills", null, cv)
-                        if (orderNo.isNotEmpty()) existing.add(orderNo)
-                        inserted = inserted + 1
-                    }
-                    db.setTransactionSuccessful()
-                } finally {
-                    db.endTransaction()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "commit import bills failed", e)
-                result.put("success", false).put("error", "db error")
-                return result.toString()
-            } finally {
-                db.close()
-            }
-            result.put("success", true)
-            result.put("inserted", inserted)
-            result.put("skipped", skipped)
-            return result.toString()
-        }
-
-        // ---------- 本应用备份（导出 / 恢复） ----------
-
-        private const val BACKUP_MAX_BYTES = 50L * 1024 * 1024
-        private val backupSaveLock = Any()
-        private var backupSaveState = "idle" // idle | saving | saved | cancelled | error
-        private var backupSaveError = ""
-        private var backupSaveName = ""
-        private var backupExportContent = ""
-
-        /**
-         * 导出：页面拼好的备份 JSON 先暂存在进程内，再拉起系统"另存为"Activity 写入用户选的位置。
-         * 内容不走 Intent extra，避免大备份超过 Binder 大小限制。
-         */
-        @JvmStatic
-        fun openBackupExport(context: Context, content: String, name: String): String {
-            var busy = false
-            synchronized(backupSaveLock) {
-                if (backupSaveState == "saving" && BackupSaveActivity.isAlive()) {
-                    busy = true
-                } else {
-                    backupExportContent = content
-                    backupSaveState = "saving"
-                    backupSaveError = ""
-                    backupSaveName = name
-                }
-            }
-            if (busy) {
-                val busyObj = JSONObject()
-                busyObj.put("success", false).put("error", "busy")
-                return busyObj.toString()
-            }
-            return try {
-                val intent = Intent(context, BackupSaveActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                intent.putExtra(BackupSaveActivity.EXTRA_NAME, name)
-                context.startActivity(intent)
-                val ok = JSONObject()
-                ok.put("success", true)
-                ok.toString()
-            } catch (e: Exception) {
-                Log.w(TAG, "open backup export failed", e)
-                val reason = "start failed: " + e.javaClass.name
-                synchronized(backupSaveLock) {
-                    backupSaveState = "error"
-                    backupSaveError = reason
-                    backupExportContent = ""
-                }
-                val fail = JSONObject()
-                fail.put("success", false).put("error", reason)
-                fail.toString()
-            }
-        }
-
-        /** 页面侧轮询导出状态 {"state","name","error"} */
-        @JvmStatic
-        fun getBackupSaveState(context: Context): String {
-            val o = JSONObject()
-            o.put("state", backupSaveState)
-            o.put("name", backupSaveName)
-            o.put("error", backupSaveError)
-            return o.toString()
-        }
-
-        /** BackupSaveActivity 读取待写内容 */
-        @JvmStatic
-        fun backupContent(): String {
-            return backupExportContent
-        }
-
-        @JvmStatic
-        fun onBackupSaved(name: String) {
-            synchronized(backupSaveLock) {
-                backupSaveState = "saved"
-                if (name.isNotEmpty()) backupSaveName = name
-                backupExportContent = ""
-            }
-        }
-
-        @JvmStatic
-        fun onBackupSaveCancelled() {
-            synchronized(backupSaveLock) {
-                backupSaveState = "cancelled"
-                backupExportContent = ""
-            }
-        }
-
-        @JvmStatic
-        fun onBackupSaveError(message: String) {
-            synchronized(backupSaveLock) {
-                backupSaveState = "error"
-                backupSaveError = message
-                backupExportContent = ""
-            }
-        }
-
-        /** 读取备份文件文本（UTF-8），超过 50MB 拒绝，返回 {"ok","text","error"} */
-        @JvmStatic
-        fun readBackupText(context: Context, path: String): String {
-            val result = JSONObject()
-            try {
-                val file = File(path)
-                if (!file.exists() || file.length() == 0L) {
-                    result.put("ok", false).put("error", "文件不存在或为空")
-                    return result.toString()
-                }
-                if (file.length() > BACKUP_MAX_BYTES) {
-                    result.put("ok", false).put("error", "备份文件过大（超过 50MB）")
-                    return result.toString()
-                }
-                val ins = FileInputStream(file)
-                val bos = ByteArrayOutputStream()
-                try {
-                    val buf = ByteArray(64 * 1024)
-                    var n = ins.read(buf)
-                    while (n >= 0) {
-                        bos.write(buf, 0, n)
-                        n = ins.read(buf)
-                    }
-                } finally {
-                    ins.close()
-                }
-                result.put("ok", true)
-                result.put("text", String(bos.toByteArray(), Charsets.UTF_8))
-            } catch (e: Exception) {
-                Log.e(TAG, "read backup text failed", e)
-                result.put("ok", false).put("error", "读取文件失败")
-            }
-            return result.toString()
-        }
-
-        /**
-         * 备份恢复用：按原 id 回填账单。库里已有同 id 或同单号的跳过，
-         * 因此重复恢复是幂等的；id 为空时退回自增。单事务，返回 {"success","inserted","skipped"}。
-         */
-        @JvmStatic
-        fun commitBackupBills(context: Context, billsJson: String): String {
-            val result = JSONObject()
-            val arr = try {
-                JSONArray(billsJson)
-            } catch (e: Exception) {
-                null
-            }
-            if (arr == null) {
-                result.put("success", false).put("error", "bad json")
-                return result.toString()
-            }
-            var inserted = 0
-            var skipped = 0
-            val db = openDb(context)
-            try {
-                db.beginTransaction()
-                try {
-                    val existingIds = HashSet<String>()
-                    val existingOrders = HashSet<String>()
-                    var cursor: Cursor? = null
-                    try {
-                        cursor = db.rawQuery("select id, orderNo from bills", null)
-                        while (cursor.moveToNext()) {
-                            existingIds.add("" + cursor.getLong(0))
-                            val o = cursor.getString(1)
-                            if (o != null && o.isNotEmpty()) existingOrders.add(o)
-                        }
-                    } finally {
-                        cursor?.close()
-                    }
-                    var i = 0
-                    while (i < arr.length()) {
-                        val o = arr.optJSONObject(i)
-                        i = i + 1
-                        if (o == null) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        val money = o.optDouble("money", 0.0)
-                        if (money == 0.0 || money.isNaN()) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        val id = o.optLong("id", 0L)
-                        val orderNo = o.optString("orderNo", "")
-                        if (id > 0 && existingIds.contains("" + id)) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        if (orderNo.isNotEmpty() && existingOrders.contains(orderNo)) {
-                            skipped = skipped + 1
-                            continue
-                        }
-                        val cv = ContentValues()
-                        if (id > 0) cv.put("id", id)
-                        cv.put("year", o.optInt("year"))
-                        cv.put("month", o.optInt("month"))
-                        cv.put("day", o.optInt("day"))
-                        cv.put("clock", o.optString("clock"))
-                        cv.put("money", money)
-                        cv.put("bankName", o.optString("bankName"))
-                        cv.put("costType", o.optString("costType"))
-                        cv.put("orderRemark", o.optString("orderRemark", ""))
-                        cv.put("source", o.optString("source", "manual"))
-                        cv.put("sourcePkg", o.optString("sourcePkg", ""))
-                        cv.put("createdAt", o.optLong("createdAt", System.currentTimeMillis()))
-                        cv.put("reimb", o.optInt("reimb", 0))
-                        cv.put("starred", o.optInt("starred", 0))
-                        cv.put("orderNo", orderNo)
-                        val rowId = db.insert("bills", null, cv)
-                        if (rowId > 0) {
-                            inserted = inserted + 1
-                            if (id > 0) existingIds.add("" + id)
-                            if (orderNo.isNotEmpty()) existingOrders.add(orderNo)
-                        } else {
-                            skipped = skipped + 1
-                        }
-                    }
-                    db.setTransactionSuccessful()
-                } finally {
-                    db.endTransaction()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "commit backup bills failed", e)
-                result.put("success", false).put("error", "db error")
-                return result.toString()
-            } finally {
-                db.close()
-            }
-            result.put("success", true)
-            result.put("inserted", inserted)
-            result.put("skipped", skipped)
-            return result.toString()
-        }
-
-        /** 全量账单（导出用）：按 id 升序分页，limit 上限 2000，返回 {"total":n,"rows":[…]} */
-        @JvmStatic
-        fun getAllBills(context: Context, offset: String, limit: String): String {
-            val startRaw = offset.trim().toIntOrNull() ?: 0
-            val start = if (startRaw < 0) 0 else startRaw
-            var count = limit.trim().toIntOrNull() ?: 1000
-            if (count < 1) count = 1
-            if (count > 2000) count = 2000
-            val out = JSONObject()
-            val arr = JSONArray()
-            val db = openDb(context)
-            var cursor: Cursor? = null
-            try {
-                cursor = db.rawQuery(
-                    "select * from bills order by id asc limit " + count + " offset " + start, null
-                )
-                while (cursor.moveToNext()) arr.put(billJson(cursor))
-                out.put("total", countAllBills(db))
-            } catch (e: Exception) {
-                Log.e(TAG, "query all bills failed", e)
-            } finally {
-                cursor?.close()
-                db.close()
-            }
-            out.put("rows", arr)
-            return out.toString()
-        }
-
-        private fun countAllBills(db: SQLiteDatabase): Int {
-            var cursor: Cursor? = null
-            try {
-                cursor = db.rawQuery("select count(*) from bills", null)
-                if (cursor.moveToFirst()) return cursor.getInt(0)
-            } catch (e: Exception) {
-                Log.e(TAG, "count bills failed", e)
-            } finally {
-                cursor?.close()
-            }
-            return 0
-        }
-
-        private fun cellOf(row: HashMap<Int, String>, col: Int): String {
-            if (col < 0) return ""
-            return row.get(col) ?: ""
-        }
-
-        /** "A1"/"AB12" 里的字母部分转 0 基列号 */
-        private fun colIndexOf(ref: String?): Int {
-            if (ref == null || ref.isEmpty()) return 0
-            var n = 0
-            var i = 0
-            while (i < ref.length) {
-                val c = ref.get(i)
-                if (c < 'A' || c > 'Z') break
-                n = n * 26 + (c.code - 64)
-                i = i + 1
-            }
-            return n - 1
-        }
-
-        private fun openZipAt(file: File): ZipInputStream {
-            return ZipInputStream(FileInputStream(file))
-        }
-
-        private fun readSharedStringsFromFile(file: File): ArrayList<String> {
-            val out = ArrayList<String>()
-            val zis = openZipAt(file)
-            try {
-                var entry: ZipEntry? = zis.nextEntry
-                while (entry != null) {
-                    if (entry.name == "xl/sharedStrings.xml") {
-                        out.addAll(readSharedStrings(zis))
-                        break
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-            } finally {
-                zis.close()
-            }
-            return out
-        }
-
-        private fun readFirstSheetFromFile(file: File, shared: ArrayList<String>): ArrayList<HashMap<Int, String>> {
-            val zis = openZipAt(file)
-            try {
-                var entry: ZipEntry? = zis.nextEntry
-                while (entry != null) {
-                    val name = entry.name ?: ""
-                    if (name.startsWith("xl/worksheets/") && name.endsWith(".xml")) {
-                        return readSheetRows(zis, shared)
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-            } finally {
-                zis.close()
-            }
-            return ArrayList()
-        }
-
-        /** sharedStrings.xml：把每个 <si> 的所有 <t> 文本拼成一个字符串 */
-        private fun readSharedStrings(input: InputStream): ArrayList<String> {
-            val out = ArrayList<String>()
-            val parser = Xml.newPullParser()
-            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-            parser.setInput(input, null)
-            var inSi = false
-            var inT = false
-            val buf = StringBuilder()
-            var ev = parser.eventType
-            while (ev != XmlPullParser.END_DOCUMENT) {
-                if (ev == XmlPullParser.START_TAG) {
-                    val n = parser.name
-                    if (n == "si") {
-                        inSi = true
-                        buf.setLength(0)
-                    } else if (n == "t") {
-                        inT = true
-                    }
-                } else if (ev == XmlPullParser.TEXT) {
-                    if (inSi && inT) buf.append(parser.text)
-                } else if (ev == XmlPullParser.END_TAG) {
-                    val n = parser.name
-                    if (n == "t") {
-                        inT = false
-                    } else if (n == "si") {
-                        inSi = false
-                        out.add(buf.toString())
-                    }
-                }
-                ev = parser.next()
-            }
-            return out
-        }
-
-        /**
-         * sheet XML：按 <row> 聚出 {列号: 文本}。t="s" 是 sharedStrings 下标，
-         * t="inlineStr" 的文本在 <is><t> 里，其余原样取 <v>。
-         */
-        private fun readSheetRows(input: InputStream, shared: ArrayList<String>): ArrayList<HashMap<Int, String>> {
-            val rows = ArrayList<HashMap<Int, String>>()
-            val parser = Xml.newPullParser()
-            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-            parser.setInput(input, null)
-            var cur: HashMap<Int, String>? = null
-            var col = 0
-            var cellType = ""
-            var inV = false
-            var inT = false
-            val buf = StringBuilder()
-            var ev = parser.eventType
-            while (ev != XmlPullParser.END_DOCUMENT) {
-                if (ev == XmlPullParser.START_TAG) {
-                    val n = parser.name
-                    if (n == "row") {
-                        cur = HashMap()
-                    } else if (n == "c" && cur != null) {
-                        col = colIndexOf(parser.getAttributeValue(null, "r"))
-                        cellType = parser.getAttributeValue(null, "t") ?: ""
-                        buf.setLength(0)
-                        inV = false
-                        inT = false
-                    } else if (n == "v") {
-                        inV = true
-                    } else if (n == "t") {
-                        inT = true
-                    }
-                } else if (ev == XmlPullParser.TEXT) {
-                    if (inV || inT) buf.append(parser.text)
-                } else if (ev == XmlPullParser.END_TAG) {
-                    val n = parser.name
-                    if (n == "v") {
-                        inV = false
-                    } else if (n == "t") {
-                        inT = false
-                    } else if (n == "c" && cur != null) {
-                        var v = buf.toString()
-                        if (cellType == "s") {
-                            val idx = v.toIntOrNull() ?: -1
-                            v = if (idx >= 0 && idx < shared.size) shared.get(idx) else ""
-                        }
-                        cur.put(col, v)
-                    } else if (n == "row" && cur != null) {
-                        rows.add(cur)
-                        cur = null
-                    }
-                }
-                ev = parser.next()
-            }
-            return rows
-        }
-
         // ---------- 通知与存储基建 ----------
 
-        /** 待确认通知渠道：IMPORTANCE_HIGH 才能在锁屏/后台弹出提醒 */
-        private fun createPendingChannel(context: Context) {
-            if (Build.VERSION.SDK_INT < 26) return
-            try {
-                val nm = context.getSystemService("notification") as NotificationManager
-                val channel = NotificationChannel(
-                    CHANNEL_PENDING, "待确认账单", NotificationManager.IMPORTANCE_HIGH
-                )
-                channel.description = "确认弹层无法弹出时提醒你补记这一笔；点开后仍进确认弹层"
-                nm.createNotificationChannel(channel)
-            } catch (e: Exception) {
-                Log.w(TAG, "create pending channel failed", e)
-            }
-        }
+        private fun nextPendingNoticeId(context: Context): Int = PendingNotices.nextId(context)
 
-        /** 生成互不冲突的通知 ID：正常拉起的弹层也会预占一个，供 Activity 取消兜底通知 */
-        private fun nextPendingNoticeId(context: Context): Int {
-            var id = 0
-            synchronized(sheetLock) {
-                // 序号落盘：进程重启后再发通知不能复用仍挂在通知栏里的旧 ID，否则旧通知会被覆盖
-                var seq = pendingNoticeSeq
-                try {
-                    seq = prefs(context).getInt(KEY_NOTICE_SEQ, pendingNoticeSeq)
-                } catch (e: Exception) {
-                    // 读失败退回进程内序号
-                }
-                seq += 1
-                if (seq > 100000) seq = 1
-                pendingNoticeSeq = seq
-                try {
-                    prefs(context).edit().putInt(KEY_NOTICE_SEQ, seq).apply()
-                } catch (e: Exception) {
-                    // 写失败只影响重启后的 ID 连续性，不影响本次发通知
-                }
-                id = PENDING_NOTICE_BASE_ID + seq
-            }
-            return id
-        }
-
-        /**
-         * 弹层拉不起来时的通知兜底（熄屏/锁屏、ROM 拦截后台 Activity、启动超时）。
-         * 通知只负责把用户带回 BillSheetActivity，点击后的保存/取消仍由弹层完成，
-         * 通知本身不写库、不提供"直接入账"入口。
-         */
         private fun postPendingNotice(context: Context, bill: JSONObject, noticeId: Int) {
-            try {
-                createPendingChannel(context)
-                val nm = context.getSystemService("notification") as NotificationManager
-                val cats = JSONArray()
-                for (c in recentCostTypes(context, 10)) cats.put(c)
-                val intent = Intent(context, BillSheetActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                intent.putExtra(BillSheetActivity.EXTRA_BILL, bill.toString())
-                intent.putExtra(BillSheetActivity.EXTRA_CATS, cats.toString())
-                intent.putExtra(BillSheetActivity.EXTRA_ACCENT, getCardThemeColor(context))
-                intent.putExtra(BillSheetActivity.EXTRA_NOTICE_ID, noticeId)
-                val pi = PendingIntent.getActivity(
-                    context, noticeId, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                nm.notify(noticeId, buildPendingNotice(context, bill, pi))
-            } catch (e: Exception) {
-                // Android 13+ 未授予 POST_NOTIFICATIONS 时 notify 会静默失败，只能记日志
-                Log.w(TAG, "post pending notice failed", e)
-            }
-        }
-
-        /** 锁屏上只显示"有待确认账单"，金额放在 private 版本里，避免锁屏泄露 */
-        @Suppress("DEPRECATION") // 兼容 API < 26 的 Notification.Builder(Context) / setPriority()
-        private fun buildPendingNotice(context: Context, bill: JSONObject, pi: PendingIntent): Notification {
-            val money = bill.optDouble("money", 0.0)
-            val typeText = if (money >= 0) "收入" else "支出"
-            val amountText = String.format(Locale.US, "%.2f", Math.abs(money))
-            val bank = bill.optString("bankName")
-            val clock = bill.optString("clock")
-            val title = "有一笔待确认" + typeText
-            var text = "¥" + amountText
-            if (bank.isNotEmpty()) text = text + " · " + bank
-            if (clock.isNotEmpty()) text = text + " · " + clock
-
-            val builder = if (Build.VERSION.SDK_INT >= 26) {
-                Notification.Builder(context, CHANNEL_PENDING)
-            } else {
-                Notification.Builder(context)
-            }
-            builder.setContentTitle(title)
-                .setContentText(text)
-                .setStyle(Notification.BigTextStyle().bigText(text))
-                .setSmallIcon(context.applicationInfo.icon)
-                .setAutoCancel(true)
-                .setContentIntent(pi)
-                .setCategory(Notification.CATEGORY_REMINDER)
-                .setVisibility(Notification.VISIBILITY_PRIVATE)
-
-            val publicBuilder = if (Build.VERSION.SDK_INT >= 26) {
-                Notification.Builder(context, CHANNEL_PENDING)
-            } else {
-                Notification.Builder(context)
-            }
-            publicBuilder.setContentTitle("有一笔待确认账单")
-                .setContentText("点此打开确认弹层")
-                .setSmallIcon(context.applicationInfo.icon)
-                .setAutoCancel(true)
-                .setContentIntent(pi)
-            builder.setPublicVersion(publicBuilder.build())
-
-            if (Build.VERSION.SDK_INT < 26) {
-                builder.setPriority(Notification.PRIORITY_HIGH)
-                builder.setDefaults(Notification.DEFAULT_ALL)
-            } else {
-                builder.setTimeoutAfter(PENDING_NOTICE_TTL_MS)
-            }
-            return builder.build()
-        }
-
-        /** 弹层已经出现或这一笔已处理完：撤掉对应的兜底通知 */
-        @JvmStatic
-        fun cancelPendingNotice(context: Context, noticeId: Int) {
-            if (noticeId <= 0) return
-            try {
-                val nm = context.getSystemService("notification") as NotificationManager
-                nm.cancel(noticeId)
-            } catch (e: Exception) {
-                Log.w(TAG, "cancel pending notice failed", e)
-            }
-        }
-
-        private fun openDb(context: Context): SQLiteDatabase {
-            val db = SQLiteDatabase.openOrCreateDatabase(
-                context.getFilesDir().getAbsolutePath() + "/" + DB_NAME, null
+            PendingNotices.post(
+                context, bill, noticeId,
+                recentCostTypes(context, 10), getCardThemeColor(context)
             )
-            if (schemaReady) return db
-            synchronized(dbLock) {
-                if (!schemaReady) {
-                    db.execSQL(
-                        "create table if not exists bills(" +
-                            "id integer primary key autoincrement," +
-                            "year integer,month integer,day integer,clock text," +
-                            "money real,bankName text,costType text,orderRemark text," +
-                            "source text,sourcePkg text,createdAt integer)"
-                    )
-                    // 旧库平滑迁移：报销 / 星标标记（不存在则补列，已存在则忽略报错）
-                    try {
-                        db.execSQL("alter table bills add column reimb integer default 0")
-                    } catch (e: Exception) {
-                        // column already exists
-                    }
-                    try {
-                        db.execSQL("alter table bills add column starred integer default 0")
-                    } catch (e: Exception) {
-                        // column already exists
-                    }
-                    // 订单/交易单号：单号去重与事后核对用，旧库补列
-                    try {
-                        db.execSQL("alter table bills add column orderNo text")
-                    } catch (e: Exception) {
-                        // column already exists
-                    }
-                    schemaReady = true
-                }
-            }
-            return db
         }
 
-        private fun billJson(cursor: Cursor): JSONObject {
-            val o = JSONObject()
-            o.put("id", cursor.getLong(cursor.getColumnIndex("id")))
-            o.put("year", cursor.getInt(cursor.getColumnIndex("year")))
-            o.put("month", cursor.getInt(cursor.getColumnIndex("month")))
-            o.put("day", cursor.getInt(cursor.getColumnIndex("day")))
-            o.put("clock", cursor.getString(cursor.getColumnIndex("clock")))
-            o.put("money", cursor.getDouble(cursor.getColumnIndex("money")))
-            o.put("bankName", cursor.getString(cursor.getColumnIndex("bankName")))
-            o.put("costType", cursor.getString(cursor.getColumnIndex("costType")))
-            o.put("orderRemark", cursor.getString(cursor.getColumnIndex("orderRemark")))
-            o.put("source", cursor.getString(cursor.getColumnIndex("source")))
-            o.put("sourcePkg", cursor.getString(cursor.getColumnIndex("sourcePkg")))
-            o.put("createdAt", cursor.getLong(cursor.getColumnIndex("createdAt")))
-            val reimbIdx = cursor.getColumnIndex("reimb")
-            val starredIdx = cursor.getColumnIndex("starred")
-            val orderIdx = cursor.getColumnIndex("orderNo")
-            o.put("reimb", if (reimbIdx >= 0) cursor.getInt(reimbIdx) else 0)
-            o.put("starred", if (starredIdx >= 0) cursor.getInt(starredIdx) else 0)
-            o.put("orderNo", if (orderIdx >= 0) (cursor.getString(orderIdx) ?: "") else "")
-            return o
-        }
+        @JvmStatic
+        fun cancelPendingNotice(context: Context, noticeId: Int) = PendingNotices.cancel(context, noticeId)
 
         private fun prefs(context: Context) =
             context.getSharedPreferences(PREFS_NAME, 0) // Context.MODE_PRIVATE
-    }
-}
-
-
-/**
- * 支付后的底部确认弹层。
- *
- * 用透明 Activity 代替悬浮窗：不用 WindowManager 绘制窗口；但 MIUI/HyperOS 仍要求
- * SYSTEM_ALERT_WINDOW 才允许无障碍服务在后台启动 Activity。
- * 布局全部用 Android 框架 View，不引入任何 UI 库；分类仍然只认账单里的 costType 字符串。
- * 弹层是唯一的确认入口：用户点保存才写库；取消/返回/超时/弹层显示后熄屏都直接丢弃这一笔。
- * 弹层从一开始就拉不起来（熄屏/锁屏/ROM 拦截）时，MuyianBillCore 会发一条待确认通知兜底，
- * 点开仍回到这里确认，通知本身不写库。
- */
-class BillSheetActivity : Activity() {
-
-    companion object {
-        const val EXTRA_BILL = "bill_json"
-        const val EXTRA_CATS = "cats_json"
-        const val EXTRA_ACCENT = "accent_color"
-        const val EXTRA_NOTICE_ID = "notice_id"
-        /** 无人操作时自动收起，避免弹层一直压在支付页上 */
-        private const val TIMEOUT_MS = 60 * 1000L
-
-        @Volatile
-        private var alive = false
-
-        /** 已经真正拉起过的通知 ID：启动看门狗用它区分"从未出现"和"出现后又被关掉" */
-        private val startedNoticeIds = ArrayList<Int>()
-
-        fun isAlive(): Boolean {
-            return alive
-        }
-
-        fun markStarted(noticeId: Int) {
-            if (noticeId <= 0) return
-            synchronized(startedNoticeIds) {
-                if (!startedNoticeIds.contains(noticeId)) startedNoticeIds.add(noticeId)
-                while (startedNoticeIds.size > 64) startedNoticeIds.removeAt(0)
-            }
-        }
-
-        fun wasStarted(noticeId: Int): Boolean {
-            if (noticeId <= 0) return false
-            var hit = false
-            synchronized(startedNoticeIds) {
-                hit = startedNoticeIds.contains(noticeId)
-            }
-            return hit
-        }
-    }
-
-    private val uiHandler = Handler(Looper.getMainLooper())
-    private var billJson = ""
-    private var income = false
-    private var costType = ""
-    private var accent = 0xFFF7A600.toInt()
-    private var accentTint = 0
-    private var amountInput: EditText? = null
-    private var remarkInput: EditText? = null
-    private var sheetHost: View? = null
-    private var dimView: View? = null
-    private var outChip: TextView? = null
-    private var inChip: TextView? = null
-    private val categoryChips = ArrayList<Pair<TextView, String>>()
-    private var closing = false
-    private var noticeId = 0
-    private var screenReceiver: BroadcastReceiver? = null
-    private val timeoutTask = Runnable { closeSheet() }
-    private val finishTask = Runnable { finish() }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        alive = true
-        val raw = intent?.getStringExtra(EXTRA_BILL) ?: ""
-        if (raw.isEmpty()) {
-            finish()
-            return
-        }
-
-        // 透明窗口：自己画遮罩，关掉系统自带的 dim
-        @Suppress("DEPRECATION")
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        if (Build.VERSION.SDK_INT >= 21) {
-            @Suppress("DEPRECATION")
-            window.statusBarColor = Color.TRANSPARENT
-            @Suppress("DEPRECATION")
-            window.navigationBarColor = Color.TRANSPARENT
-        }
-
-        val extraAccent = intent?.getIntExtra(EXTRA_ACCENT, 0xFFF7A600.toInt()) ?: 0xFFF7A600.toInt()
-        val catsRaw = intent?.getStringExtra(EXTRA_CATS) ?: "[]"
-        val extraNoticeId = intent?.getIntExtra(EXTRA_NOTICE_ID, 0) ?: 0
-        if (!bindBill(raw, catsRaw, extraAccent, extraNoticeId)) {
-            finish()
-            return
-        }
-        uiHandler.postDelayed(timeoutTask, TIMEOUT_MS)
-        registerScreenOff()
-    }
-
-    /** 绑定一笔账单并重建弹层内容：首次创建和通知点击换单共用 */
-    private fun bindBill(raw: String, catsRaw: String, accentValue: Int, noticeIdValue: Int): Boolean {
-        val parsed = try {
-            JSONObject(raw)
-        } catch (e: Exception) {
-            null
-        }
-        if (parsed == null) return false
-        billJson = raw
-        income = parsed.optDouble("money", 0.0) >= 0
-        costType = parsed.optString("costType")
-        accent = accentValue
-        accentTint = lighten(accent, 0.86f)
-        noticeId = noticeIdValue
-        if (noticeId > 0) {
-            markStarted(noticeId)
-            // 弹层已经出现，撤掉兜底通知并清掉"被系统拦截"标记
-            MuyianBillCore.cancelPendingNotice(this, noticeId)
-            MuyianBillCore.clearPopupBlocked(this)
-        }
-        val cats = parseCats(catsRaw)
-        categoryChips.clear()
-        setContentView(buildRoot(parsed, cats))
-        playEnter()
-        return true
-    }
-
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        if (intent == null) return
-        val raw = intent.getStringExtra(EXTRA_BILL) ?: return
-        val extraNoticeId = intent.getIntExtra(EXTRA_NOTICE_ID, 0)
-        MuyianBillCore.cancelPendingNotice(this, extraNoticeId)
-        // 当前弹层还在：放回队列，等这一笔处理完再弹，不覆盖用户正在编辑的内容
-        MuyianBillCore.enqueueSheetBill(this, raw)
-    }
-
-    @Suppress("OVERRIDE_DEPRECATION")
-    override fun onBackPressed() {
-        closeSheet()
-    }
-
-    override fun onDestroy() {
-        alive = false
-        uiHandler.removeCallbacks(timeoutTask)
-        uiHandler.removeCallbacks(finishTask)
-        unregisterScreenOff()
-        // 取消/超时/熄屏/保存都撤掉对应的兜底通知；取消即丢弃这一笔
-        MuyianBillCore.cancelPendingNotice(applicationContext, noticeId)
-        super.onDestroy()
-        try {
-            MuyianBillCore.onSheetClosed(applicationContext)
-        } catch (e: Exception) {
-            Log.w("MuyianBill", "notify sheet closed failed", e)
-        }
-    }
-
-    private fun parseCats(raw: String): ArrayList<String> {
-        val list = ArrayList<String>()
-        try {
-            val array = JSONArray(raw)
-            var i = 0
-            while (i < array.length()) {
-                val name = array.optString(i, "")
-                if (name.isNotEmpty()) list.add(name)
-                i++
-            }
-        } catch (e: Exception) {
-            // ignore
-        }
-        return list
-    }
-
-    private fun buildRoot(data: JSONObject, cats: List<String>): View {
-        val root = FrameLayout(this)
-
-        val dim = View(this)
-        dim.setBackgroundColor(Color.BLACK)
-        dim.alpha = 0f
-        dimView = dim
-        root.addView(dim, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ))
-
-        val scroller = ScrollView(this)
-        scroller.isFillViewport = false
-        sheetHost = scroller
-
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.setPadding(dp(20), dp(14), dp(20), dp(22))
-        box.background = roundedTop(Color.WHITE, 22)
-        box.elevation = dp(12).toFloat()
-        scroller.addView(box, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT
-        ))
-
-        val handle = View(this)
-        handle.background = rounded(0xFFE3E5EA.toInt(), 2)
-        val handleLp = LinearLayout.LayoutParams(dp(36), dp(4))
-        handleLp.gravity = Gravity.CENTER_HORIZONTAL
-        handleLp.bottomMargin = dp(14)
-        box.addView(handle, handleLp)
-
-        val header = LinearLayout(this)
-        header.orientation = LinearLayout.HORIZONTAL
-        header.gravity = Gravity.CENTER_VERTICAL
-        val title = TextView(this)
-        title.text = "自动识别到一笔账单"
-        title.textSize = 15f
-        title.setTextColor(0xFF1D2129.toInt())
-        header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        val close = TextView(this)
-        close.text = "×"
-        close.textSize = 22f
-        close.setTextColor(0xFF8A90A0.toInt())
-        close.setPadding(dp(12), 0, 0, dp(2))
-        close.setOnClickListener { closeSheet() }
-        header.addView(close)
-        box.addView(header)
-
-        val meta = TextView(this)
-        val bank = data.optString("bankName")
-        val clock = data.optString("clock")
-        meta.text = if (bank.isEmpty()) clock else bank + " · " + clock
-        meta.textSize = 12f
-        meta.setTextColor(0xFF8A90A0.toInt())
-        meta.setPadding(0, dp(2), 0, dp(10))
-        box.addView(meta)
-
-        val amountRow = LinearLayout(this)
-        amountRow.orientation = LinearLayout.HORIZONTAL
-        amountRow.gravity = Gravity.CENTER_VERTICAL
-        amountRow.setPadding(0, dp(4), 0, dp(6))
-        val symbol = TextView(this)
-        symbol.text = "¥"
-        symbol.textSize = 22f
-        symbol.setTextColor(0xFF1D2129.toInt())
-        amountRow.addView(symbol)
-        val amount = EditText(this)
-        amount.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-        amount.setText(String.format(Locale.US, "%.2f", Math.abs(data.optDouble("money", 0.0))))
-        amount.setSelection(amount.text.length)
-        amount.textSize = 28f
-        amount.setTextColor(typeColor(income))
-        amount.setBackgroundColor(Color.TRANSPARENT)
-        amount.setPadding(dp(4), 0, dp(4), 0)
-        amountInput = amount
-        amountRow.addView(amount, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        val out = chip("支出")
-        val inc = chip("收入")
-        outChip = out
-        inChip = inc
-        amountRow.addView(out)
-        amountRow.addView(inc)
-        out.setOnClickListener { setIncome(false) }
-        inc.setOnClickListener { setIncome(true) }
-        box.addView(amountRow)
-
-        val catLabel = TextView(this)
-        catLabel.text = "分类"
-        catLabel.textSize = 12f
-        catLabel.setTextColor(0xFF8A90A0.toInt())
-        catLabel.setPadding(0, dp(10), 0, dp(6))
-        box.addView(catLabel)
-
-        val chipScroller = HorizontalScrollView(this)
-        chipScroller.isHorizontalScrollBarEnabled = false
-        val chipRow = LinearLayout(this)
-        chipRow.orientation = LinearLayout.HORIZONTAL
-        chipScroller.addView(chipRow)
-        val names = ArrayList<String>()
-        if (costType.isNotEmpty()) names.add(costType)
-        for (c in cats) {
-            if (!names.contains(c)) names.add(c)
-        }
-        if (names.isEmpty()) names.add(if (income) "收入" else "消费")
-        for (name in names.take(10)) {
-            val view = chip(name)
-            categoryChips.add(view to name)
-            chipRow.addView(view)
-            view.setOnClickListener { selectCategory(name) }
-        }
-        box.addView(chipScroller)
-        selectCategory(names[0])
-
-        val remark = EditText(this)
-        remark.hint = "备注（可选）"
-        remark.setText(data.optString("merchant"))
-        remark.textSize = 15f
-        remark.setSingleLine(true)
-        remark.setBackgroundColor(Color.TRANSPARENT)
-        remark.setPadding(0, dp(12), 0, dp(12))
-        remarkInput = remark
-        box.addView(remark)
-
-        val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
-        buttons.gravity = Gravity.END
-        buttons.setPadding(0, dp(8), 0, 0)
-        val cancel = TextView(this)
-        cancel.text = "取消"
-        cancel.textSize = 15f
-        cancel.setTextColor(0xFF8A90A0.toInt())
-        cancel.setPadding(dp(22), dp(10), dp(22), dp(10))
-        cancel.background = rounded(0xFFF4F6FA.toInt(), 16)
-        cancel.setOnClickListener { closeSheet() }
-        buttons.addView(cancel)
-        val save = TextView(this)
-        save.text = "保存"
-        save.textSize = 15f
-        save.setTextColor(Color.WHITE)
-        save.setPadding(dp(28), dp(10), dp(28), dp(10))
-        save.background = rounded(accent, 16)
-        save.setOnClickListener { saveBill() }
-        val saveLp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        saveLp.leftMargin = dp(10)
-        buttons.addView(save, saveLp)
-        box.addView(buttons)
-
-        val sheetLp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT
-        )
-        sheetLp.gravity = Gravity.BOTTOM
-        root.addView(scroller, sheetLp)
-
-        setIncome(income)
-        return root
-    }
-
-    private fun saveBill() {
-        val text = amountInput?.text?.toString() ?: ""
-        val value = try {
-            text.trim().toDouble()
-        } catch (e: NumberFormatException) {
-            0.0
-        }
-        if (value <= 0) {
-            Toast.makeText(this, "请输入金额", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val ok = MuyianBillCore.saveSheetBill(
-            this, billJson, text, income, costType,
-            remarkInput?.text?.toString()?.trim() ?: ""
-        )
-        if (ok == false) {
-            Toast.makeText(this, "保存失败，请重试", Toast.LENGTH_SHORT).show()
-            return
-        }
-        closeSheet()
-    }
-
-    private fun playEnter() {
-        val host = sheetHost ?: return
-        host.post {
-            val height = host.height.toFloat()
-            if (height <= 0f) return@post
-            host.translationY = height
-            host.animate().translationY(0f).setDuration(240).start()
-            dimView?.animate()?.alpha(0.35f)?.setDuration(240)?.start()
-        }
-    }
-
-    private fun closeSheet() {
-        if (closing) return
-        closing = true
-        uiHandler.removeCallbacks(timeoutTask)
-        val host = sheetHost
-        val dim = dimView
-        if (host != null) {
-            host.animate().translationY(host.height.toFloat()).setDuration(180).start()
-            uiHandler.postDelayed(finishTask, 260)
-        } else {
-            finish()
-        }
-        dim?.animate()?.alpha(0f)?.setDuration(180)?.start()
-    }
-
-    private fun registerScreenOff() {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context?, i: Intent?) {
-                if (i?.action == Intent.ACTION_SCREEN_OFF) closeSheet()
-            }
-        }
-        try {
-            registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
-            screenReceiver = receiver
-        } catch (e: Exception) {
-            // 少数 ROM 限制动态注册，忽略即可
-        }
-    }
-
-    private fun unregisterScreenOff() {
-        val receiver = screenReceiver ?: return
-        screenReceiver = null
-        try {
-            unregisterReceiver(receiver)
-        } catch (e: Exception) {
-            // ignore
-        }
-    }
-
-    private fun typeColor(value: Boolean): Int {
-        return if (value) 0xFF22B877.toInt() else 0xFFF0655E.toInt()
-    }
-
-    private fun setIncome(value: Boolean) {
-        income = value
-        amountInput?.setTextColor(typeColor(value))
-        outChip?.let { styleTypeChip(it, value == false) }
-        inChip?.let { styleTypeChip(it, value) }
-    }
-
-    private fun styleTypeChip(view: TextView, selected: Boolean) {
-        view.setTextColor(if (selected) 0xFF1D2129.toInt() else 0xFF8A90A0.toInt())
-        view.background = rounded(if (selected) accentTint else 0xFFF4F6FA.toInt(), 14)
-    }
-
-    private fun selectCategory(name: String) {
-        costType = name
-        for ((view, value) in categoryChips) {
-            val selected = value == name
-            view.setTextColor(if (selected) accent else 0xFF5B6170.toInt())
-            view.background = rounded(if (selected) accentTint else 0xFFF4F6FA.toInt(), 14)
-        }
-    }
-
-    private fun chip(text: String): TextView {
-        val view = TextView(this)
-        view.text = text
-        view.textSize = 13f
-        view.setTextColor(0xFF5B6170.toInt())
-        view.background = rounded(0xFFF4F6FA.toInt(), 14)
-        view.setPadding(dp(12), dp(7), dp(12), dp(7))
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        lp.rightMargin = dp(8)
-        view.layoutParams = lp
-        return view
-    }
-
-    private fun dp(value: Int): Int {
-        return (value * resources.displayMetrics.density).toInt()
-    }
-
-    /** 把强调色向白色混合，得到选中项的淡底 */
-    private fun lighten(color: Int, ratio: Float): Int {
-        fun ch(v: Int): Int = (v + (255 - v) * ratio).toInt()
-        return Color.rgb(ch(Color.red(color)), ch(Color.green(color)), ch(Color.blue(color)))
-    }
-
-    private fun rounded(color: Int, radiusDp: Int): GradientDrawable {
-        val drawable = GradientDrawable()
-        drawable.setColor(color)
-        drawable.cornerRadius = dp(radiusDp).toFloat()
-        return drawable
-    }
-
-    /** 只有顶部两角圆角的白色面板 */
-    private fun roundedTop(color: Int, radiusDp: Int): GradientDrawable {
-        val r = dp(radiusDp).toFloat()
-        val drawable = GradientDrawable()
-        drawable.setColor(color)
-        drawable.setCornerRadii(floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f))
-        return drawable
-    }
-}
-
-
-/**
- * 钱迹导入的文件选择中转 Activity：透明主题，拉起系统文件选择器（SAF），
- * 把选中的文件拷进应用私有目录（qianji_import.xlsx）后通知 MuyianBillCore，由页面侧轮询。
- * 通过 ContentResolver 读用户选中的 Uri，不需要任何存储权限。
- */
-class ImportPickActivity : Activity() {
-
-    companion object {
-        const val EXTRA_KIND = "pick_kind"
-        private const val REQ_PICK_FILE = 4201
-
-        @Volatile
-        private var alive = false
-
-        fun isAlive(): Boolean {
-            return alive
-        }
-    }
-
-    private var kind = "xlsx"
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        alive = true
-        kind = intent?.getStringExtra(EXTRA_KIND) ?: "xlsx"
-        val isJson = kind == "json"
-        val intent = Intent(Intent.ACTION_GET_CONTENT)
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.type = "*/*"
-        // 有些文件管理器会把类型标成 octet-stream，额外放开候选类型
-        val mimes = if (isJson) {
-            arrayOf("application/json", "text/plain", "application/octet-stream")
-        } else {
-            arrayOf(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "application/vnd.ms-excel",
-                "application/zip",
-                "application/octet-stream"
-            )
-        }
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes)
-        try {
-            @Suppress("DEPRECATION")
-            startActivityForResult(intent, REQ_PICK_FILE)
-        } catch (e: Exception) {
-            Log.w("MuyianBill", "no file picker available", e)
-            MuyianBillCore.onImportPickError("no file picker")
-            finish()
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_PICK_FILE) {
-            finish()
-            return
-        }
-        val uri = data?.data
-        if (resultCode != RESULT_OK || uri == null) {
-            MuyianBillCore.onImportPickCancelled()
-            finish()
-            return
-        }
-        try {
-            val targetName = if (kind == "json") "muyian_backup.json" else "qianji_import.xlsx"
-            val out = File(getFilesDir(), targetName)
-            val ins = contentResolver.openInputStream(uri)
-            if (ins == null) {
-                MuyianBillCore.onImportPickError("unreadable file")
-            } else {
-                val fos = FileOutputStream(out)
-                try {
-                    val buf = ByteArray(64 * 1024)
-                    var n = ins.read(buf)
-                    while (n >= 0) {
-                        fos.write(buf, 0, n)
-                        n = ins.read(buf)
-                    }
-                } finally {
-                    fos.close()
-                    ins.close()
-                }
-                MuyianBillCore.onImportPicked(out.getAbsolutePath(), queryName(uri))
-            }
-        } catch (e: Exception) {
-            Log.w("MuyianBill", "copy picked file failed", e)
-            MuyianBillCore.onImportPickError("copy failed")
-        }
-        finish()
-    }
-
-    /** 取显示文件名，拿不到就退回固定名 */
-    private fun queryName(uri: Uri): String {
-        try {
-            val cursor = contentResolver.query(uri, null, null, null, null)
-            if (cursor != null) {
-                try {
-                    val idx = cursor.getColumnIndex("_display_name")
-                    if (idx >= 0 && cursor.moveToFirst()) {
-                        val v = cursor.getString(idx)
-                        if (v != null && v.isNotEmpty()) return v
-                    }
-                } finally {
-                    cursor.close()
-                }
-            }
-        } catch (e: Exception) {
-            // ignore
-        }
-        return if (kind == "json") "muyian_backup.json" else "qianji_import.xlsx"
-    }
-
-    override fun onDestroy() {
-        alive = false
-        super.onDestroy()
-    }
-}
-
-
-/**
- * 备份导出的"另存为"中转 Activity：透明壳，拉起系统 ACTION_CREATE_DOCUMENT，
- * 把进程内暂存的备份 JSON 写到用户选的位置（内容不走 Intent，避免大备份超过 Binder 限制）。
- */
-class BackupSaveActivity : Activity() {
-
-    companion object {
-        const val EXTRA_NAME = "save_name"
-        private const val REQ_SAVE_FILE = 4202
-
-        @Volatile
-        private var alive = false
-
-        fun isAlive(): Boolean {
-            return alive
-        }
-    }
-
-    private var suggestedName = "muyian_backup.json"
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        alive = true
-        val rawName = intent?.getStringExtra(EXTRA_NAME) ?: ""
-        if (rawName.isNotEmpty()) suggestedName = rawName
-        if (MuyianBillCore.backupContent().isEmpty()) {
-            MuyianBillCore.onBackupSaveError("no content")
-            finish()
-            return
-        }
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-        intent.addCategory(Intent.CATEGORY_OPENABLE)
-        intent.type = "application/json"
-        intent.putExtra(Intent.EXTRA_TITLE, suggestedName)
-        try {
-            @Suppress("DEPRECATION")
-            startActivityForResult(intent, REQ_SAVE_FILE)
-        } catch (e: Exception) {
-            Log.w("MuyianBill", "no save document ui", e)
-            MuyianBillCore.onBackupSaveError("no file picker")
-            finish()
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_SAVE_FILE) {
-            finish()
-            return
-        }
-        val uri = data?.data
-        if (resultCode != RESULT_OK || uri == null) {
-            MuyianBillCore.onBackupSaveCancelled()
-            finish()
-            return
-        }
-        try {
-            val content = MuyianBillCore.backupContent()
-            val os = contentResolver.openOutputStream(uri)
-            if (os == null) {
-                MuyianBillCore.onBackupSaveError("write failed")
-            } else {
-                try {
-                    os.write(content.toByteArray(Charsets.UTF_8))
-                    os.flush()
-                } finally {
-                    os.close()
-                }
-                MuyianBillCore.onBackupSaved(queryName(uri))
-            }
-        } catch (e: Exception) {
-            Log.w("MuyianBill", "write backup file failed", e)
-            MuyianBillCore.onBackupSaveError("write failed")
-        }
-        finish()
-    }
-
-    /** 取显示文件名，拿不到就用建议名 */
-    private fun queryName(uri: Uri): String {
-        try {
-            val cursor = contentResolver.query(uri, null, null, null, null)
-            if (cursor != null) {
-                try {
-                    val idx = cursor.getColumnIndex("_display_name")
-                    if (idx >= 0 && cursor.moveToFirst()) {
-                        val v = cursor.getString(idx)
-                        if (v != null && v.isNotEmpty()) return v
-                    }
-                } finally {
-                    cursor.close()
-                }
-            }
-        } catch (e: Exception) {
-            // ignore
-        }
-        return suggestedName
-    }
-
-    override fun onDestroy() {
-        alive = false
-        super.onDestroy()
     }
 }

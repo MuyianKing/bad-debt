@@ -31,16 +31,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
-import com.muyian.debt.data.AppState
+import com.muyian.debt.data.PrefKeys
 import com.muyian.debt.data.Prefs
-import com.muyian.debt.data.Screen
+import com.muyian.debt.state.AppState
+import com.muyian.debt.state.Screen
 import com.muyian.debt.ui.components.ActionSheetHost
 import com.muyian.debt.ui.components.AppToastHost
 import com.muyian.debt.ui.components.ConfirmDialogHost
@@ -58,21 +58,14 @@ import com.muyian.debt.ui.screens.SettingsScreen
 import com.muyian.debt.ui.screens.StatsScreen
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.LocalRpx
+import com.muyian.debt.ui.theme.themeStyleRes
 import muyian.bill.listener.MuyianBillCore
-
-private val SplashColor = Color(0xFFF7F4EC)
 
 class MainActivity : ComponentActivity() {
     private lateinit var app: AppState
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        setTheme(
-            when (Prefs(this).str("muyian_theme_v1", "wukong")) {
-                "nezha" -> R.style.Theme_Muyian_Nezha
-                "shaseng" -> R.style.Theme_Muyian_Shaseng
-                else -> R.style.Theme_Muyian_Wukong
-            }
-        )
+        setTheme(themeStyleRes(Prefs(this).str(PrefKeys.THEME, "wukong")))
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         try {
@@ -203,7 +196,7 @@ private fun MuyianRoot(app: AppState) {
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer { alpha = splashFade.value }
-                        .background(SplashColor)
+                        .background(p.bg)
                 )
             }
         }

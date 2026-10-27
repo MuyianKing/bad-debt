@@ -4,8 +4,8 @@
 
 ## 表结构
 
-- SQLite：`files/muyian.db`（`MuyianBillCore.DB_NAME`），表 `bills(id, year, month, day, clock, money, bankName, costType, orderRemark, source, sourcePkg, createdAt, reimb, starred, orderNo)`；`orderNo` 为订单/交易单号，单号去重用。
-- 建表与旧库补列都在 `hybrid.kt` 的 `openDb()`：`reimb` / `starred` / `orderNo` 用 try-catch `ALTER TABLE ... ADD COLUMN` 兼容旧库；`billJson()` 对缺失列给默认值（0 / 空串）。
+- SQLite：`files/muyian.db`（`BillDb` 内部常量 `DB_NAME`），表 `bills(id, year, month, day, clock, money, bankName, costType, orderRemark, source, sourcePkg, createdAt, reimb, starred, orderNo)`；`orderNo` 为订单/交易单号，单号去重用。
+- 建表与旧库补列都在 `BillDb.kt` 的 `openDb()`：`reimb` / `starred` / `orderNo` 用 try-catch `ALTER TABLE ... ADD COLUMN` 兼容旧库；`billJson()` 对缺失列给默认值（0 / 空串）。
 
 ## 金额与分类口径
 

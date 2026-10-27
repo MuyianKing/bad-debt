@@ -1,7 +1,6 @@
 package com.muyian.debt.ui.screens
 
 import android.app.Activity
-import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -70,15 +69,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Bills
-import com.muyian.debt.data.Screen
+import com.muyian.debt.state.Screen
 import com.muyian.debt.data.fmtMoney
 import com.muyian.debt.data.fmtNum
+import com.muyian.debt.data.Stats
+import com.muyian.debt.data.WeekStats
+import com.muyian.debt.data.WeekSummary
 import com.muyian.debt.data.groupByDay
 import com.muyian.debt.data.pad2
-import com.muyian.debt.data.weekdayCN
 import com.muyian.debt.ui.components.AppFab
 import com.muyian.debt.ui.components.BillList
 import com.muyian.debt.ui.components.DividerLine
@@ -87,7 +88,9 @@ import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.navBottomPadding
 import com.muyian.debt.ui.components.pressable
+import com.muyian.debt.ui.components.rememberFileBitmap
 import com.muyian.debt.ui.components.stagger
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
@@ -132,14 +135,8 @@ fun HomeScreen(app: AppState, activity: Activity) {
     }
 
     fun loadWeekBills() {
-        val months = LinkedHashSet<Pair<Int, Int>>()
-        val cal = Calendar.getInstance()
-        for (i in 0..6) {
-            months.add(cal.get(Calendar.YEAR) to (cal.get(Calendar.MONTH) + 1))
-            cal.add(Calendar.DAY_OF_MONTH, -1)
-        }
         val merged = ArrayList<Bill>()
-        for ((y, m) in months) merged.addAll(Bills.month(ctx, y, m))
+        for ((y, m) in WeekStats.monthKeys()) merged.addAll(Bills.month(ctx, y, m))
         weekBills = merged
     }
 
@@ -148,36 +145,14 @@ fun HomeScreen(app: AppState, activity: Activity) {
         loadWeekBills()
     }
 
-    LaunchedEffect(app.resumeToken) { load() }
+    LaunchedEffect(app.resumeToken, app.billsVersion) { load() }
 
-    val monthExpense = remember(bills) { bills.filter { it.money < 0 }.sumOf { abs(it.money) } }
-    val monthIncome = remember(bills) { bills.filter { it.money > 0 }.sumOf { it.money } }
-    val monthBalance = monthIncome - monthExpense
+    val totals = remember(bills) { Stats.totals(bills) }
+    val monthExpense = totals.expense
+    val monthIncome = totals.income
+    val monthBalance = totals.balance
     val groups = remember(bills, year, month) { groupByDay(bills, year, month) }
-
-    val weekData = remember(weekBills) {
-        val today = Calendar.getInstance()
-        val todayZero = Calendar.getInstance().apply {
-            set(today.get(Calendar.YEAR), today.get(Calendar.MONTH), today.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        val values = ArrayList<Pair<String, Double>>()
-        var max = 0.0
-        val atoms = ArrayList<Triple<Int, Int, Int>>()
-        for (i in 6 downTo 0) {
-            val d = Calendar.getInstance().apply { timeInMillis = todayZero - i * 86_400_000L }
-            val y = d.get(Calendar.YEAR); val m = d.get(Calendar.MONTH) + 1; val day = d.get(Calendar.DAY_OF_MONTH)
-            atoms.add(Triple(y, m, day))
-            var v = 0.0
-            for (b in weekBills) if (b.year == y && b.month == m && b.day == day && b.money < 0) v += abs(b.money)
-            if (v > max) max = v
-            values.add(weekdayCN(y, m, day) to v)
-        }
-        val heights = values.map { (_, v) ->
-            if (v > 0) maxOf(14, Math.round(v / max * 132).toInt()) else 8
-        }
-        Triple(values, heights, values.sumOf { it.second })
-    }
+    val week = remember(weekBills) { WeekStats.last7(weekBills) }
 
     fun closeDrawer() {
         animateDrawer(0f)
@@ -185,25 +160,6 @@ fun HomeScreen(app: AppState, activity: Activity) {
 
     fun openDrawer() {
         animateDrawer(1f)
-    }
-
-    fun askDelete(bill: Bill) {
-        app.confirm(
-            "删除账单",
-            "删除这笔「${bill.costType} ${fmtMoney(abs(bill.money))}元」的记录？",
-            "删除"
-        ) {
-            Bills.delete(ctx, bill.id)
-            load()
-        }
-    }
-
-    fun showRowMenu(bill: Bill) {
-        app.actionSheet = com.muyian.debt.data.ActionSheetState(
-            listOf("编辑" to false, "删除" to true)
-        ) { index ->
-            if (index == 0) app.openAdd(bill) else askDelete(bill)
-        }
     }
 
     Box(
@@ -270,19 +226,15 @@ fun HomeScreen(app: AppState, activity: Activity) {
             }
             if (groups.isNotEmpty()) {
                 item(key = "week") {
-                    WeekCard(
-                        values = weekData.first,
-                        heights = weekData.second,
-                        total = weekData.third
-                    )
+                    WeekCard(week)
                 }
             }
             items(groups, key = { it.day }) { group ->
                 BillList(
                     app = app,
                     groups = listOf(group),
-                    onRow = { showRowMenu(it) },
-                    onRowLong = { askDelete(it) },
+                    onRow = { app.showBillActions(it) },
+                    onRowLong = { app.requestDeleteBill(it) },
                     modifier = Modifier.animateItem()
                 )
             }
@@ -314,9 +266,7 @@ fun HomeScreen(app: AppState, activity: Activity) {
                 }
             }
             item(key = "bottom") {
-                Spacer(
-                    Modifier.height(rpx(150) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
-                )
+                Spacer(Modifier.height(rpx(150) + navBottomPadding()))
             }
         }
 
@@ -327,15 +277,16 @@ fun HomeScreen(app: AppState, activity: Activity) {
                 .graphicsLayer { translationX = drawerWidthPx * drawerProgress }
                 .background(if (navSolid) (if (p.dark) Color.Black.copy(alpha = 0.82f) else Color.White.copy(alpha = 0.72f)) else Color.Transparent)
         ) {
-            Row(
+            // 左右按钮数不同（左 1 右 2），用 Row 等分空白会把日期推向左侧；改用 Box 以屏幕中线定位
+            Box(
                 Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = rpx(24), vertical = rpx(12)),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = rpx(24), vertical = rpx(12))
             ) {
                 Box(
                     Modifier
+                        .align(Alignment.CenterStart)
                         .size(rpx(68))
                         .clip(CircleShape)
                         .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f), ::openDrawer),
@@ -343,9 +294,9 @@ fun HomeScreen(app: AppState, activity: Activity) {
                 ) {
                     AppIcon("menu", if (navSolid) p.text else Color.White, 22.dp)
                 }
-                Spacer(Modifier.weight(1f))
                 Row(
                     Modifier
+                        .align(Alignment.Center)
                         .clip(RoundedCornerShape(rpx(999)))
                         .clickable {
                             app.showDatePicker("YM", year, month, 1) { y, m, _ ->
@@ -355,6 +306,9 @@ fun HomeScreen(app: AppState, activity: Activity) {
                         .padding(horizontal = rpx(22), vertical = rpx(8)),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 左侧补上与「间距 + 箭头」等宽的空白，让月份文字本身落在中线上；
+                    // 箭头是固定 dp，不能用 rpx 换算，否则补偿宽度会随屏幕缩放偏小
+                    Spacer(Modifier.width(rpx(6) + 15.dp))
                     Text(
                         "$year-${pad2(month)}",
                         color = if (navSolid) p.text else Color.White,
@@ -368,17 +322,21 @@ fun HomeScreen(app: AppState, activity: Activity) {
                         15.dp
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier.size(rpx(68)).clip(CircleShape)
-                        .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Calendar) },
-                    contentAlignment = Alignment.Center
-                ) { AppIcon("calendar", if (navSolid) p.text else Color.White, 20.dp) }
-                Box(
-                    Modifier.size(rpx(68)).clip(CircleShape)
-                        .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Stats) },
-                    contentAlignment = Alignment.Center
-                ) { AppIcon("bar-chart", if (navSolid) p.text else Color.White, 20.dp) }
+                Row(
+                    Modifier.align(Alignment.CenterEnd),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier.size(rpx(68)).clip(CircleShape)
+                            .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Calendar) },
+                        contentAlignment = Alignment.Center
+                    ) { AppIcon("calendar", if (navSolid) p.text else Color.White, 20.dp) }
+                    Box(
+                        Modifier.size(rpx(68)).clip(CircleShape)
+                            .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Stats) },
+                        contentAlignment = Alignment.Center
+                    ) { AppIcon("bar-chart", if (navSolid) p.text else Color.White, 20.dp) }
+                }
             }
         }
 
@@ -438,13 +396,7 @@ private fun Hero(
     val expenseShown = countUp(expense)
     val incomeShown = countUp(income)
     val balanceShown = countUp(balance)
-    val heroBitmap = remember(app.heroImg) {
-        if (app.heroImg.isEmpty()) null else try {
-            BitmapFactory.decodeFile(app.heroImg.removePrefix("file://"))
-        } catch (_: Exception) {
-            null
-        }
-    }
+    val heroBitmap = rememberFileBitmap(app.heroImg)
     Box(
         Modifier
             .fillMaxWidth()
@@ -549,8 +501,16 @@ private fun Hero(
 }
 
 @Composable
-private fun WeekCard(values: List<Pair<String, Double>>, heights: List<Int>, total: Double) {
+private fun WeekCard(summary: WeekSummary) {
     val p = LocalPalette.current
+    val values = summary.days
+    val total = summary.total
+    val heights = remember(values) {
+        val max = summary.max
+        values.map { (_, v) ->
+            if (v > 0 && max > 0) maxOf(14, Math.round(v / max * 132).toInt()) else 8
+        }
+    }
     val grow = remember { Animatable(0f) }
     LaunchedEffect(values) {
         grow.snapTo(0f)
@@ -661,36 +621,39 @@ private fun Drawer(
                 .clipToBounds()
                 .background(Brush.linearGradient(p.gradPrimaryStrong))
         ) {
-            Box(
-                Modifier
-                    .offset(x = rpx(180), y = rpx(-120))
-                    .size(rpx(380))
-                    .clip(CircleShape)
-                    .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
-            )
-            Box(
-                Modifier
-                    .offset(x = rpx(250), y = rpx(150))
-                    .size(rpx(190))
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f))
-            )
+            // 装饰圆圈放在 matchParentSize 里，只做背景，不参与头部高度测量
+            Box(Modifier.matchParentSize()) {
+                Box(
+                    Modifier
+                        .offset(x = rpx(180), y = rpx(-120))
+                        .size(rpx(380))
+                        .clip(CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
+                )
+                Box(
+                    Modifier
+                        .offset(x = rpx(250), y = rpx(30))
+                        .size(rpx(190))
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+            }
             Row(
                 Modifier
                     .statusBarsPadding()
-                    .padding(start = rpx(40), end = rpx(40), top = rpx(48), bottom = rpx(46)),
+                    .padding(start = rpx(40), end = rpx(40), top = rpx(30), bottom = rpx(28)),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     Modifier
-                        .size(rpx(92))
+                        .size(rpx(74))
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.22f))
                         .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape)
                         .padding(rpx(2)),
                     contentAlignment = Alignment.Center
                 ) {
-                    MascotFace(app, "idle", 88, head = true, mode = "base")
+                    MascotFace(app, "idle", 70, head = true, mode = "base")
                 }
                 Spacer(Modifier.width(rpx(24)))
                 Column {

@@ -29,7 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Cats
 import com.muyian.debt.data.DayGroup
@@ -37,6 +37,7 @@ import com.muyian.debt.data.fmtMoney
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.categoryGradient
+import com.muyian.debt.ui.theme.hex
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
 
@@ -124,7 +125,7 @@ fun BillRow(
     val p = LocalPalette.current
     val type = if (bill.money < 0) "expense" else "income"
     val top = Cats.parentOf(app.categories, bill.costType, type).ifEmpty { bill.costType }
-    val color = Cats.colorOf(app.categories, top, type)
+    val color = hex(Cats.colorHexOf(app.categories, top, type))
     val icon = Cats.iconOf(app.categories, bill.costType)
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()

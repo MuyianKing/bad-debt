@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.muyian.debt.R
 
 fun hex(value: String, alpha: Float = 1f): Color {
     val raw = value.removePrefix("#")
@@ -217,6 +218,13 @@ val Shaseng = Wukong.copy(
 val AllPalettes = listOf(Wukong, Nezha, Shaseng)
 
 fun paletteOf(id: String): Palette = AllPalettes.firstOrNull { it.id == id } ?: Wukong
+
+/** 主题 id -> 系统主题资源；Activity 启动前就要用，不能依赖 AppState。 */
+fun themeStyleRes(id: String): Int = when (id) {
+    Nezha.id -> R.style.Theme_Muyian_Nezha
+    Shaseng.id -> R.style.Theme_Muyian_Shaseng
+    else -> R.style.Theme_Muyian_Wukong
+}
 
 val LocalPalette = staticCompositionLocalOf { Wukong }
 

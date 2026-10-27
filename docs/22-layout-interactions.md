@@ -36,7 +36,7 @@
 
 ## 内页沉浸式顶栏
 
-- 内页统一用 `TopBar(title, onBack, solid = ...)`：未滚动时背景透明，让页面底色直通状态栏；滚动超过阈值后 `solid = true` 切半透明底，避免列表从标题下穿过。
+- 内页统一用 `TopBar(title, onBack, solid = ..., titleContent = ..., actions = ...)`：未滚动时背景透明，让页面底色直通状态栏；滚动超过阈值后 `solid = true` 切半透明底，避免列表从标题下穿过。
 - 顶栏外层用 `statusBarsPadding()`；不要写死状态栏高度，也不要让顶栏和状态栏之间出现白带。
 - 页面背景与顶栏之间不要加额外的实心色块；沉浸效果由 `MainActivity` 的 edge-to-edge + 透明系统栏保证。
 

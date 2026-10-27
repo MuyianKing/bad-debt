@@ -1,6 +1,5 @@
 package com.muyian.debt.ui.components
 
-import android.graphics.BitmapFactory
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -48,7 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
 import com.muyian.debt.data.daysInMonth
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
@@ -82,7 +81,7 @@ fun AppToastHost(app: AppState) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .clip(RoundedCornerShape(rpx(14)))
-                    .background(if (p.dark) Color(0xE6232327) else Color(0xD91D2129))
+                    .background(if (p.dark) p.raised.copy(alpha = 0.90f) else p.text.copy(alpha = 0.85f))
                     .padding(horizontal = rpx(34), vertical = rpx(20))
             )
         }
@@ -363,14 +362,9 @@ fun DatePickerHost(app: AppState) {
 
 @Composable
 fun ImagePreviewHost(app: AppState) {
+    val p = LocalPalette.current
     AnimatedFade(value = app.previewImage) { path ->
-        val bitmap = remember(path) {
-            try {
-                BitmapFactory.decodeFile(path.removePrefix("file://"))
-            } catch (_: Exception) {
-                null
-            }
-        }
+        val bitmap = rememberFileBitmap(path)
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             if (bitmap != null) {
                 Image(
@@ -391,7 +385,7 @@ fun ImagePreviewHost(app: AppState) {
                     .padding(rpx(20))
                     .size(rpx(72))
                     .clip(RoundedCornerShape(rpx(36)))
-                    .background(Color(0x66000000))
+                    .background(p.mask.copy(alpha = 0.45f))
                     .clickable { app.previewImage = null },
                 contentAlignment = Alignment.Center
             ) {

@@ -1,12 +1,6 @@
 package com.muyian.debt.ui.screens
 
 import android.Manifest
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
-import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -24,15 +18,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -56,12 +46,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import com.muyian.debt.data.AppState
+import com.muyian.debt.state.AppState
+import com.muyian.debt.data.Files
 import com.muyian.debt.data.MascotStyle
+import com.muyian.debt.data.NativeStatus
+import com.muyian.debt.state.ActionSheetState
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.GroupTitle
+import com.muyian.debt.ui.components.IconBlock
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.MascotImage
 import com.muyian.debt.ui.components.Motion
@@ -69,109 +62,42 @@ import com.muyian.debt.ui.components.RiseIn
 import com.muyian.debt.ui.components.StateChip
 import com.muyian.debt.ui.components.AppSwitch
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.TopBar
+import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
+import com.muyian.debt.ui.components.rememberFileBitmap
 import com.muyian.debt.ui.theme.AllPalettes
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.paletteOf
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
-import muyian.bill.listener.MuyianBillCore
-import org.json.JSONObject
-import java.io.File
-
-private data class PopupState(
-    val miui: Boolean = false,
-    val miuiPopup: Int = -1,
-    val known: Boolean = false,
-    val blocked: Boolean = false
-) {
-    val ok: Boolean get() = known && miuiPopup == 0
-    val text: String
-        get() = when {
-            known && miuiPopup == 0 -> "已允许"
-            known && miuiPopup == 1 -> "未允许"
-            blocked -> "被系统拦截"
-            else -> "未检测"
-        }
-}
-
-private fun copyHeroImage(context: Context, uri: Uri): String? = try {
-    val file = File(context.filesDir, "hero_${System.currentTimeMillis()}.jpg")
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        file.outputStream().use { output -> input.copyTo(output) }
-    }
-    file.absolutePath
-} catch (_: Exception) {
-    null
-}
 
 @Composable
 fun SettingsScreen(app: AppState) {
     val p = LocalPalette.current
     val ctx = LocalContext.current
-    var listenerEnabled by remember { mutableStateOf(false) }
-    var notifyEnabled by remember { mutableStateOf(false) }
-    var notifAllowed by remember { mutableStateOf(true) }
-    var overlayPerm by remember { mutableStateOf(false) }
-    var popup by remember { mutableStateOf(PopupState()) }
-    var batteryOk by remember { mutableStateOf(true) }
-    var keepAlive by remember { mutableStateOf(true) }
-    var repairOk by remember { mutableStateOf(false) }
-    var repairPkg by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf(NativeStatus.snapshot(ctx)) }
 
     fun refresh() {
-        listenerEnabled = try { MuyianBillCore.isAccessibilityEnabled(ctx) } catch (_: Exception) { false }
-        notifyEnabled = try { MuyianBillCore.isNotificationListenerEnabled(ctx) } catch (_: Exception) { false }
-        notifAllowed = try { MuyianBillCore.areNotificationsEnabled(ctx) } catch (_: Exception) { true }
-        overlayPerm = try { MuyianBillCore.hasOverlayPermission(ctx) } catch (_: Exception) { false }
-        try {
-            val o = JSONObject(MuyianBillCore.getPopupPermissionState(ctx))
-            popup = PopupState(
-                o.optBoolean("miui"),
-                if (o.has("miuiPopup")) o.optInt("miuiPopup") else -1,
-                o.optBoolean("miuiPopupKnown"),
-                o.optBoolean("blocked")
-            )
-        } catch (_: Exception) {
-            popup = PopupState()
-        }
-        batteryOk = try { MuyianBillCore.isIgnoringBatteryOptimizations(ctx) } catch (_: Exception) { true }
-        keepAlive = try { MuyianBillCore.isKeepAliveEnabled(ctx) } catch (_: Exception) { false }
-        try {
-            val st = JSONObject(MuyianBillCore.getSelfRepairState(ctx))
-            repairOk = st.optBoolean("hasPermission")
-            repairPkg = st.optString("packageName", "")
-        } catch (_: Exception) {
-            repairOk = false
-            repairPkg = ""
-        }
+        status = NativeStatus.snapshot(ctx)
     }
 
     LaunchedEffect(app.resumeToken) {
         refresh()
     }
 
-    val heroBitmap = remember(app.heroImg) {
-        if (app.heroImg.isEmpty()) null else try {
-            BitmapFactory.decodeFile(app.heroImg.removePrefix("file://"))
-        } catch (_: Exception) {
-            null
-        }
-    }
+    val heroBitmap = rememberFileBitmap(app.heroImg)
 
     val heroPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val path = copyHeroImage(ctx, uri)
+        val path = Files.copyUriToFiles(ctx, uri, "hero")
         if (path == null) {
             app.showToast("读取图片失败")
             return@rememberLauncherForActivityResult
         }
         val old = app.heroImg
         app.updateHeroImg(path)
-        if (old.isNotEmpty()) {
-            try { File(old.removePrefix("file://")).delete() } catch (_: Exception) {
-            }
-        }
+        Files.delete(old)
         app.showToast("已设置首页头图")
     }
 
@@ -181,7 +107,7 @@ fun SettingsScreen(app: AppState) {
     }
 
     fun chooseHero() {
-        app.actionSheet = com.muyian.debt.data.ActionSheetState(
+        app.actionSheet = ActionSheetState(
             listOf("选择图片" to false, "恢复默认" to false)
         ) { index ->
             if (index == 0) {
@@ -189,10 +115,7 @@ fun SettingsScreen(app: AppState) {
             } else {
                 val old = app.heroImg
                 app.updateHeroImg("")
-                if (old.isNotEmpty()) {
-                    try { File(old.removePrefix("file://")).delete() } catch (_: Exception) {
-                    }
-                }
+                Files.delete(old)
                 app.showToast("已恢复默认")
             }
         }
@@ -206,30 +129,14 @@ fun SettingsScreen(app: AppState) {
     }
 
     Column(Modifier.fillMaxSize().background(p.bg)) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = rpx(20), vertical = rpx(12)),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.size(rpx(72)).clip(CircleShape).pressable(p.fill) { app.pop() }, contentAlignment = Alignment.Center) {
-                AppIcon("chevron-left", p.text, 22.dp)
-            }
-            Text(
-                "设置·关于",
-                color = p.text,
-                fontSize = rsp(32),
-                fontWeight = FontWeight.SemiBold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.width(rpx(72)))
-        }
+        TopBar(title = "设置·关于", onBack = { app.pop() })
 
         Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+                .pageBottomPadding()
         ) {
             RiseIn(0, key = "look") {
             GroupTitle("外观")
@@ -442,40 +349,30 @@ fun SettingsScreen(app: AppState) {
                     icon = "shield",
                     gradient = Brush.linearGradient(p.gradPrimary),
                     title = "无障碍服务",
-                    state = if (listenerEnabled) "已开启" to true else "未开启" to false,
+                    state = if (status.accessibility) "已开启" to true else "未开启" to false,
                     desc = "自动记账的核心开关。开启后，你在支付宝/微信等App里完成支付时，孽账会读取支付结果页的文字，在本地解析出待确认账单。",
-                    action = if (listenerEnabled) null else "去开启",
-                    onClick = {
-                        try {
-                            ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        } catch (_: Exception) {
-                        }
-                    }
+                    action = if (status.accessibility) null else "去开启",
+                    onClick = { NativeStatus.openAccessibilitySettings(ctx) }
                 )
                 SettingCell(
                     icon = "bell",
                     gradient = Brush.linearGradient(p.gradSky),
                     title = "通知使用权（辅助）",
-                    state = if (notifyEnabled) "已开启" to true else "未开启" to false,
+                    state = if (status.notificationListener) "已开启" to true else "未开启" to false,
                     desc = "补充无障碍覆盖不到的场景：收款到账提醒只在通知栏、熄屏碰卡支付的交易通知。两路来源自动去重，不会重复入账。",
-                    action = if (notifyEnabled) null else "去开启",
-                    onClick = {
-                        try {
-                            ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        } catch (_: Exception) {
-                        }
-                    }
+                    action = if (status.notificationListener) null else "去开启",
+                    onClick = { NativeStatus.openNotificationListenerSettings(ctx) }
                 )
                 SettingCell(
                     icon = "rotate-ccw",
                     gradient = Brush.linearGradient(p.gradViolet),
                     title = "无障碍自恢复",
-                    state = if (repairOk) "已授权" to true else "未授权" to false,
+                    state = if (status.repair.hasPermission) "已授权" to true else "未授权" to false,
                     desc = "系统可能杀掉无障碍服务导致自动记账失效。用电脑 adb 执行一次授权命令后，打开孽账会自动把服务重新开启，无需再去系统设置手动开。",
-                    action = if (!repairOk) "授权教程" else if (!listenerEnabled) "立即恢复" else null,
+                    action = if (!status.repair.hasPermission) "授权教程" else if (!status.accessibility) "立即恢复" else null,
                     onClick = {
-                        if (!repairOk) {
-                            val pkg = repairPkg.ifEmpty { ctx.packageName }
+                        if (!status.repair.hasPermission) {
+                            val pkg = status.repair.packageName.ifEmpty { ctx.packageName }
                             val cmd = "adb shell pm grant $pkg android.permission.WRITE_SECURE_SETTINGS"
                             app.confirm(
                                 "开启无障碍自恢复",
@@ -485,12 +382,12 @@ fun SettingsScreen(app: AppState) {
                                 app.copyText(cmd)
                                 app.showToast("已复制，执行后回到本页刷新")
                             }
-                        } else if (!listenerEnabled) {
-                            val resp = try { JSONObject(MuyianBillCore.repairAccessibilityService(ctx)) } catch (_: Exception) { JSONObject() }
-                            if (resp.optBoolean("success") && resp.optBoolean("serviceEnabled")) {
+                        } else if (!status.accessibility) {
+                            val result = NativeStatus.repairAccessibility(ctx)
+                            if (result.success && result.serviceEnabled) {
                                 app.showToast("已恢复开启无障碍服务")
                             } else {
-                                app.showToast("恢复失败：${resp.optString("error", "未知原因")}")
+                                app.showToast("恢复失败：${result.error.ifEmpty { "未知原因" }}")
                             }
                             refresh()
                         } else {
@@ -500,30 +397,26 @@ fun SettingsScreen(app: AppState) {
                 )
                 SettingCell(
                     icon = "maximize",
-                    gradient = Brush.linearGradient(
-                        listOf(com.muyian.debt.ui.theme.hex("#74ADFF"), com.muyian.debt.ui.theme.hex("#4489FE"))
-                    ),
+                    gradient = Brush.linearGradient(p.gradBlue),
                     title = "显示在其他应用上层",
-                    state = if (overlayPerm) "已允许" to true else "未允许" to false,
+                    state = if (status.overlay) "已允许" to true else "未允许" to false,
                     desc = "系统级悬浮窗开关，弹层要盖在支付页上方必须先允许。这里只开系统开关，不绘制悬浮窗。",
-                    action = if (overlayPerm) null else "去允许",
+                    action = if (status.overlay) null else "去允许",
                     onClick = {
-                        try { MuyianBillCore.requestOverlayPermission(ctx) } catch (_: Exception) {
-                        }
+                        NativeStatus.requestOverlayPermission(ctx)
                         app.showToast("请允许“显示在其他应用上层”，返回后自动生效")
                     }
                 )
-                if (popup.miui) {
+                if (status.popup.miui) {
                     SettingCell(
                         icon = "shield",
                         gradient = Brush.linearGradient(p.gradViolet),
                         title = "后台弹出界面（MIUI）",
-                        state = popup.text to popup.ok,
+                        state = status.popup.text to status.popup.ok,
                         desc = "MIUI/HyperOS 单独的后台启动 Activity 开关，和上面的悬浮窗开关不是一个。点「去开启」后进入权限页，再点「其他权限」→「后台弹出界面」；未开启时弹层会被系统拦掉，只能收到待确认通知。",
-                        action = if (popup.ok) null else "去开启",
+                        action = if (status.popup.ok) null else "去开启",
                         onClick = {
-                            try { MuyianBillCore.openPopupPermissionSettings(ctx) } catch (_: Exception) {
-                            }
+                            NativeStatus.openPopupPermissionSettings(ctx)
                             app.showToast("点「其他权限」→「后台弹出界面」")
                         }
                     )
@@ -532,11 +425,11 @@ fun SettingsScreen(app: AppState) {
                     icon = "bell",
                     gradient = Brush.linearGradient(p.gradRose),
                     title = "App 弹通知权限",
-                    state = if (notifAllowed) "已开启" to true else "未开启" to false,
+                    state = if (status.notificationsAllowed) "已开启" to true else "未开启" to false,
                     desc = "Android 13+ 需要。用于后台保活常驻通知，以及确认弹层被系统拦住时的待确认提醒；关闭后这两类通知都收不到",
-                    action = if (notifAllowed) null else "请求权限",
+                    action = if (status.notificationsAllowed) null else "请求权限",
                     onClick = {
-                        if (notifAllowed) app.showToast("通知权限已开启")
+                        if (status.notificationsAllowed) app.showToast("通知权限已开启")
                         else notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                 )
@@ -550,11 +443,11 @@ fun SettingsScreen(app: AppState) {
                     icon = "battery-charging",
                     gradient = Brush.linearGradient(p.gradPrimary),
                     title = "电池优化",
-                    state = if (batteryOk) "不限制" to true else "受限制" to false,
+                    state = if (status.batteryUnrestricted) "不限制" to true else "受限制" to false,
                     desc = "系统省电策略可能在锁屏后回收后台进程，导致自动记账失效。请把电池策略设为“不限制”。",
-                    chevron = !batteryOk,
+                    chevron = !status.batteryUnrestricted,
                     onClick = {
-                        if (batteryOk) {
+                        if (status.batteryUnrestricted) {
                             app.showToast("已不受电池优化限制")
                         } else {
                             app.confirm(
@@ -562,8 +455,7 @@ fun SettingsScreen(app: AppState) {
                                 "在系统弹窗中选择“不限制”。部分机型还需在“应用详情”里把自启动/后台运行设为允许。",
                                 "去设置"
                             ) {
-                                try { MuyianBillCore.requestIgnoreBatteryOptimizations(ctx) } catch (_: Exception) {
-                                }
+                                NativeStatus.requestIgnoreBatteryOptimization(ctx)
                             }
                         }
                     }
@@ -572,13 +464,12 @@ fun SettingsScreen(app: AppState) {
                     icon = "zap",
                     gradient = Brush.linearGradient(p.gradMint),
                     title = "后台保活",
-                    state = if (keepAlive) "已开启" to true else "已关闭" to false,
+                    state = if (status.keepAlive) "已开启" to true else "已关闭" to false,
                     desc = "用一条低优先级常驻通知维持进程，降低被系统回收的概率。关闭后仍可记账，但后台更容易被厂商省电策略杀掉。",
-                    switch = keepAlive,
+                    switch = status.keepAlive,
                     onSwitch = { value ->
-                        val ok = try { MuyianBillCore.setKeepAliveEnabled(ctx, value) } catch (_: Exception) { false }
-                        if (ok) {
-                            keepAlive = value
+                        if (NativeStatus.setKeepAlive(ctx, value)) {
+                            refresh()
                         } else {
                             app.showToast("设置失败，请重试")
                         }
@@ -586,9 +477,7 @@ fun SettingsScreen(app: AppState) {
                 )
                 SettingCell(
                     icon = "layers",
-                    gradient = Brush.linearGradient(
-                        listOf(com.muyian.debt.ui.theme.hex("#74ADFF"), com.muyian.debt.ui.theme.hex("#4489FE"))
-                    ),
+                    gradient = Brush.linearGradient(p.gradBlue),
                     title = "从多任务页面隐藏",
                     state = if (app.hideRecents) "已隐藏" to true else "显示中" to false,
                     desc = "隐藏后系统「一键清理」不会把本应用任务一起清掉，自动记账更不容易被连带杀死。关闭后可在最近任务里看到本应用。",
@@ -605,8 +494,7 @@ fun SettingsScreen(app: AppState) {
                     desc = "小米、OPPO、vivo 等机型还需在应用详情里允许“自启动”“后台运行”，否则锁屏后仍可能被清理。",
                     action = "去设置",
                     onClick = {
-                        try { MuyianBillCore.openAppSettings(ctx) } catch (_: Exception) {
-                        }
+                        NativeStatus.openAppSettings(ctx)
                         app.showToast("请在应用详情中允许自启动/后台运行")
                     }
                 )
@@ -713,12 +601,4 @@ private fun SettingCell(
         }
         DividerLine(color = p.lineSoft)
     }
-}
-
-@Composable
-private fun IconBlock(icon: String, gradient: Brush, size: Int, iconSize: Int) {
-    Box(
-        Modifier.size(rpx(size)).clip(RoundedCornerShape(rpx(size * 0.3f))).background(gradient),
-        contentAlignment = Alignment.Center
-    ) { AppIcon(icon, Color.White, iconSize.dp) }
 }

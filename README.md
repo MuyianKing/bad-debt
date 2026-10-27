@@ -2,7 +2,7 @@
 
 <p align="center"><img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="88" alt="孽账 App 图标"></p>
 
-Android 双渠道自动记账 App（无障碍为主 + 通知监听辅助）。技术栈：**Kotlin + Jetpack Compose**，系统能力与数据层集中在原生核心 `hybrid.kt`。
+Android 双渠道自动记账 App（无障碍为主 + 通知监听辅助）。技术栈：**Kotlin + Jetpack Compose**，系统能力与原生数据层集中在 `muyian/bill/listener/` 同包文件。
 
 界面布局参考【钱迹】，配色与视觉按本项目的三主题重做。
 
@@ -20,13 +20,14 @@ muyian/
     └── app/src/main/java/
         ├── com/muyian/debt/
         │   ├── MainActivity.kt               # 单 Activity + Compose 导航 + 系统栏
-        │   ├── data/                         # 账单/分类/设置/角色/钱迹映射/农历/AppState
+        │   ├── data/                         # 账单/分类/设置/角色/钱迹/统计/备份/导入
+        │   ├── state/                        # AppState 门面 + 主题/导航/弹层/设置子状态
         │   └── ui/
         │       ├── theme/Theme.kt            # 三主题设计令牌（Palette）
         │       ├── icons/                    # 24x24 图标路径与 Compose 绘制
         │       ├── components/               # 玻璃卡、角色、账单列表、弹层、滚轮、动效
         │       └── screens/                  # 首页/记一笔/统计/日历/分类/设置/导入/备份
-        └── muyian/bill/listener/hybrid.kt    # 原生核心：无障碍 + 通知监听 + 解析 + 去重 + SQLite + 弹层
+        └── muyian/bill/listener/              # 原生核心：hybrid.kt + BillDb/SystemPerms/XlsxReader/PendingNotices + Activities/Services
 ```
 
 ## 数据设计
@@ -59,4 +60,4 @@ SQLite `files/muyian.db`，表 `bills(id, year, month, day, clock, money, bankNa
 
 - UI 全部是 Jetpack Compose，不引入第三方 UI 库；原生核心只用 Android 框架 API + `org.json`，不引入网络/统计/云同步依赖。
 - 无障碍服务 `muyian.bill.listener.MuyianBillAccessibilityService`、通知监听服务 `muyian.bill.listener.BillNotificationListener`、确认弹层 `muyian.bill.listener.BillSheetActivity` 都注册在 `android/app/src/main/AndroidManifest.xml`；无障碍配置在 `app/src/main/res/xml/muyian_accessibility_config.xml`。
-- 改 `hybrid.kt` 或清单后重新构建安装即可；换包名/换签名后无障碍、通知使用权、悬浮窗、MIUI「后台弹出界面」、电池优化白名单都要重新授权。
+- 改 `muyian/bill/listener/` 或清单后重新构建安装即可；换包名/换签名后无障碍、通知使用权、悬浮窗、MIUI「后台弹出界面」、电池优化白名单都要重新授权。

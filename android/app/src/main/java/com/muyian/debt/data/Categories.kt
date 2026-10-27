@@ -1,7 +1,5 @@
 package com.muyian.debt.data
 
-import androidx.compose.ui.graphics.Color
-import com.muyian.debt.ui.theme.hex
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -67,20 +65,24 @@ object Cats {
     fun load(prefs: Prefs): CategoryData {
         val raw = prefs.str(STORAGE_KEY, "")
         if (raw.isNotEmpty()) {
-            try {
-                val o = JSONObject(raw)
-                val e = o.optJSONArray("expense")
-                val i = o.optJSONArray("income")
-                if (e != null && i != null) {
-                    return CategoryData(parseList(e), parseList(i))
-                }
-            } catch (_: Exception) {
-                // 落回默认
-            }
+            fromJson(raw)?.let { return it }
         }
         val data = CategoryData(defaultExpense(), defaultIncome())
         save(prefs, data)
         return data
+    }
+
+    /** 备份/导入用的分类反序列化；结构不完整时返回 null。 */
+    fun fromJson(raw: String): CategoryData? = try {
+        fromJsonObject(JSONObject(raw))
+    } catch (_: Exception) {
+        null
+    }
+
+    fun fromJsonObject(o: JSONObject): CategoryData? {
+        val e = o.optJSONArray("expense") ?: return null
+        val i = o.optJSONArray("income") ?: return null
+        return CategoryData(parseList(e), parseList(i))
     }
 
     private fun parseList(arr: JSONArray): MutableList<Category> {
@@ -160,13 +162,16 @@ object Cats {
         return name
     }
 
-    fun colorOf(data: CategoryData, name: String, type: String = "expense"): Color {
+    /** 分类色板索引 -> hex；页面侧自行映射成主题 Color，数据层不依赖 Compose。 */
+    fun paletteHex(index: Int): String = PALETTE[((index % PALETTE.size) + PALETTE.size) % PALETTE.size]
+
+    fun colorHexOf(data: CategoryData, name: String, type: String = "expense"): String {
         val list = data.list(type)
         val idx = list.indexOfFirst { it.name == name }
-        if (idx >= 0) return hex(PALETTE[idx % PALETTE.size])
+        if (idx >= 0) return paletteHex(idx)
         var hash = 0
         for (ch in name) hash = (hash * 31 + ch.code) and 0x7FFFFFFF
-        return hex(PALETTE[hash % PALETTE.size])
+        return paletteHex(hash)
     }
 
     fun parentOf(data: CategoryData, name: String, type: String = "expense"): String {

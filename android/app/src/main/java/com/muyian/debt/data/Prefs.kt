@@ -3,6 +3,13 @@ package com.muyian.debt.data
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 
+/** 应用级 SharedPreferences 键的唯一来源，避免同一个键在多个文件里各写一遍。 */
+object PrefKeys {
+    const val THEME = "muyian_theme_v1"
+    const val HERO_IMG = "muyian_hero_img_v1"
+    const val HIDE_RECENTS = "muyian_hide_recents_v1"
+}
+
 /**
  * 本地设置存储。旧版本把分类/主题/角色选择存在 databases/DCStorage 里，
  * 同包名升级时这里会做一次只读迁移；新装用户直接用默认值。

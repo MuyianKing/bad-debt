@@ -5,6 +5,14 @@ import muyian.bill.listener.MuyianBillCore
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** 账单写入结果：不再用 Boolean 吞掉原生返回的错误原因。 */
+data class BillWriteResult(val ok: Boolean, val error: String = "") {
+    companion object {
+        val Success = BillWriteResult(true)
+        fun fail(message: String) = BillWriteResult(false, message)
+    }
+}
+
 /** 账单数据层：统一走 hybrid.kt 的原生 SQLite 实现，页面只认 Bill。 */
 object Bills {
     fun parseArray(raw: String?): List<Bill> {
@@ -37,6 +45,30 @@ object Bills {
         orderNo = o.optString("orderNo", "")
     )
 
+    /** 账单 JSON 的唯一出站定义：备份、导入、导出都走这里，字段变更只改一处。 */
+    fun toJson(b: Bill): JSONObject = JSONObject()
+        .put("id", b.id)
+        .put("year", b.year)
+        .put("month", b.month)
+        .put("day", b.day)
+        .put("clock", b.clock)
+        .put("money", b.money)
+        .put("bankName", b.bankName)
+        .put("costType", b.costType)
+        .put("orderRemark", b.orderRemark)
+        .put("source", b.source)
+        .put("sourcePkg", b.sourcePkg)
+        .put("createdAt", b.createdAt)
+        .put("reimb", b.reimb)
+        .put("starred", b.starred)
+        .put("orderNo", b.orderNo)
+
+    fun toJsonArray(list: List<Bill>): JSONArray {
+        val arr = JSONArray()
+        for (b in list) arr.put(toJson(b))
+        return arr
+    }
+
     fun month(context: Context, year: Int, month: Int): List<Bill> =
         parseArray(MuyianBillCore.getMonthBills(context, year.toString(), month.toString()))
 
@@ -68,16 +100,11 @@ object Bills {
         remark: String,
         reimb: Boolean,
         starred: Boolean
-    ): Boolean {
-        val raw = MuyianBillCore.saveBillEx(
+    ): BillWriteResult = write(
+        MuyianBillCore.saveBillEx(
             context, date, amount.toString(), isIncome, "手动", costType, remark, reimb, starred
         )
-        return try {
-            JSONObject(raw).optBoolean("success", false)
-        } catch (_: Exception) {
-            false
-        }
-    }
+    )
 
     fun update(
         context: Context,
@@ -89,16 +116,19 @@ object Bills {
         remark: String,
         reimb: Boolean,
         starred: Boolean
-    ): Boolean {
-        val raw = MuyianBillCore.updateBill(
+    ): BillWriteResult = write(
+        MuyianBillCore.updateBill(
             context, id, date, amount.toString(), isIncome, "手动", costType, remark, reimb, starred
         )
-        return try {
-            JSONObject(raw).optBoolean("success", false)
-        } catch (_: Exception) {
-            false
-        }
-    }
+    )
 
     fun delete(context: Context, id: Long): Boolean = MuyianBillCore.deleteBill(context, id.toString())
+
+    private fun write(raw: String): BillWriteResult = try {
+        val o = JSONObject(raw)
+        if (o.optBoolean("success", false)) BillWriteResult.Success
+        else BillWriteResult.fail(o.optString("error", ""))
+    } catch (_: Exception) {
+        BillWriteResult.fail("write failed")
+    }
 }

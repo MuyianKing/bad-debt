@@ -25,7 +25,7 @@
   ./gradlew assembleRelease
   ```
   release 默认只开 R8 与资源裁剪，**没有配置签名**；正式分发请自行配置 `signingConfig`，或用 `apksigner` 对产物签名。
-- 改 `hybrid.kt`、`android/app/src/main/AndroidManifest.xml` 或资源后重新构建安装即可；没有自定义调试基座这一层。
+- 改 `muyian/bill/listener/` 下任意文件、`android/app/src/main/AndroidManifest.xml` 或资源后重新构建安装即可；没有自定义调试基座这一层。
 
 ## 相机与权限
 
