@@ -42,9 +42,23 @@
       }
     },
     {
+      "path": "pages/import/import",
+      "style": {
+        "navigationBarTitleText": "导入账单",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/backup/backup",
+      "style": {
+        "navigationBarTitleText": "备份·恢复",
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/settings/settings",
       "style": {
-        "navigationBarTitleText": "设置",
+        "navigationBarTitleText": "设置·关于",
         "navigationStyle": "custom"
       }
     }

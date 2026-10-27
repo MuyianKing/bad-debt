@@ -8,7 +8,7 @@
 
 ## 解析成功不等于入账
 
-- **解析成功的账单不自动入账**：检测到支付后从屏幕底部滑出确认弹层（`BillSheetActivity`，透明 Activity），用户点"保存"才写库；取消/返回/60 秒超时/熄屏都直接丢弃这一笔。弹层不是 WindowManager 悬浮窗，但 **MIUI/HyperOS 把"后台启动 Activity"绑在 `SYSTEM_ALERT_WINDOW` 上**，manifest 必须声明该权限并在设置页引导「后台弹出界面」，否则 `startActivity` 会被系统直接 Abort（日志：`MIUILOG- Permission Denied Activity` / `Abort background activity starts`）。**不再有悬浮卡、兜底草稿、待确认通知**，任何改动不得重新引入这些旁路，也不得绕过确认直接入账。
+- **解析成功的账单不自动入账**：检测到支付后从屏幕底部滑出确认弹层（`BillSheetActivity`，透明 Activity），用户点"保存"才写库；取消/返回/60 秒超时，以及弹层已经显示后的熄屏，都直接丢弃这一笔。弹层从一开始就没能拉起（熄屏/锁屏、ROM 拦截后台 Activity、启动超时）时，改发一条「待确认」通知兜底；点通知仍打开同一个确认弹层，通知本身不写库、没有直接入账入口。弹层不是 WindowManager 悬浮窗，但 **MIUI/HyperOS 要求「显示在其他应用上层」（`SYSTEM_ALERT_WINDOW`）和独立的「后台弹出界面」（MIUI AppOp 10021）都允许**，只开前者时系统日志为 `MIUILOG- Permission Denied Activity` / `Abort background activity starts`；manifest 必须声明 `SYSTEM_ALERT_WINDOW`，设置页分别展示两项状态（「后台弹出界面」仅小米/Redmi/POCO 显示）并提供对应授权入口。**不再有悬浮卡、兜底草稿；待确认通知只允许作为弹层拉不起来时的入口，不得演化成旁路**，任何改动不得绕过确认直接入账。
 
 ## 隐私红线
 

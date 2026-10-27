@@ -36,11 +36,23 @@ export function isKeepAliveEnabled(): boolean
 /** 开启/关闭后台保活前台服务，返回是否设置成功 */
 export function setKeepAliveEnabled(enabled: boolean): boolean
 
-/** MIUI/HyperOS 的"后台弹出界面"开关是否已允许（对应"显示在其他应用上层"）；弹层是 Activity，不用它绘制窗口 */
+/** 系统"显示在其他应用上层"（SYSTEM_ALERT_WINDOW）是否已允许；弹层是 Activity，不用它绘制窗口 */
 export function hasOverlayPermission(): boolean
 
 /** 打开系统的"显示在其他应用上层"授权页 */
 export function requestOverlayPermission(): boolean
+
+/**
+ * 弹层弹出权限状态（JSON 字符串）：
+ * {"miui":bool,"overlay":bool,"miuiPopup":int,"miuiPopupKnown":bool,"blocked":bool}
+ * miui：是否小米/Redmi/POCO 设备，false 时页面不显示「后台弹出界面」项；
+ * overlay：显示在其他应用上层；miuiPopup：MIUI「后台弹出界面」AppOp 10021（0 允许/1 忽略/2 拒绝/3 默认）；
+ * known=false 表示系统不提供或隐藏 API 读取被拦截；blocked=true 表示最近 7 天实际拦截过弹层。
+ */
+export function getPopupPermissionState(): string
+
+/** 打开 MIUI 的「后台弹出界面」权限编辑页；非 MIUI 退回应用详情页 */
+export function openPopupPermissionSettings(): boolean
 
 /** 设置支付后底部确认弹层的主题强调色（#RRGGBB，字面色——原生不认 CSS 变量），下次弹层生效 */
 export function setCardThemeColor(color: string): boolean
@@ -83,3 +95,47 @@ export function deleteBill(id: string): boolean
  * 文本需包含完成标记（如"支付成功"）与金额，返回结果 JSON 字符串。
  */
 export function emitTestBill(text: string): string
+
+// ---------- 钱迹 Excel 导入（本地解析，不联网） ----------
+
+/** 拉起系统文件选择器选钱迹导出的 Excel，返回 {"success":bool,"error"?:string}；结果由 getImportPickState 轮询 */
+export function openImportPicker(): string
+
+/** 选文件状态：{"state":"idle|picking|picked|cancelled|error","path":"","name":"","error":""} */
+export function getImportPickState(): string
+
+/**
+ * 读取钱迹 xlsx 的原始表格（不做账单语义解析）。
+ * 返回 {"ok":true,"header":["ID","时间",…],"width":n,"total":n,"capped"?:true}；
+ * 数据行由 getImportSheetRows 分块取回，再交给 common/qianji-import.js 解析。
+ */
+export function readImportSheet(path: string): string
+
+/** 分块读取原始数据行（不含表头），返回 {"total":n,"rows":[["…"],…]} */
+export function getImportSheetRows(offset: string, limit: string): string
+
+/** 统计一组钱迹单号在库中已存在的条数，返回 {"count":n} JSON 字符串 */
+export function countExistingOrders(orderNosJson: string): string
+
+/** 批量入库（页面映射好的账单数组 JSON，金额带符号），按 orderNo 去重，返回 {"success","inserted","skipped"} */
+export function commitImportBills(billsJson: string): string
+
+// ---------- 本应用备份（导出 / 恢复） ----------
+
+/** 拉起系统"另存为"保存备份文件，返回 {"success":bool,"error"?:string}；结果由 getBackupSaveState 轮询 */
+export function openBackupExport(content: string, name: string): string
+
+/** 导出状态：{"state":"idle|saving|saved|cancelled|error","name":"","error":""} */
+export function getBackupSaveState(): string
+
+/** 选择本应用备份 JSON，返回 {"success":bool,"error"?:string}；结果由 getImportPickState 轮询 */
+export function openBackupPicker(): string
+
+/** 读取备份文件文本（UTF-8），返回 {"ok":bool,"text":"","error"?:string} */
+export function readBackupText(path: string): string
+
+/** 按原 id 恢复账单（同 id / 同单号跳过），返回 {"success","inserted","skipped"} */
+export function commitBackupBills(billsJson: string): string
+
+/** 全量账单分页（导出用），offset/limit 为数字字符串，返回 {"total":n,"rows":[…]} */
+export function getAllBills(offset: string, limit: string): string

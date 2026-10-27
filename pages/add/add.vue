@@ -20,50 +20,60 @@
       </view>
     </view>
 
-    <!-- 分类宫格 -->
-    <scroll-view scroll-y class="cat-scroll">
-      <view :key="isIncome ? 'in' : 'out'" class="cat-grid">
-        <view
-          v-for="(c, i) in cats"
-          :key="c.name"
-          class="cat-item"
-          @tap="selectCat(i)"
-        >
-          <view
-            :class="['cat-circle', selectedTop === c.name ? 'cat-circle-active' : '']"
-          >
-            <app-icon :name="c.icon || 'grid'" :color="selectedTop === c.name ? theme.primaryDeep : '#7a8194'" :size="25" :solid="true"></app-icon>
+    <!-- 分类宫格：角色浮在空白处，不占键盘高度、也不进滚动流 -->
+    <view class="cat-area">
+      <scroll-view scroll-y class="cat-scroll">
+        <view class="cat-flow">
+          <view :key="isIncome ? 'in' : 'out'" class="cat-grid">
+            <template v-for="(c, i) in cats" :key="c.name">
+              <view class="cat-item" @tap="selectCat(i)">
+                <view
+                  :class="['cat-circle', selectedTop === c.name ? 'cat-circle-active' : '']"
+                >
+                  <app-icon :name="c.icon || 'grid'" :color="selectedTop === c.name ? theme.primaryDeep : '#7a8194'" :size="25" :solid="true"></app-icon>
+                </view>
+                <text :class="['cat-name', selectedTop === c.name ? 'cat-name-active' : '']">{{ c.name }}</text>
+              </view>
+              <!-- 子类：插在父类所在行的紧下方，整行展开；箭头指向父类那一列 -->
+              <view
+                v-if="subList.length && i === subRowEndIndex"
+                class="sub-row"
+                :style="{ '--caret-left': subCaretLeft }"
+              >
+                <view
+                  v-for="s in subList"
+                  :key="s.name"
+                  :class="['sub-chip', selectedSub === s.name ? 'sub-chip-active' : '']"
+                  @tap="selectSub(s.name)"
+                >
+                  <view class="sub-chip-inner"><app-icon :name="s.icon || 'grid'" :color="selectedSub === s.name ? '#ffffff' : '#8a90a0'" :size="15" :solid="true"></app-icon><text class="sub-chip-text">{{ s.name }}</text></view>
+                </view>
+              </view>
+            </template>
           </view>
-          <text :class="['cat-name', selectedTop === c.name ? 'cat-name-active' : '']">{{ c.name }}</text>
         </view>
+      </scroll-view>
+
+      <!-- 分类区右下角角色：固定层，不随分类列表滚动 -->
+      <view class="cat-mascot">
+        <view class="cat-mascot-say">
+          <text class="cat-mascot-name">{{ activeMascot.name }}</text>
+          <text class="cat-mascot-text">：{{ mascotLine }}</text>
+        </view>
+        <mascot-face :mood="inputMood" :size="145"></mascot-face>
       </view>
-      <!-- 子类 -->
-      <view v-if="subList.length" class="sub-row">
-        <view
-          :class="['sub-chip', !selectedSub ? 'sub-chip-active' : '']"
-          @tap="selectSub('')"
-        >
-          <text>全部</text>
-        </view>
-        <view
-          v-for="s in subList"
-          :key="s.name"
-          :class="['sub-chip', selectedSub === s.name ? 'sub-chip-active' : '']"
-          @tap="selectSub(s.name)"
-        >
-          <view class="sub-chip-inner"><app-icon :name="s.icon || 'grid'" :color="selectedSub === s.name ? '#ffffff' : '#8a90a0'" :size="15" :solid="true"></app-icon><text class="sub-chip-text">{{ s.name }}</text></view>
-        </view>
-      </view>
-      <view class="grid-bottom-space"></view>
-    </scroll-view>
+    </view>
 
     <!-- 底部：备注 + 键盘 -->
     <view class="keypad-panel glass">
       <view class="input-row">
+        <view class="input-mascot">
+          <mascot-face :mood="inputMood" head :size="64"></mascot-face>
+        </view>
         <input
           class="remark-input"
           v-model="remark"
-          placeholder="点此输入备注..."
+          :placeholder="isIncome ? '这笔从哪来？' : '这笔花在哪？'"
           placeholder-class="remark-placeholder"
           confirm-type="done"
         />
@@ -74,12 +84,10 @@
       </view>
 
       <view class="chips-row">
-        <picker mode="date" :value="dateValue" @change="onDateChange">
-          <view class="chip glass">
-            <app-icon name="calendar" :color="theme.inkSub" :size="15"></app-icon>
-            <text class="chip-text">{{ dateChipText }}</text>
-          </view>
-        </picker>
+        <view class="chip glass" @tap="openDatePicker">
+          <app-icon name="calendar" :color="theme.inkSub" :size="15"></app-icon>
+          <text class="chip-text">{{ dateChipText }}</text>
+        </view>
         <view :class="['chip', reimb ? 'chip-active' : '']" @tap="reimb = !reimb">
           <text class="chip-text">报销</text>
         </view>
@@ -121,6 +129,12 @@
       </view>
     </view>
 
+    <!-- 角色反馈：成功大笑，金额不合法时不服，短暂出现后自动消失 -->
+    <view v-if="savedShow" class="saved-toast">
+      <mascot-face :mood="savedMood" head :size="112"></mascot-face>
+      <text class="saved-text">{{ savedText }}</text>
+    </view>
+
     <!-- 备注图片操作菜单 -->
     <wd-action-sheet
       v-model="imgMenuShow"
@@ -130,14 +144,20 @@
       :safe-area-inset-bottom="true"
       @select="onImageMenuSelect"
     ></wd-action-sheet>
+
+    <!-- 日期选择：wot 日期面板（原生 picker 在深色主题下是白底） -->
+    <wd-datetime-picker ref="datePickerRef" v-model="dateStamp" type="date" :z-index="300">
+      <view></view>
+    </wd-datetime-picker>
   </view>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
-import { todayStr, evalExpr } from '@/common/fmt.js'
+import { ref, computed, onUnmounted } from 'vue'
+import { onLoad, onShow, onHide } from '@dcloudio/uni-app'
+import { todayStr, evalExpr, fmtMoneyInput, pad2 } from '@/common/fmt.js'
 import { listByType } from '@/common/cats.js'
+import { activeMascot, refreshMascots } from '@/common/mascots.js'
 import { theme, themeClass, refreshTheme } from '@/common/theme.js'
 // #ifdef APP-PLUS
 import { saveBillEx, updateBill } from '@/uni_modules/muyian-bill-listener'
@@ -147,6 +167,8 @@ import { saveBillEx, updateBill } from '@/common/web-bill-api.js'
 // #endif
 
 const mode = ref('new') // new | edit
+// 分类宫格列数：CSS 的 grid-template-columns 也写的是 5，改列数要同步
+const CAT_COLS = 5
 const editId = ref('')
 const isIncome = ref(false)
 const cats = ref([])
@@ -157,6 +179,20 @@ const expr = ref('')
 const reimb = ref(false)
 const starred = ref(false)
 const dateValue = ref(todayStr())
+// wot 日期面板吃时间戳；确认时转回 YYYY-MM-DD，页面间仍按字符串传日期
+const datePickerRef = ref(null)
+const dateStamp = computed({
+  get: () => {
+    const parts = String(dateValue.value).split('-').map(Number)
+    const t = new Date(parts[0], parts[1] - 1, parts[2]).getTime()
+    return isNaN(t) ? Date.now() : t
+  },
+  set: (stamp) => {
+    const d = new Date(Number(stamp))
+    if (isNaN(d.getTime())) return
+    dateValue.value = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
+  }
+})
 const imgPath = ref('')
 // 备注图片操作菜单（wot action sheet）
 const imgMenuShow = ref(false)
@@ -166,10 +202,41 @@ const imgMenuItems = [
   { name: '更换图片' }
 ]
 const launchQuery = ref({})
+// 保存成功反馈：短暂显示角色表情，不阻塞键盘
+const savedShow = ref(false)
+const savedText = ref('')
+const savedMood = ref('success')
+let savedTimer = null
+// 保存后到返回之间忽略重复点击，避免反馈窗口里重复入账
+let leaving = false
 
 const selectedTop = computed(() => (cats.value[selectedTopIndex.value] || {}).name || '')
 const subList = computed(() => (cats.value[selectedTopIndex.value] || {}).subs || [])
+/** 父类所在行的最后一个下标：子类面板插在它后面，整行展开 */
+const subRowEndIndex = computed(() => {
+  if (!subList.value.length) return -1
+  const rowStart = Math.floor(selectedTopIndex.value / CAT_COLS) * CAT_COLS
+  return Math.min(cats.value.length - 1, rowStart + CAT_COLS - 1)
+})
+/** 箭头对准父类那一列的中心：10% / 30% / 50% / 70% / 90% */
+const subCaretLeft = computed(() => (((selectedTopIndex.value % CAT_COLS) + 0.5) * (100 / CAT_COLS)) + '%')
 const displayAmount = computed(() => (expr.value ? expr.value : '0.0'))
+/** 输入行的角色表情：金额有效看收入/支出，算不出来或为 0 时换成「不服」 */
+const inputMood = computed(() => {
+  if (!expr.value) return 'idle'
+  const v = evalExpr(expr.value)
+  if (!isFinite(v) || v <= 0) return 'warn'
+  return isIncome.value ? 'success' : 'idle'
+})
+/** 角色台词：收入/支出分开写，收入先问来源，支出先问去处 */
+const mascotLine = computed(() => {
+  if (mode.value === 'edit') return isIncome.value ? '改这笔进账' : '改这笔支出'
+  if (!expr.value) return isIncome.value ? '进账多少？' : '这笔花在哪？'
+  const v = evalExpr(expr.value)
+  if (!isFinite(v)) return isIncome.value ? '进账怎么算？' : '支出怎么算？'
+  if (v <= 0) return isIncome.value ? '进账得大于 0' : '支出得大于 0'
+  return isIncome.value ? '进账啦' : '花哪儿了？'
+})
 const dateChipText = computed(() => (dateValue.value === todayStr() ? '今天' : dateValue.value.slice(5).replace('-', '/')))
 
 onLoad((query) => {
@@ -185,16 +252,27 @@ onLoad((query) => {
   if (q.starred === '1') starred.value = true
 })
 
+/** 深色主题的黑底需要白色状态栏图标（与设置页一致） */
+function applyStatusBarStyle() {
+  // #ifdef APP-PLUS
+  try {
+    plus.navigator.setStatusBarStyle(theme.value.dark ? 'light' : 'dark')
+  } catch (e) {}
+  // #endif
+}
+
 onShow(() => {
   refreshTheme()
+  refreshMascots()
+  applyStatusBarStyle()
   // 分类每次进入都刷新，便于刚在分类管理里改完回来生效
   cats.value = listByType(isIncome.value ? 'income' : 'expense')
   if (selectedTopIndex.value >= cats.value.length) selectedTopIndex.value = 0
 
   if (mode.value === 'edit' && !expr.value) {
-    // 编辑模式：参数带入
+    // 编辑模式：参数带入；金额去掉小数末尾无效的 0（12.00 -> 12，12.50 -> 12.5）
     const params = launchQuery.value || {}
-    expr.value = params.money || ''
+    expr.value = fmtMoneyInput(params.money || '')
     remark.value = params.remark || ''
     if (params.costType) {
       const list = cats.value
@@ -216,6 +294,13 @@ onShow(() => {
       remark.value = rm.slice(0, rm.indexOf('{{img:')).trim()
     }
   }
+})
+
+onHide(() => {
+  // 下一层页面沿用清单默认的深色图标
+  // #ifdef APP-PLUS
+  try { plus.navigator.setStatusBarStyle('dark') } catch (e) {}
+  // #endif
 })
 
 function switchType(income) {
@@ -254,9 +339,8 @@ function selectLeaf(name) {
 
 const leafName = computed(() => selectedSub.value || selectedTop.value || '其它')
 
-function onDateChange(e) {
-  const v = e.detail && e.detail.value ? String(e.detail.value) : ''
-  if (v) dateValue.value = v
+function openDatePicker() {
+  if (datePickerRef.value) datePickerRef.value.open()
 }
 
 function onImageChip() {
@@ -342,7 +426,7 @@ function buildRemark() {
   return imgPath.value ? (text ? text + ' ' : '') + '{{img:' + imgPath.value + '}}' : text
 }
 
-function persist(amount, keepOpen) {
+function persist(amount) {
   if (!isFinite(amount) || amount <= 0) {
     uni.showToast({ title: '请输入大于0的有效金额', icon: 'none' })
     return false
@@ -359,8 +443,16 @@ function persist(amount, keepOpen) {
     uni.showToast({ title: '保存失败', icon: 'none' })
     return false
   }
-  uni.showToast({ title: keepOpen ? '已记一笔' : '已入账', icon: 'success' })
   return true
+}
+
+/** 角色反馈：成功用大笑，提醒用不服；默认 500ms 后自动消失 */
+function flashSaved(text, mood = 'success', duration = 500) {
+  savedText.value = text
+  savedMood.value = mood
+  savedShow.value = true
+  clearTimeout(savedTimer)
+  savedTimer = setTimeout(() => { savedShow.value = false }, duration)
 }
 
 function bankNameOf() {
@@ -368,17 +460,37 @@ function bankNameOf() {
 }
 
 function onSave() {
+  if (leaving) return
   const amount = currentAmount()
-  if (!persist(amount, false)) return
-  setTimeout(() => { uni.navigateBack() }, 400)
+  if (!isFinite(amount) || amount <= 0) {
+    flashSaved('先填个数', 'empty', 900)
+    return
+  }
+  if (!persist(amount)) return
+  leaving = true
+  flashSaved(mode.value === 'edit' ? '改好了' : (isIncome.value ? '进账了' : '记下了'))
+  setTimeout(() => {
+    uni.navigateBack({
+      fail: () => { leaving = false }
+    })
+  }, 520)
 }
 
 function onAgain() {
   const amount = currentAmount()
-  if (!persist(amount, true)) return
+  if (!isFinite(amount) || amount <= 0) {
+    flashSaved('先填个数', 'empty', 900)
+    return
+  }
+  if (!persist(amount)) return
+  flashSaved(isIncome.value ? '进账了' : '记下了')
   expr.value = ''
   remark.value = ''
 }
+
+onUnmounted(() => {
+  clearTimeout(savedTimer)
+})
 
 function goBack() {
   uni.navigateBack()
@@ -450,20 +562,32 @@ function goCategories() {
   width: 130rpx;
   height: 6rpx;
   border-radius: 4rpx;
-  background: var(--grad-primary);
+  background-color: var(--c-primary);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
 }
 .nav-line-in {
   background-color: var(--c-in);
 }
-.cat-scroll {
+/* 分类区：滚动层与固定角色层分开，角色不跟列表滚动 */
+.cat-area {
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+.cat-scroll {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+}
+/* 底部留出角色高度，滚到底时最后一行能避开角色 */
+.cat-flow {
+  padding-bottom: 190rpx;
 }
 .cat-grid {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
   padding: 18rpx 8rpx 0;
   animation: gridIn 0.22s ease both;
 }
@@ -478,10 +602,10 @@ function goCategories() {
   }
 }
 .cat-item {
-  width: 20%;
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 0;
   padding: 14rpx 0;
 }
 .cat-circle {
@@ -514,11 +638,42 @@ function goCategories() {
   color: var(--c-primary-deep);
   font-weight: 600;
 }
+/* 子类面板：插在父类所在行后面，整行展开；箭头对准父类那一列 */
 .sub-row {
+  grid-column: 1 / -1;
+  position: relative;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
-  padding: 8rpx 32rpx;
+  margin: 4rpx 8rpx 10rpx;
+  padding: 10rpx 16rpx 4rpx;
+  background-color: var(--c-primary-weak);
+  border: 1rpx solid var(--c-primary-tint);
+  border-radius: 20rpx;
+  animation: subRowIn 0.16s ease both;
+}
+.sub-row::before {
+  content: '';
+  position: absolute;
+  top: -9rpx;
+  left: var(--caret-left, 10%);
+  width: 18rpx;
+  height: 18rpx;
+  background-color: var(--c-primary-weak);
+  border-left: 1rpx solid var(--c-primary-tint);
+  border-top: 1rpx solid var(--c-primary-tint);
+  border-radius: 3rpx 0 0 0;
+  transform: translateX(-50%) rotate(45deg);
+}
+@keyframes subRowIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .sub-chip {
   background-color: var(--c-fill);
@@ -537,13 +692,43 @@ function goCategories() {
   margin-left: 8rpx;
 }
 .sub-chip-active {
-  background: var(--grad-primary);
+  background-color: var(--c-primary-fill);
   color: #ffffff;
   font-weight: 600;
-  box-shadow: var(--shadow-primary-sm);
+  box-shadow: var(--shadow-card-soft);
 }
-.grid-bottom-space {
-  height: 20rpx;
+/* 分类区右下角角色：固定贴在键盘上沿，只做展示，不拦截分类点击 */
+.cat-mascot {
+  position: absolute;
+  right: 40rpx;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  padding-bottom: 4rpx;
+  pointer-events: none;
+}
+.cat-mascot-say {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  margin-right: 6rpx;
+  margin-bottom: 36rpx;
+  max-width: 380rpx;
+}
+.cat-mascot-name {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--c-primary-deep);
+  flex-shrink: 0;
+}
+.cat-mascot-text {
+  font-size: 24rpx;
+  color: var(--c-sub);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .keypad-panel {
   background-color: var(--glass-bg);
@@ -559,8 +744,22 @@ function goCategories() {
   flex-direction: row;
   align-items: center;
   padding: 0 12rpx 16rpx;
-  border-bottom: 1rpx solid #e9ebf1;
+  border-bottom: 1rpx solid var(--c-line);
   margin-bottom: 16rpx;
+}
+/* 输入行的角色头像：随收入/支出切换表情，不抢金额的注意力 */
+.input-mascot {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background-color: var(--c-primary-weak);
+  border: 1rpx solid var(--c-primary-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 14rpx;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 .remark-input {
   flex: 1;
@@ -622,8 +821,8 @@ function goCategories() {
   margin-left: 0;
 }
 .chip-active {
-  background: var(--grad-primary);
-  box-shadow: var(--shadow-primary-sm);
+  background-color: var(--c-primary-fill);
+  box-shadow: var(--shadow-card-soft);
 }
 .chip-active .chip-text {
   color: #ffffff;
@@ -681,8 +880,8 @@ function goCategories() {
   font-weight: 600;
 }
 .key-save {
-  background: var(--grad-primary);
-  box-shadow: 0 3rpx 0 var(--c-primary-press), var(--shadow-primary);
+  background-color: var(--c-primary-fill);
+  box-shadow: 0 3rpx 0 var(--c-primary-press);
 }
 .key-save-hover {
   transform: translateY(2rpx);
@@ -694,5 +893,41 @@ function goCategories() {
   font-size: 31rpx;
   font-weight: 700;
   letter-spacing: 2rpx;
+}
+/* 保存成功反馈：浮在页面上方，不拦截后续操作 */
+.saved-toast {
+  position: fixed;
+  left: 50%;
+  top: 38%;
+  z-index: 400;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28rpx 40rpx 24rpx;
+  border-radius: 28rpx;
+  background-color: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  border: 1rpx solid var(--glass-border);
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+  animation: savedIn 0.18s ease both;
+}
+.saved-text {
+  margin-top: 10rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--c-text);
+}
+@keyframes savedIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 </style>

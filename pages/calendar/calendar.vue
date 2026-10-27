@@ -11,12 +11,10 @@
       @click-left="goBack"
     >
       <template #title>
-        <picker mode="date" fields="month" :value="pickerValue" @change="onMonthChange">
-          <view class="cal-title">
-            <text class="cal-title-text">{{ year }}.{{ pad2(month) }}</text>
-            <app-icon name="chevron-down" :color="theme.ink" :size="14"></app-icon>
-          </view>
-        </picker>
+        <view class="cal-title" @tap="openMonthPicker">
+          <text class="cal-title-text">{{ year }}.{{ pad2(month) }}</text>
+          <app-icon name="chevron-down" :color="theme.ink" :size="14"></app-icon>
+        </view>
       </template>
     </wd-navbar>
 
@@ -53,38 +51,54 @@
         <text>{{ m.label }}</text>
       </view>
     </view>
-    <view class="day-head">
-      <text class="day-head-title">{{ dayTitle }}</text>
-      <view class="day-head-totals">
-        <template v-if="mode === 'income'">
-          <text class="ms-item">收 <text class="ms-in">{{ fmtMoney(dayIncome) }}</text></text>
-        </template>
-        <template v-else-if="mode === 'expense'">
-          <text class="ms-item">支 <text class="ms-out">{{ fmtMoney(dayExpense) }}</text></text>
-        </template>
-        <template v-else>
-          <text class="ms-item">支 <text class="ms-out">{{ fmtMoney(dayExpense) }}</text></text>
-          <text class="ms-dot">·</text>
-          <text class="ms-item">收 <text class="ms-in">{{ fmtMoney(dayIncome) }}</text></text>
-          <text class="ms-dot">·</text>
-          <text class="ms-item">结 <text :class="dayBalance < 0 ? 'ms-out' : 'ms-in'">{{ fmtMoney(dayBalance) }}</text></text>
-        </template>
+    <!-- 选中日摘要与账单合成一张卡：摘要和列表之间用细线分隔，列表行沿用 bill-list 的分隔线 -->
+    <view class="day-card glass">
+      <view :class="['day-summary', dayBills.length ? 'day-summary-rich' : '']">
+        <view class="day-card-main">
+          <view class="day-card-head">
+            <text class="day-card-title">{{ dayTitle }}</text>
+            <text v-if="dayBills.length" class="day-card-count">{{ dayBills.length }} 笔</text>
+          </view>
+          <view v-if="dayBills.length" class="day-card-totals">
+            <template v-if="mode === 'income'">
+              <text class="ms-item">收 <text class="ms-in">{{ fmtMoney(dayIncome) }}</text></text>
+            </template>
+            <template v-else-if="mode === 'expense'">
+              <text class="ms-item">支 <text class="ms-out">{{ fmtMoney(dayExpense) }}</text></text>
+            </template>
+            <template v-else>
+              <text class="ms-item">支 <text class="ms-out">{{ fmtMoney(dayExpense) }}</text></text>
+              <text class="ms-dot">·</text>
+              <text class="ms-item">收 <text class="ms-in">{{ fmtMoney(dayIncome) }}</text></text>
+              <text class="ms-dot">·</text>
+              <text class="ms-item">结 <text :class="dayBalance < 0 ? 'ms-out' : 'ms-in'">{{ fmtMoney(dayBalance) }}</text></text>
+            </template>
+          </view>
+          <view class="day-card-say">
+            <text class="day-card-say-name">{{ activeMascot.name }}</text>
+            <text class="day-card-say-text">：{{ dayLine }}</text>
+          </view>
+        </view>
+        <view v-if="dayBills.length" class="day-card-mascot">
+          <mascot-face :mood="dayMood" :size="158"></mascot-face>
+        </view>
       </view>
-    </view>
 
-    <!-- 账单列表：只展示当前选中日期 -->
-    <view class="list-area">
-      <bill-list :groups="groups" :hide-head="true" @row="onRow" @rowlong="onRowLong"></bill-list>
-    <view v-if="!groups.length" class="empty">
-      <view class="empty-ic">
-        <app-icon name="calendar" :color="theme.primary" :size="44" :stroke-width="1.6"></app-icon>
+      <view class="day-divider"></view>
+
+      <view class="day-list">
+        <bill-list :groups="groups" :hide-head="true" :flush="true" @row="onRow" @rowlong="onRowLong"></bill-list>
+        <view v-if="!groups.length" class="empty">
+          <view class="empty-ic">
+            <mascot-face mood="empty" head :size="128"></mascot-face>
+          </view>
+          <text class="empty-text">{{ emptyText }}</text>
+          <text class="empty-sub">{{ activeMascot.name }}帮你盯着</text>
+        </view>
       </view>
-      <text class="empty-text">{{ emptyText }}</text>
-    </view>
     </view>
 
     <view class="bottom-safe"></view>
-    <app-fab position="bottom-center" @click="goAdd"></app-fab>
 
     <!-- 账单操作菜单 -->
     <wd-action-sheet
@@ -95,15 +109,22 @@
       :safe-area-inset-bottom="true"
       @select="onActionSelect"
     ></wd-action-sheet>
+
+    <!-- 月份选择：wot 日期面板（原生 picker 在深色主题下是白底）。
+         弹层放在 navbar 之外，避免导航栏的 fixed/毛玻璃样式影响弹层定位 -->
+    <wd-datetime-picker ref="monthPickerRef" v-model="monthStamp" type="year-month" :z-index="300">
+      <view></view>
+    </wd-datetime-picker>
   </view>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
-import { onShow, onPageScroll } from '@dcloudio/uni-app'
+import { onShow, onHide, onPageScroll } from '@dcloudio/uni-app'
 import { fmtMoney, fmtNum, pad2, groupByDay, dayGroupTitle, daysInMonth } from '@/common/fmt.js'
 import { lunarText } from '@/common/lunar.js'
 import { theme, themeClass, refreshTheme } from '@/common/theme.js'
+import { activeMascot, refreshMascots } from '@/common/mascots.js'
 // #ifdef APP-PLUS
 import { getMonthBills, deleteBill } from '@/uni_modules/muyian-bill-listener'
 // #endif
@@ -138,7 +159,22 @@ const modes = [
   { value: 'expense', label: '支出' }
 ]
 
-const pickerValue = computed(() => year.value + '-' + pad2(month.value))
+// wot 日期面板吃时间戳；确认时才回写年月，滚动过程中不改日历数据
+const monthPickerRef = ref(null)
+const monthStamp = computed({
+  get: () => new Date(year.value, month.value - 1, 1).getTime(),
+  set: (stamp) => {
+    const d = new Date(Number(stamp))
+    if (isNaN(d.getTime())) return
+    const y = d.getFullYear()
+    const m = d.getMonth() + 1
+    if (y === year.value && m === month.value) return
+    year.value = y
+    month.value = m
+    resetSelectedDay()
+    load()
+  }
+})
 /** 选中日的全部账单 */
 const dayBillsAll = computed(() => bills.value.filter(b => Number(b.day) === Number(selectedDay.value)))
 /** 列表随「收&支 / 结余 / 收入 / 支出」过滤；结余同收&支，展示全部 */
@@ -151,6 +187,25 @@ const dayExpense = computed(() => dayBills.value.filter(b => Number(b.money) < 0
 const dayIncome = computed(() => dayBills.value.filter(b => Number(b.money) > 0).reduce((s, b) => s + Number(b.money), 0))
 const dayBalance = computed(() => dayIncome.value - dayExpense.value)
 const dayTitle = computed(() => dayGroupTitle(year.value, month.value, selectedDay.value))
+// 角色表情跟随当前筛选结果：有进账且没倒挂时大笑，其余有账单的场景用基础表情
+const dayMood = computed(() => {
+  let income = 0
+  let expense = 0
+  for (const b of dayBills.value) {
+    const n = Number(b.money) || 0
+    if (n > 0) income += n
+    else expense += Math.abs(n)
+  }
+  return income > 0 && income >= expense ? 'success' : 'idle'
+})
+const dayLine = computed(() => {
+  if (!dayBills.value.length) {
+    if (mode.value === 'income') return '这天没有进账'
+    if (mode.value === 'expense') return '这天没花钱'
+    return '这天还没开账'
+  }
+  return dayMood.value === 'success' ? '有进账，这天不错' : '钱都花这儿了'
+})
 const emptyText = computed(() => {
   if (mode.value === 'income') return '这一天还没有收入'
   if (mode.value === 'expense') return '这一天还没有支出'
@@ -232,15 +287,8 @@ function resetSelectedDay() {
   selectedDay.value = Math.min(day, daysInMonth(year.value, month.value))
 }
 
-function onMonthChange(e) {
-  const v = e.detail && e.detail.value ? String(e.detail.value) : ''
-  const parts = v.split('-')
-  if (parts.length >= 2) {
-    year.value = Number(parts[0])
-    month.value = Number(parts[1])
-    resetSelectedDay()
-    load()
-  }
+function openMonthPicker() {
+  if (monthPickerRef.value) monthPickerRef.value.open()
 }
 
 function selectDay(cell) {
@@ -294,7 +342,6 @@ function goEdit(bill) {
   uni.navigateTo({ url: '/pages/add/add?' + q })
 }
 
-function goAdd() { uni.navigateTo({ url: '/pages/add/add' }) }
 function goBack() { uni.navigateBack() }
 
 onPageScroll((e) => {
@@ -303,9 +350,27 @@ onPageScroll((e) => {
   else if (top <= 8 && navSolid.value) navSolid.value = false
 })
 
+/** 深色主题的黑底需要白色状态栏图标（与设置页一致） */
+function applyStatusBarStyle() {
+  // #ifdef APP-PLUS
+  try {
+    plus.navigator.setStatusBarStyle(theme.value.dark ? 'light' : 'dark')
+  } catch (e) {}
+  // #endif
+}
+
 onShow(() => {
   refreshTheme()
+  refreshMascots()
+  applyStatusBarStyle()
   load()
+})
+
+onHide(() => {
+  // 下一层页面沿用清单默认的深色图标
+  // #ifdef APP-PLUS
+  try { plus.navigator.setStatusBarStyle('dark') } catch (e) {}
+  // #endif
 })
 </script>
 
@@ -454,22 +519,94 @@ onShow(() => {
   font-weight: 700;
   box-shadow: var(--shadow-primary-sm);
 }
-.day-head {
+/* ---- 选中日摘要 + 账单：同一张卡，中间细线分隔 ---- */
+.day-card {
+  position: relative;
+  margin: 24rpx 24rpx 0;
+  padding: 0;
+  border-radius: 28rpx;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.day-summary {
+  position: relative;
+  padding: 22rpx 28rpx;
+  /* 角色的投影只留在摘要区内，不压到下方列表的分隔线 */
+  overflow: hidden;
+}
+/* 有账单：右侧给整身角色让位，摘要区撑到角色完整露出 */
+.day-summary-rich {
+  display: flex;
+  align-items: center;
+  min-height: 210rpx;
+  padding-right: 188rpx;
+  box-sizing: border-box;
+}
+.day-card-main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+.day-card-head {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
-  margin: 26rpx 30rpx 6rpx;
 }
-.day-head-title {
-  font-size: 28rpx;
+.day-card-title {
+  font-size: 30rpx;
   font-weight: 700;
   color: var(--c-text);
 }
-.day-head-totals {
+.day-card-count {
+  margin-left: 12rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  background-color: var(--c-primary-weak);
+  color: var(--c-primary-deep);
+  font-size: 21rpx;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.day-card-totals {
   display: flex;
   flex-direction: row;
   align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10rpx;
+}
+.day-card-say {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  margin-top: 12rpx;
+}
+.day-card-say-name {
+  font-size: 23rpx;
+  font-weight: 600;
+  color: var(--c-primary-deep);
+}
+.day-card-say-text {
+  font-size: 23rpx;
+  color: var(--c-sub);
+}
+/* 角色压在摘要区右下角，不参与文本排版 */
+.day-card-mascot {
+  position: absolute;
+  right: 10rpx;
+  bottom: 0;
+  z-index: 0;
+  width: 158rpx;
+  pointer-events: none;
+  filter: drop-shadow(0 6rpx 14rpx rgba(0, 0, 0, 0.16));
+}
+.day-divider {
+  height: 1rpx;
+  margin: 0 28rpx;
+  background-color: var(--c-line);
+}
+.day-list {
+  padding-bottom: 4rpx;
 }
 .ms-item {
   font-size: 24rpx;
@@ -487,32 +624,38 @@ onShow(() => {
   margin: 0 12rpx;
   color: var(--c-dim);
 }
-.list-area {
-  margin-top: 10rpx;
-}
 .empty {
-  padding: 100rpx 0;
+  padding: 56rpx 0 72rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 .empty-ic {
-  width: 130rpx;
-  height: 130rpx;
-  border-radius: 42rpx;
+  width: 144rpx;
+  height: 144rpx;
+  padding: 8rpx;
+  box-sizing: border-box;
+  border-radius: 50%;
   background-color: var(--c-primary-weak);
+  border: 1rpx solid var(--c-primary-tint);
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: var(--shadow-card);
   margin-bottom: 24rpx;
+  overflow: hidden;
 }
 .empty-text {
   color: var(--c-sub);
   font-size: 28rpx;
   font-weight: 600;
 }
+.empty-sub {
+  margin-top: 10rpx;
+  color: var(--c-dim);
+  font-size: 24rpx;
+}
 .bottom-safe {
-  height: calc(150rpx + env(safe-area-inset-bottom));
+  height: calc(60rpx + env(safe-area-inset-bottom));
 }
 </style>

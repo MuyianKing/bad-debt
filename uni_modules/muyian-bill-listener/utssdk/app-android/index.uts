@@ -109,6 +109,22 @@ export function requestOverlayPermission(): boolean {
   return MuyianBillCore.requestOverlayPermission(c);
 }
 
+export function getPopupPermissionState(): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"miui":false,"overlay":false,"miuiPopup":-1,"miuiPopupKnown":false,"blocked":false}';
+  }
+  return MuyianBillCore.getPopupPermissionState(c);
+}
+
+export function openPopupPermissionSettings(): boolean {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return false;
+  }
+  return MuyianBillCore.openPopupPermissionSettings(c);
+}
+
 export function setCardThemeColor(color: string): boolean {
   const c = UTSAndroid.getAppContext();
   if (c == null) {
@@ -195,4 +211,92 @@ export function emitTestBill(text: string): string {
     return '{"accepted":false,"reason":"context is null"}';
   }
   return MuyianBillCore.emitTestBill(c, text);
+}
+
+export function openImportPicker(): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"success":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.openImportPicker(c);
+}
+
+export function getImportPickState(): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"state":"idle","path":"","name":"","error":""}';
+  }
+  return MuyianBillCore.getImportPickState(c);
+}
+
+export function readImportSheet(path: string): string {
+  return MuyianBillCore.readImportSheet(path);
+}
+
+export function getImportSheetRows(offset: string, limit: string): string {
+  return MuyianBillCore.getImportSheetRows(offset, limit);
+}
+
+export function countExistingOrders(orderNosJson: string): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"count":0}';
+  }
+  return MuyianBillCore.countExistingOrders(c, orderNosJson);
+}
+
+export function commitImportBills(billsJson: string): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"success":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.commitImportBills(c, billsJson);
+}
+
+export function openBackupExport(content: string, name: string): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"success":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.openBackupExport(c, content, name);
+}
+
+export function getBackupSaveState(): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"state":"idle","name":"","error":""}';
+  }
+  return MuyianBillCore.getBackupSaveState(c);
+}
+
+export function openBackupPicker(): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"success":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.openBackupPicker(c);
+}
+
+export function readBackupText(path: string): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"ok":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.readBackupText(c, path);
+}
+
+export function commitBackupBills(billsJson: string): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"success":false,"error":"context is null"}';
+  }
+  return MuyianBillCore.commitBackupBills(c, billsJson);
+}
+
+export function getAllBills(offset: string, limit: string): string {
+  const c = UTSAndroid.getAppContext();
+  if (c == null) {
+    return '{"total":0,"rows":[]}';
+  }
+  return MuyianBillCore.getAllBills(c, offset, limit);
 }

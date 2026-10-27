@@ -50,6 +50,14 @@ export function requestOverlayPermission() {
   return false
 }
 
+export function getPopupPermissionState() {
+  return '{"miui":false,"overlay":false,"miuiPopup":-1,"miuiPopupKnown":false,"blocked":false}'
+}
+
+export function openPopupPermissionSettings() {
+  return false
+}
+
 export function setCardThemeColor(color) {
   return true
 }
@@ -90,4 +98,56 @@ export function deleteBill(id) {
 
 export function emitTestBill(text) {
   return '{"accepted":false,"reason":"h5 unsupported"}'
+}
+
+/* ---------- 钱迹 Excel 导入（依赖原生 SAF 文件选择与本地解析，H5 不支持） ---------- */
+
+export function openImportPicker() {
+  return '{"success":false,"error":"h5 unsupported"}'
+}
+
+export function getImportPickState() {
+  return '{"state":"idle","path":"","name":"","error":""}'
+}
+
+export function readImportSheet(path) {
+  return '{"ok":false,"error":"h5 unsupported"}'
+}
+
+export function getImportSheetRows(offset, limit) {
+  return '{"total":0,"rows":[]}'
+}
+
+export function countExistingOrders(orderNosJson) {
+  return '{"count":0}'
+}
+
+export function commitImportBills(billsJson) {
+  return '{"success":false,"error":"h5 unsupported"}'
+}
+
+/* ---------- 本应用备份（依赖原生文件读写，H5 不支持） ---------- */
+
+export function openBackupExport(content, name) {
+  return '{"success":false,"error":"h5 unsupported"}'
+}
+
+export function getBackupSaveState() {
+  return '{"state":"idle","name":"","error":""}'
+}
+
+export function openBackupPicker() {
+  return '{"success":false,"error":"h5 unsupported"}'
+}
+
+export function readBackupText(path) {
+  return '{"ok":false,"error":"h5 unsupported"}'
+}
+
+export function commitBackupBills(billsJson) {
+  return '{"success":false,"error":"h5 unsupported"}'
+}
+
+export function getAllBills(offset, limit) {
+  return '{"total":0,"rows":[]}'
 }

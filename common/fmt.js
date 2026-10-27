@@ -42,6 +42,17 @@ export function fmtTick(v) {
   return String(n)
 }
 
+/**
+ * 金额输入框回填：去掉小数末尾无效的 0。
+ * 12.00 -> 12，12.50 -> 12.5，12.05 -> 12.05；非数字原样返回。
+ */
+export function fmtMoneyInput(v) {
+  let s = String(v == null ? '' : v).trim()
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return s
+  s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+  return s === '-0' ? '0' : s
+}
+
 export function todayStr() {
   const d = new Date()
   return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())

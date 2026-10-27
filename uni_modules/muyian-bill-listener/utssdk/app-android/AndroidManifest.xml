@@ -63,6 +63,29 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!--
+            钱迹导入的文件选择中转 Activity：透明壳，拉起系统文件选择器（SAF），
+            把结果拷进应用私有目录后 finish。不申请存储权限；
+            configChanges 防止转屏重建后再次拉起选择器。
+        -->
+        <activity
+            android:name="muyian.bill.listener.ImportPickActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!--
+            备份导出的"另存为"中转 Activity：透明壳，拉起系统保存文件界面（SAF），
+            把进程内暂存的备份 JSON 写到用户选的位置后 finish。
+        -->
+        <activity
+            android:name="muyian.bill.listener.BackupSaveActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!--
             后台保活前台服务：低优先级常驻通知维持进程，降低锁屏/后台时被系统回收的概率。
             stopWithTask=false：用户从最近任务划掉应用后服务仍保持运行（可由用户关闭）。
         -->

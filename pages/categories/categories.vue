@@ -149,8 +149,8 @@
 </template>
 
 <script setup>
-import { ref, computed, getCurrentInstance, onUnmounted } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { ref, computed, getCurrentInstance } from 'vue'
+import { onShow, onHide } from '@dcloudio/uni-app'
 import { getCategories, saveCategories, listByType, ICON_CHOICES, DEFAULT_ICON, PALETTE, gradOf, tintOf } from '@/common/cats.js'
 import { theme, themeClass, refreshTheme } from '@/common/theme.js'
 
@@ -237,30 +237,8 @@ function onCardTouch(e) {
 }
 
 /* ---------- 拖动时锁住页面滚动 ---------- */
-let scrollLockHandler = null
-
-/**
- * 拖动期间在 document 上挂非 passive 的 touchmove 拦截。
- * 只靠行上的 e.preventDefault() 不够：WebView 可能已经在合成线程开始原生滚动，
- * 会出现"行在拖、页面也跟着滚"的双重拖动。
- */
-function lockPageScroll() {
-  if (scrollLockHandler || typeof document === 'undefined') return
-  scrollLockHandler = (e) => {
-    if (e.cancelable) e.preventDefault()
-  }
-  document.addEventListener('touchmove', scrollLockHandler, { passive: false })
-}
-
-function unlockPageScroll() {
-  if (!scrollLockHandler) return
-  if (typeof document !== 'undefined') {
-    document.removeEventListener('touchmove', scrollLockHandler, { passive: false })
-  }
-  scrollLockHandler = null
-}
-
-onUnmounted(unlockPageScroll)
+// App 端页面逻辑跑在逻辑层（app-service.js），这里没有 document；
+// 滚动发生在视图层，锁滚动由文件末尾 renderjs 的 scrollGuard 负责。
 
 function startDrag(kind, from, parentIdx = -1) {
   if (drag.value) return
@@ -279,7 +257,6 @@ function startDrag(kind, from, parentIdx = -1) {
       dy: 0,
       rects
     }
-    lockPageScroll()
     if (uni.vibrateShort) {
       try { uni.vibrateShort() } catch (e) { /* ignore */ }
     }
@@ -326,7 +303,6 @@ function onDragMove(e) {
 }
 
 function onDragEnd() {
-  unlockPageScroll()
   const d = drag.value
   if (!d) return
   drag.value = null
@@ -484,10 +460,73 @@ function onActionSelect({ index }) {
 
 function goBack() { uni.navigateBack() }
 
+/** 深色主题的黑底需要白色状态栏图标（与设置页一致） */
+function applyStatusBarStyle() {
+  // #ifdef APP-PLUS
+  try {
+    plus.navigator.setStatusBarStyle(theme.value.dark ? 'light' : 'dark')
+  } catch (e) {}
+  // #endif
+}
+
 onShow(() => {
   refreshTheme()
+  applyStatusBarStyle()
   refresh()
 })
+
+onHide(() => {
+  // 拖拽中途切后台时 touchend 可能收不到，复位拖拽状态，避免回到页面后条目还悬着
+  drag.value = null
+  // 下一层页面沿用清单默认的深色图标
+  // #ifdef APP-PLUS
+  try { plus.navigator.setStatusBarStyle('dark') } catch (e) {}
+  // #endif
+})
+</script>
+
+<!-- 拖拽排序时锁住页面滚动。App 端页面逻辑跑在逻辑层（没有 document），
+     滚动发生在视图层，所以监听必须写在 renderjs 里；H5 会把这段混入页面组件，同样生效 -->
+<script module="scrollGuard" lang="renderjs">
+export default {
+  data() {
+    return { locked: false }
+  },
+  mounted() {
+    // 非 passive 的 touchmove 守卫在页面渲染时就挂上：
+    // 浏览器从手势开始就允许 preventDefault，拖到一半再挂就来不及了
+    this.onTouchStart = (e) => {
+      // 拖到一半切后台等异常路径不会有 touchend，靠下一次单指触摸自愈
+      if (e.touches.length === 1) this.locked = false
+    }
+    // 视图层在长按 350ms（位移不超过 10px）时派发 longpress DOM 事件，
+    // 和页面 @longpress 是同一个事件，用它作为"开始拖拽"的信号
+    this.onLongPress = (e) => {
+      const row = e.target && e.target.closest && e.target.closest('.cat-row, .sub-item')
+      if (row && !row.classList.contains('sub-item-add')) this.locked = true
+    }
+    this.onTouchMove = (e) => {
+      if (!this.locked) return
+      if (e.cancelable) e.preventDefault()
+    }
+    this.onTouchEnd = () => { this.locked = false }
+
+    document.addEventListener('touchstart', this.onTouchStart, true)
+    document.addEventListener('longpress', this.onLongPress, true)
+    // 捕获阶段 + 非 passive：既不会被行上的事件转发 stopPropagation 截断，
+    // 又能真正取消 WebView 的原生滚动
+    document.addEventListener('touchmove', this.onTouchMove, { passive: false, capture: true })
+    document.addEventListener('touchend', this.onTouchEnd, true)
+    document.addEventListener('touchcancel', this.onTouchEnd, true)
+  },
+  beforeDestroy() {
+    document.removeEventListener('touchstart', this.onTouchStart, true)
+    document.removeEventListener('longpress', this.onLongPress, true)
+    document.removeEventListener('touchmove', this.onTouchMove, { capture: true })
+    document.removeEventListener('touchend', this.onTouchEnd, true)
+    document.removeEventListener('touchcancel', this.onTouchEnd, true)
+  }
+}
 </script>
 
 <style lang="scss">

@@ -2,6 +2,7 @@ package muyian.bill.listener
 
 import android.accessibilityservice.AccessibilityService
 import android.app.Activity
+import android.app.AppOpsManager
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -32,6 +33,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.text.InputType
 import android.util.Log
+import android.util.Xml
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -46,14 +48,23 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.ArrayList
 import java.util.Calendar
 import java.util.Date
+import java.util.HashSet
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.regex.Pattern
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 
 /**
  * 系统通知监听服务（辅助渠道）：收到候选App的通知后交给 MuyianBillCore 处理。
@@ -137,6 +148,7 @@ class MuyianBillAccessibilityService : AccessibilityService() {
         val lines = ArrayList<String>()
         collectTexts(root, lines, 0, intArrayOf(MAX_NODES))
         if (Build.VERSION.SDK_INT < 33) {
+            @Suppress("DEPRECATION")
             try { root.recycle() } catch (e: Exception) { }
         }
         if (lines.isEmpty()) return
@@ -219,6 +231,7 @@ class MuyianKeepAliveService : Service() {
             Log.w(TAG, "startForeground failed", e)
         }
         if (!MuyianBillCore.isKeepAliveEnabled(this)) {
+            @Suppress("DEPRECATION")
             stopForeground(true)
             stopSelf(startId)
             return START_NOT_STICKY
@@ -226,6 +239,7 @@ class MuyianKeepAliveService : Service() {
         return START_STICKY
     }
 
+    @Suppress("DEPRECATION") // 兼容 API < 26 的旧版通知构建分支
     private fun buildNotification(): Notification {
         createChannel()
         val launch = packageManager.getLaunchIntentForPackage(packageName)
@@ -268,7 +282,8 @@ class MuyianKeepAliveService : Service() {
 
 /**
  * 自动记账核心引擎：
- * 候选App过滤 -> 页面黑名单 -> "支付成功"标记解析 -> 单号优先的去重 -> 底部确认弹层。
+ * 候选App过滤 -> 页面黑名单 -> "支付成功"标记解析 -> 单号优先的去重 -> 底部确认弹层
+ * （弹层拉不起来时发一条「待确认」通知兜底，点开仍回到同一个弹层）。
  * 金额按"锚点标签 > 独立大字金额 > 上下文扫描"三级择取，余额/额度/优惠类数字不进候选。
  * 数据全部保存在本机（SQLite 存账单），不经任何服务端。
  */
@@ -281,8 +296,18 @@ class MuyianBillCore private constructor() {
         private const val KEY_ORDER_DEDUP = "order_dedup"
         private const val KEY_KEEP_ALIVE = "keep_alive_enabled"
         private const val KEY_CARD_THEME = "card_theme_color"
+        private const val KEY_NOTICE_SEQ = "pending_notice_seq"
+        private const val KEY_POPUP_BLOCKED_AT = "popup_blocked_at"
+        /** MIUI/HyperOS 的「后台弹出界面」AppOp；标准 Android 没有这个权限 */
+        private const val MIUI_POPUP_OP = 10021
+        /** 拦截标记保留 7 天，避免用户开了权限后设置页还长期挂着警告 */
+        private const val POPUP_BLOCKED_TTL_MS = 7 * 24 * 3600 * 1000L
         /** 底部弹层默认主题色：悟空黄（与前端 --c-primary 一致） */
         private val DEFAULT_CARD_THEME = 0xFFF7A600.toInt()
+        /** 弹层拉不起来时的通知兜底渠道：点开通知仍进 BillSheetActivity，不在通知里入账 */
+        private const val CHANNEL_PENDING = "bill_pending"
+        private const val PENDING_NOTICE_BASE_ID = 20000
+        private const val PENDING_NOTICE_TTL_MS = 24 * 3600 * 1000L
 
         /** 弹层队列与去重用的内存状态：不落盘，进程结束即丢弃 */
         private val sheetLock = Any()
@@ -290,6 +315,8 @@ class MuyianBillCore private constructor() {
         private val recentBills = ArrayList<JSONObject>()
         private val sheetHandler = Handler(Looper.getMainLooper())
         private var sheetShowing = false
+        /** 通知 ID 自增序号：同一时刻可能有多笔兜底通知，不能互相覆盖 */
+        private var pendingNoticeSeq = 0
         /** 建表/补列只在本进程首次开库时执行一次，避免每次查询都抛 3 次 ALTER 异常 */
         private val dbLock = Any()
         @Volatile
@@ -438,10 +465,10 @@ class MuyianBillCore private constructor() {
         /** 应用名关键词白名单的判定缓存：无障碍事件高频，避免每次都查 PackageManager */
         private val labelCache = ConcurrentHashMap<String, Boolean>()
 
-        /** App 启动时调用：清掉旧版本遗留的草稿/悬浮卡状态，再拉起保活服务 */
+        /** App 启动时调用：建好待确认通知渠道、清理旧版本遗留状态，再拉起保活服务 */
         @JvmStatic
         fun init(context: Context) {
-            // 旧版本用 SharedPreferences 存待确认草稿与通知跳转 token，现已整体移除
+            // 旧版本的草稿落盘与悬浮卡开关已整体移除；弹层拉不起来时只发通知，点开仍进弹层
             try {
                 prefs(context).edit()
                     .remove("pending_drafts")
@@ -451,14 +478,12 @@ class MuyianBillCore private constructor() {
             } catch (e: Exception) {
                 Log.w(TAG, "clean legacy prefs failed", e)
             }
-            // 旧的"记账待确认"通知渠道一并删掉，避免通知设置里残留
+            createPendingChannel(context)
+            // 启动时记录一次弹层权限状态，便于排查"权限显示已开但弹层仍被拦"
             try {
-                if (Build.VERSION.SDK_INT >= 26) {
-                    val nm = context.getSystemService("notification") as NotificationManager
-                    nm.deleteNotificationChannel("bill_pending")
-                }
+                Log.i(TAG, "popup permission state " + getPopupPermissionState(context))
             } catch (e: Exception) {
-                Log.w(TAG, "delete legacy channel failed", e)
+                Log.w(TAG, "probe popup permission state failed", e)
             }
             // 默认开启后台保活；用户明确关闭过则不再拉起
             if (isKeepAliveEnabled(context)) {
@@ -517,6 +542,89 @@ class MuyianBillCore private constructor() {
                 true
             } catch (e: Exception) {
                 Log.w(TAG, "open overlay settings failed", e)
+                false
+            }
+        }
+
+        /**
+         * 弹层弹出权限状态：
+         * overlay = "显示在其他应用上层"（SYSTEM_ALERT_WINDOW）；
+         * miuiPopup = MIUI/HyperOS 的「后台弹出界面」AppOp 10021（0=允许 1=忽略 2=拒绝 3=默认），
+         *   known=false 表示系统不提供或隐藏 API 被拦截；
+         * blocked = 最近 7 天确实发生过"亮屏但弹层被系统拦住"。
+         */
+        @JvmStatic
+        fun getPopupPermissionState(context: Context): String {
+            val o = JSONObject()
+            o.put("miui", isMiuiDevice())
+            o.put("overlay", hasOverlayPermission(context))
+            var known = false
+            var mode = -1
+            try {
+                val am = context.getSystemService("appops") as AppOpsManager
+                // 标准 SDK 只有 String 版；MIUI 的 op 10021 没有字符串名，只能走隐藏的 int 版
+                val method = AppOpsManager::class.java.getDeclaredMethod(
+                    "checkOpNoThrow", Integer.TYPE, Integer.TYPE, String::class.java
+                )
+                method.isAccessible = true
+                mode = method.invoke(am, MIUI_POPUP_OP, Process.myUid(), context.packageName) as Int
+                known = true
+            } catch (e: Exception) {
+                Log.w(TAG, "query miui popup op failed", e)
+            }
+            o.put("miuiPopup", mode)
+            o.put("miuiPopupKnown", known)
+            o.put("blocked", isPopupBlocked(context))
+            return o.toString()
+        }
+
+        /** 小米/Redmi/POCO：只有这些设备才有 MIUI 的「后台弹出界面」AppOp 10021 */
+        private fun isMiuiDevice(): Boolean {
+            val brand = Build.BRAND.lowercase(Locale.US)
+            val manufacturer = Build.MANUFACTURER.lowercase(Locale.US)
+            return brand.contains("xiaomi") || brand.contains("redmi") || brand.contains("poco") ||
+                manufacturer.contains("xiaomi")
+        }
+
+        /** 打开 MIUI 权限编辑页（列表里有「后台弹出界面」）；非 MIUI 退回应用详情页 */
+        @JvmStatic
+        fun openPopupPermissionSettings(context: Context): Boolean {
+            return try {
+                val intent = Intent("miui.intent.action.APP_PERM_EDITOR")
+                intent.putExtra("extra_pkgname", context.packageName)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "open miui permission editor failed", e)
+                openAppSettings(context)
+            }
+        }
+
+        /** 亮屏但弹层没起来（ROM 拦截后台 Activity）时记一笔，设置页据此提示 */
+        private fun markPopupBlocked(context: Context) {
+            try {
+                prefs(context).edit().putLong(KEY_POPUP_BLOCKED_AT, System.currentTimeMillis()).apply()
+            } catch (e: Exception) {
+                Log.w(TAG, "mark popup blocked failed", e)
+            }
+        }
+
+        /** 弹层成功拉起后清掉拦截标记，避免权限已开还长期显示警告 */
+        @JvmStatic
+        fun clearPopupBlocked(context: Context) {
+            try {
+                prefs(context).edit().remove(KEY_POPUP_BLOCKED_AT).apply()
+            } catch (e: Exception) {
+                Log.w(TAG, "clear popup blocked failed", e)
+            }
+        }
+
+        private fun isPopupBlocked(context: Context): Boolean {
+            return try {
+                val at = prefs(context).getLong(KEY_POPUP_BLOCKED_AT, 0L)
+                at > 0 && System.currentTimeMillis() - at < POPUP_BLOCKED_TTL_MS
+            } catch (e: Exception) {
                 false
             }
         }
@@ -1165,10 +1273,10 @@ class MuyianBillCore private constructor() {
                 if (line.isEmpty()) continue
                 if (previousLabelExcluded(lines, i, excludes)) continue
                 val symbol = SYMBOL_AMOUNT_LINE.matcher(line)
-                if (symbol.matches()) return toAmount(symbol.group(1))
+                if (symbol.matches()) return toAmount(symbol.group(1) ?: "")
                 if (bare <= 0.0 && i < 15 && !DATE_LINE.matcher(line).find()) {
                     val b = BARE_DECIMAL_LINE.matcher(line)
-                    if (b.matches()) bare = toAmount(b.group(1))
+                    if (b.matches()) bare = toAmount(b.group(1) ?: "")
                 }
             }
             return bare
@@ -1383,6 +1491,18 @@ class MuyianBillCore private constructor() {
             sheetHandler.post { showNextSheet(context.applicationContext) }
         }
 
+        /** 弹层已经开着时，把通知点击带来的新账单放回队列，等当前弹层关闭后再弹 */
+        @JvmStatic
+        fun enqueueSheetBill(context: Context, billJson: String): Boolean {
+            val bill = try {
+                JSONObject(billJson)
+            } catch (e: Exception) {
+                return false
+            }
+            presentBill(context.applicationContext, bill)
+            return true
+        }
+
         private fun showNextSheet(context: Context) {
             var next: JSONObject? = null
             synchronized(sheetLock) {
@@ -1393,8 +1513,11 @@ class MuyianBillCore private constructor() {
             }
             val bill = next
             if (bill == null) return
+            // 预占通知 ID：弹层正常出现时 Activity 会拿它标记"已拉起"，拉不起来时才真正发通知
+            val noticeId = nextPendingNoticeId(context)
             if (!isScreenInteractive(context)) {
-                // 熄屏/锁屏时 Activity 无法显示在支付页上方，这一笔直接放弃（不再有草稿/通知兜底）
+                // 熄屏/锁屏时 Activity 无法显示在支付页上方：改发通知，点开仍进确认弹层
+                postPendingNotice(context, bill, noticeId)
                 onSheetClosed(context)
                 return
             }
@@ -1405,6 +1528,7 @@ class MuyianBillCore private constructor() {
             intent.putExtra(BillSheetActivity.EXTRA_BILL, bill.toString())
             intent.putExtra(BillSheetActivity.EXTRA_CATS, cats.toString())
             intent.putExtra(BillSheetActivity.EXTRA_ACCENT, getCardThemeColor(context))
+            intent.putExtra(BillSheetActivity.EXTRA_NOTICE_ID, noticeId)
             var started = false
             try {
                 context.startActivity(intent)
@@ -1413,12 +1537,17 @@ class MuyianBillCore private constructor() {
                 Log.e(TAG, "start bill sheet failed", e)
             }
             if (!started) {
+                markPopupBlocked(context)
+                postPendingNotice(context, bill, noticeId)
                 onSheetClosed(context)
                 return
             }
-            // 后台启动 Activity 被 ROM 静默拦截时不会抛异常：等一会还没起来就放行队列
+            // 后台启动 Activity 被 ROM 静默拦截时不会抛异常：等一会还没起来就发通知并放行队列。
+            // 已经起来又很快被关掉的（wasStarted）不能再补通知，避免用户取消后又收到一条。
             sheetHandler.postDelayed({
-                if (BillSheetActivity.isAlive() == false) {
+                if (BillSheetActivity.isAlive() == false && BillSheetActivity.wasStarted(noticeId) == false) {
+                    markPopupBlocked(context)
+                    postPendingNotice(context, bill, noticeId)
                     onSheetClosed(context)
                 }
             }, SHEET_START_WATCHDOG_MS)
@@ -1697,7 +1826,889 @@ class MuyianBillCore private constructor() {
             return handleScreen(context, "com.eg.android.AlipayGphone", lines, true)
         }
 
+        // ---------- 钱迹 Excel 导入 ----------
+        // 选文件由 ImportPickActivity 中转（SAF，无需存储权限）：选中的文件拷到应用私有目录
+        // qianji_import.xlsx，路径与状态放在静态字段，页面侧用同步 API 轮询读取。
+        // 原生只做「xlsx 解压成表头 + 原始单元格行」和「批量写库」；时间/类型/金额校验、
+        // 统计、分类计数与映射、入库字段拼装都在 common/qianji-import.js。
+
+        private const val IMPORT_CACHE_NAME = "qianji_import.xlsx"
+        private const val IMPORT_MAX_ROWS = 20000
+        /** 防止 xlsx 里零散的远端单元格把每行数组撑爆；钱迹导出实际只有十列左右 */
+        private const val IMPORT_MAX_COLUMNS = 64
+        private val importLock = Any()
+        private var importPickState = "idle" // idle | picking | picked | cancelled | error
+        private var importPickError = ""
+        private var importPickPath = ""
+        private var importPickName = ""
+        private val importSheetRows = ArrayList<ArrayList<String>>()
+
+        /** 拉起文件选择中转 Activity 选钱迹 Excel；同一时刻只允许一次 */
+        @JvmStatic
+        fun openImportPicker(context: Context): String {
+            return startFilePicker(context, "xlsx")
+        }
+
+        /** 拉起文件选择中转 Activity 选本应用备份 JSON */
+        @JvmStatic
+        fun openBackupPicker(context: Context): String {
+            return startFilePicker(context, "json")
+        }
+
+        private fun startFilePicker(context: Context, kind: String): String {
+            // 不在 synchronized 块内提前 return：HBuilderX 的 Kotlin 检查器会把这种写法误判成
+            // Java synchronized 块，后随 return 报 "no viable alternative"
+            var busy = false
+            synchronized(importLock) {
+                if (importPickState == "picking" && ImportPickActivity.isAlive()) {
+                    busy = true
+                } else {
+                    importPickState = "picking"
+                    importPickError = ""
+                    importPickPath = ""
+                    importPickName = ""
+                }
+            }
+            if (busy) {
+                val busyObj = JSONObject()
+                busyObj.put("success", false).put("error", "picking")
+                return busyObj.toString()
+            }
+            return try {
+                val intent = Intent(context, ImportPickActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.putExtra(ImportPickActivity.EXTRA_KIND, kind)
+                context.startActivity(intent)
+                val ok = JSONObject()
+                ok.put("success", true)
+                ok.toString()
+            } catch (e: Exception) {
+                Log.w(TAG, "open file picker failed", e)
+                // 带上异常类型：基座没更新时这里会是 ActivityNotFoundException，页面据此提示重做基座
+                val reason = "start failed: " + e.javaClass.name
+                synchronized(importLock) {
+                    importPickState = "error"
+                    importPickError = reason
+                }
+                val fail = JSONObject()
+                fail.put("success", false).put("error", reason)
+                fail.toString()
+            }
+        }
+
+        /** 页面侧轮询：读取选文件状态 {"state","path","name","error"} */
+        @JvmStatic
+        fun getImportPickState(context: Context): String {
+            val o = JSONObject()
+            o.put("state", importPickState)
+            o.put("path", importPickPath)
+            o.put("name", importPickName)
+            o.put("error", importPickError)
+            return o.toString()
+        }
+
+        @JvmStatic
+        fun onImportPicked(path: String, name: String) {
+            synchronized(importLock) {
+                importPickState = "picked"
+                importPickPath = path
+                importPickName = name
+            }
+        }
+
+        @JvmStatic
+        fun onImportPickCancelled() {
+            synchronized(importLock) {
+                importPickState = "cancelled"
+            }
+        }
+
+        @JvmStatic
+        fun onImportPickError(message: String) {
+            synchronized(importLock) {
+                importPickState = "error"
+                importPickError = message
+            }
+        }
+
+        /**
+         * 读取钱迹导出的 xlsx，只解压成「表头 + 原始单元格行」，不做账单语义解析。
+         * 返回 {"ok":true,"header":[…],"width":n,"total":n,"capped":true?}；
+         * 数据行缓存在内存，供 getImportSheetRows 分块取用。
+         */
+        @JvmStatic
+        fun readImportSheet(path: String): String {
+            val result = JSONObject()
+            try {
+                val file = File(path)
+                if (!file.exists() || file.length() == 0L) {
+                    result.put("ok", false).put("error", "文件不存在或为空")
+                    return result.toString()
+                }
+                val shared = readSharedStringsFromFile(file)
+                val sheet = readFirstSheetFromFile(file, shared)
+                if (sheet.isEmpty()) {
+                    result.put("ok", false).put("error", "表格里没有内容")
+                    return result.toString()
+                }
+                var width = 0
+                for (row in sheet) {
+                    for (key in row.keys) {
+                        if (key + 1 > width) width = key + 1
+                    }
+                }
+                if (width > IMPORT_MAX_COLUMNS) width = IMPORT_MAX_COLUMNS
+                val headerRow = sheet.get(0)
+                val header = ArrayList<String>()
+                var c = 0
+                while (c < width) {
+                    header.add(cellOf(headerRow, c))
+                    c = c + 1
+                }
+                val data = ArrayList<ArrayList<String>>()
+                var capped = false
+                var i = 1
+                while (i < sheet.size) {
+                    val row = sheet.get(i)
+                    i = i + 1
+                    if (row.isEmpty()) continue
+                    val values = ArrayList<String>()
+                    c = 0
+                    while (c < width) {
+                        values.add(cellOf(row, c))
+                        c = c + 1
+                    }
+                    data.add(values)
+                    if (data.size >= IMPORT_MAX_ROWS) {
+                        capped = i < sheet.size
+                        if (capped) Log.w(TAG, "import sheet capped at " + IMPORT_MAX_ROWS)
+                        break
+                    }
+                }
+                synchronized(importLock) {
+                    importSheetRows.clear()
+                    importSheetRows.addAll(data)
+                }
+                val headerJson = JSONArray()
+                for (value in header) headerJson.put(value)
+                result.put("ok", true)
+                result.put("header", headerJson)
+                result.put("width", width)
+                result.put("total", data.size)
+                if (capped) result.put("capped", true)
+                return result.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "read import sheet failed", e)
+                result.put("ok", false).put("error", "解析失败，请确认是钱迹导出的 Excel 文件")
+                return result.toString()
+            }
+        }
+
+        /** 分块读取原始数据行：{"total":n,"rows":[[…],…]}，offset/limit 走字符串规避 UTS number 映射坑 */
+        @JvmStatic
+        fun getImportSheetRows(offset: String, limit: String): String {
+            val start = offset.trim().toIntOrNull() ?: 0
+            val count = limit.trim().toIntOrNull() ?: 200
+            val out = JSONObject()
+            val arr = JSONArray()
+            synchronized(importLock) {
+                var i = start
+                if (i < 0) i = 0
+                val size = importSheetRows.size
+                var end = i + count
+                if (end > size) end = size
+                while (i < end) {
+                    val row = importSheetRows.get(i)
+                    val rowJson = JSONArray()
+                    for (value in row) rowJson.put(value)
+                    arr.put(rowJson)
+                    i = i + 1
+                }
+                out.put("total", size)
+            }
+            out.put("rows", arr)
+            return out.toString()
+        }
+
+        /** 统计一组钱迹单号在库中已存在的条数：{"count":n} */
+        @JvmStatic
+        fun countExistingOrders(context: Context, orderNosJson: String): String {
+            var count = 0
+            val arr = try {
+                JSONArray(orderNosJson)
+            } catch (e: Exception) {
+                null
+            }
+            if (arr != null) {
+                val db = openDb(context)
+                var cursor: Cursor? = null
+                try {
+                    val existing = HashSet<String>()
+                    cursor = db.rawQuery(
+                        "select orderNo from bills where orderNo is not null and orderNo != ''", null
+                    )
+                    while (cursor.moveToNext()) {
+                        val v = cursor.getString(0)
+                        if (v != null && v.isNotEmpty()) existing.add(v)
+                    }
+                    var i = 0
+                    while (i < arr.length()) {
+                        val v = arr.optString(i, "").trim()
+                        i = i + 1
+                        if (v.isNotEmpty() && existing.contains(v)) count = count + 1
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "count existing orders failed", e)
+                } finally {
+                    cursor?.close()
+                    db.close()
+                }
+            }
+            val out = JSONObject()
+            out.put("count", count)
+            return out.toString()
+        }
+
+        /**
+         * 批量入库：billsJson 是页面映射好的账单数组（金额已带符号，收入 costType 由页面固定为"收入"）。
+         * 按 orderNo（钱迹单号）去重：库里已有或本批已插入的都跳过。单事务，返回 {"success","inserted","skipped"}。
+         */
+        @JvmStatic
+        fun commitImportBills(context: Context, billsJson: String): String {
+            val result = JSONObject()
+            val arr = try {
+                JSONArray(billsJson)
+            } catch (e: Exception) {
+                null
+            }
+            if (arr == null) {
+                result.put("success", false).put("error", "bad json")
+                return result.toString()
+            }
+            var inserted = 0
+            var skipped = 0
+            val db = openDb(context)
+            try {
+                db.beginTransaction()
+                try {
+                    val existing = HashSet<String>()
+                    var cursor: Cursor? = null
+                    try {
+                        cursor = db.rawQuery(
+                            "select orderNo from bills where orderNo is not null and orderNo != ''", null
+                        )
+                        while (cursor.moveToNext()) {
+                            val v = cursor.getString(0)
+                            if (v != null && v.isNotEmpty()) existing.add(v)
+                        }
+                    } finally {
+                        cursor?.close()
+                    }
+                    var i = 0
+                    while (i < arr.length()) {
+                        val o = arr.optJSONObject(i)
+                        i = i + 1
+                        if (o == null) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        val money = o.optString("money", "0").trim().toDoubleOrNull() ?: 0.0
+                        if (money == 0.0) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        val orderNo = o.optString("orderNo", "")
+                        if (orderNo.isNotEmpty() && existing.contains(orderNo)) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        val cv = ContentValues()
+                        cv.put("year", o.optInt("year"))
+                        cv.put("month", o.optInt("month"))
+                        cv.put("day", o.optInt("day"))
+                        cv.put("clock", o.optString("clock"))
+                        cv.put("money", money)
+                        cv.put("bankName", o.optString("bankName", "钱迹"))
+                        cv.put("costType", o.optString("costType", "消费"))
+                        cv.put("orderRemark", o.optString("orderRemark", ""))
+                        cv.put("source", "qianji")
+                        cv.put("sourcePkg", "")
+                        cv.put("createdAt", o.optLong("createdAt", System.currentTimeMillis()))
+                        cv.put("reimb", o.optInt("reimb", 0))
+                        cv.put("starred", o.optInt("starred", 0))
+                        cv.put("orderNo", orderNo)
+                        db.insert("bills", null, cv)
+                        if (orderNo.isNotEmpty()) existing.add(orderNo)
+                        inserted = inserted + 1
+                    }
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "commit import bills failed", e)
+                result.put("success", false).put("error", "db error")
+                return result.toString()
+            } finally {
+                db.close()
+            }
+            result.put("success", true)
+            result.put("inserted", inserted)
+            result.put("skipped", skipped)
+            return result.toString()
+        }
+
+        // ---------- 本应用备份（导出 / 恢复） ----------
+
+        private const val BACKUP_MAX_BYTES = 50L * 1024 * 1024
+        private val backupSaveLock = Any()
+        private var backupSaveState = "idle" // idle | saving | saved | cancelled | error
+        private var backupSaveError = ""
+        private var backupSaveName = ""
+        private var backupExportContent = ""
+
+        /**
+         * 导出：页面拼好的备份 JSON 先暂存在进程内，再拉起系统"另存为"Activity 写入用户选的位置。
+         * 内容不走 Intent extra，避免大备份超过 Binder 大小限制。
+         */
+        @JvmStatic
+        fun openBackupExport(context: Context, content: String, name: String): String {
+            var busy = false
+            synchronized(backupSaveLock) {
+                if (backupSaveState == "saving" && BackupSaveActivity.isAlive()) {
+                    busy = true
+                } else {
+                    backupExportContent = content
+                    backupSaveState = "saving"
+                    backupSaveError = ""
+                    backupSaveName = name
+                }
+            }
+            if (busy) {
+                val busyObj = JSONObject()
+                busyObj.put("success", false).put("error", "busy")
+                return busyObj.toString()
+            }
+            return try {
+                val intent = Intent(context, BackupSaveActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.putExtra(BackupSaveActivity.EXTRA_NAME, name)
+                context.startActivity(intent)
+                val ok = JSONObject()
+                ok.put("success", true)
+                ok.toString()
+            } catch (e: Exception) {
+                Log.w(TAG, "open backup export failed", e)
+                val reason = "start failed: " + e.javaClass.name
+                synchronized(backupSaveLock) {
+                    backupSaveState = "error"
+                    backupSaveError = reason
+                    backupExportContent = ""
+                }
+                val fail = JSONObject()
+                fail.put("success", false).put("error", reason)
+                fail.toString()
+            }
+        }
+
+        /** 页面侧轮询导出状态 {"state","name","error"} */
+        @JvmStatic
+        fun getBackupSaveState(context: Context): String {
+            val o = JSONObject()
+            o.put("state", backupSaveState)
+            o.put("name", backupSaveName)
+            o.put("error", backupSaveError)
+            return o.toString()
+        }
+
+        /** BackupSaveActivity 读取待写内容 */
+        @JvmStatic
+        fun backupContent(): String {
+            return backupExportContent
+        }
+
+        @JvmStatic
+        fun onBackupSaved(name: String) {
+            synchronized(backupSaveLock) {
+                backupSaveState = "saved"
+                if (name.isNotEmpty()) backupSaveName = name
+                backupExportContent = ""
+            }
+        }
+
+        @JvmStatic
+        fun onBackupSaveCancelled() {
+            synchronized(backupSaveLock) {
+                backupSaveState = "cancelled"
+                backupExportContent = ""
+            }
+        }
+
+        @JvmStatic
+        fun onBackupSaveError(message: String) {
+            synchronized(backupSaveLock) {
+                backupSaveState = "error"
+                backupSaveError = message
+                backupExportContent = ""
+            }
+        }
+
+        /** 读取备份文件文本（UTF-8），超过 50MB 拒绝，返回 {"ok","text","error"} */
+        @JvmStatic
+        fun readBackupText(context: Context, path: String): String {
+            val result = JSONObject()
+            try {
+                val file = File(path)
+                if (!file.exists() || file.length() == 0L) {
+                    result.put("ok", false).put("error", "文件不存在或为空")
+                    return result.toString()
+                }
+                if (file.length() > BACKUP_MAX_BYTES) {
+                    result.put("ok", false).put("error", "备份文件过大（超过 50MB）")
+                    return result.toString()
+                }
+                val ins = FileInputStream(file)
+                val bos = ByteArrayOutputStream()
+                try {
+                    val buf = ByteArray(64 * 1024)
+                    var n = ins.read(buf)
+                    while (n >= 0) {
+                        bos.write(buf, 0, n)
+                        n = ins.read(buf)
+                    }
+                } finally {
+                    ins.close()
+                }
+                result.put("ok", true)
+                result.put("text", String(bos.toByteArray(), Charsets.UTF_8))
+            } catch (e: Exception) {
+                Log.e(TAG, "read backup text failed", e)
+                result.put("ok", false).put("error", "读取文件失败")
+            }
+            return result.toString()
+        }
+
+        /**
+         * 备份恢复用：按原 id 回填账单。库里已有同 id 或同单号的跳过，
+         * 因此重复恢复是幂等的；id 为空时退回自增。单事务，返回 {"success","inserted","skipped"}。
+         */
+        @JvmStatic
+        fun commitBackupBills(context: Context, billsJson: String): String {
+            val result = JSONObject()
+            val arr = try {
+                JSONArray(billsJson)
+            } catch (e: Exception) {
+                null
+            }
+            if (arr == null) {
+                result.put("success", false).put("error", "bad json")
+                return result.toString()
+            }
+            var inserted = 0
+            var skipped = 0
+            val db = openDb(context)
+            try {
+                db.beginTransaction()
+                try {
+                    val existingIds = HashSet<String>()
+                    val existingOrders = HashSet<String>()
+                    var cursor: Cursor? = null
+                    try {
+                        cursor = db.rawQuery("select id, orderNo from bills", null)
+                        while (cursor.moveToNext()) {
+                            existingIds.add("" + cursor.getLong(0))
+                            val o = cursor.getString(1)
+                            if (o != null && o.isNotEmpty()) existingOrders.add(o)
+                        }
+                    } finally {
+                        cursor?.close()
+                    }
+                    var i = 0
+                    while (i < arr.length()) {
+                        val o = arr.optJSONObject(i)
+                        i = i + 1
+                        if (o == null) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        val money = o.optDouble("money", 0.0)
+                        if (money == 0.0 || money.isNaN()) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        val id = o.optLong("id", 0L)
+                        val orderNo = o.optString("orderNo", "")
+                        if (id > 0 && existingIds.contains("" + id)) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        if (orderNo.isNotEmpty() && existingOrders.contains(orderNo)) {
+                            skipped = skipped + 1
+                            continue
+                        }
+                        val cv = ContentValues()
+                        if (id > 0) cv.put("id", id)
+                        cv.put("year", o.optInt("year"))
+                        cv.put("month", o.optInt("month"))
+                        cv.put("day", o.optInt("day"))
+                        cv.put("clock", o.optString("clock"))
+                        cv.put("money", money)
+                        cv.put("bankName", o.optString("bankName"))
+                        cv.put("costType", o.optString("costType"))
+                        cv.put("orderRemark", o.optString("orderRemark", ""))
+                        cv.put("source", o.optString("source", "manual"))
+                        cv.put("sourcePkg", o.optString("sourcePkg", ""))
+                        cv.put("createdAt", o.optLong("createdAt", System.currentTimeMillis()))
+                        cv.put("reimb", o.optInt("reimb", 0))
+                        cv.put("starred", o.optInt("starred", 0))
+                        cv.put("orderNo", orderNo)
+                        val rowId = db.insert("bills", null, cv)
+                        if (rowId > 0) {
+                            inserted = inserted + 1
+                            if (id > 0) existingIds.add("" + id)
+                            if (orderNo.isNotEmpty()) existingOrders.add(orderNo)
+                        } else {
+                            skipped = skipped + 1
+                        }
+                    }
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "commit backup bills failed", e)
+                result.put("success", false).put("error", "db error")
+                return result.toString()
+            } finally {
+                db.close()
+            }
+            result.put("success", true)
+            result.put("inserted", inserted)
+            result.put("skipped", skipped)
+            return result.toString()
+        }
+
+        /** 全量账单（导出用）：按 id 升序分页，limit 上限 2000，返回 {"total":n,"rows":[…]} */
+        @JvmStatic
+        fun getAllBills(context: Context, offset: String, limit: String): String {
+            val startRaw = offset.trim().toIntOrNull() ?: 0
+            val start = if (startRaw < 0) 0 else startRaw
+            var count = limit.trim().toIntOrNull() ?: 1000
+            if (count < 1) count = 1
+            if (count > 2000) count = 2000
+            val out = JSONObject()
+            val arr = JSONArray()
+            val db = openDb(context)
+            var cursor: Cursor? = null
+            try {
+                cursor = db.rawQuery(
+                    "select * from bills order by id asc limit " + count + " offset " + start, null
+                )
+                while (cursor.moveToNext()) arr.put(billJson(cursor))
+                out.put("total", countAllBills(db))
+            } catch (e: Exception) {
+                Log.e(TAG, "query all bills failed", e)
+            } finally {
+                cursor?.close()
+                db.close()
+            }
+            out.put("rows", arr)
+            return out.toString()
+        }
+
+        private fun countAllBills(db: SQLiteDatabase): Int {
+            var cursor: Cursor? = null
+            try {
+                cursor = db.rawQuery("select count(*) from bills", null)
+                if (cursor.moveToFirst()) return cursor.getInt(0)
+            } catch (e: Exception) {
+                Log.e(TAG, "count bills failed", e)
+            } finally {
+                cursor?.close()
+            }
+            return 0
+        }
+
+        private fun cellOf(row: HashMap<Int, String>, col: Int): String {
+            if (col < 0) return ""
+            return row.get(col) ?: ""
+        }
+
+        /** "A1"/"AB12" 里的字母部分转 0 基列号 */
+        private fun colIndexOf(ref: String?): Int {
+            if (ref == null || ref.isEmpty()) return 0
+            var n = 0
+            var i = 0
+            while (i < ref.length) {
+                val c = ref.get(i)
+                if (c < 'A' || c > 'Z') break
+                n = n * 26 + (c.code - 64)
+                i = i + 1
+            }
+            return n - 1
+        }
+
+        private fun openZipAt(file: File): ZipInputStream {
+            return ZipInputStream(FileInputStream(file))
+        }
+
+        private fun readSharedStringsFromFile(file: File): ArrayList<String> {
+            val out = ArrayList<String>()
+            val zis = openZipAt(file)
+            try {
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    if (entry.name == "xl/sharedStrings.xml") {
+                        out.addAll(readSharedStrings(zis))
+                        break
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            } finally {
+                zis.close()
+            }
+            return out
+        }
+
+        private fun readFirstSheetFromFile(file: File, shared: ArrayList<String>): ArrayList<HashMap<Int, String>> {
+            val zis = openZipAt(file)
+            try {
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    val name = entry.name ?: ""
+                    if (name.startsWith("xl/worksheets/") && name.endsWith(".xml")) {
+                        return readSheetRows(zis, shared)
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            } finally {
+                zis.close()
+            }
+            return ArrayList()
+        }
+
+        /** sharedStrings.xml：把每个 <si> 的所有 <t> 文本拼成一个字符串 */
+        private fun readSharedStrings(input: InputStream): ArrayList<String> {
+            val out = ArrayList<String>()
+            val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+            parser.setInput(input, null)
+            var inSi = false
+            var inT = false
+            val buf = StringBuilder()
+            var ev = parser.eventType
+            while (ev != XmlPullParser.END_DOCUMENT) {
+                if (ev == XmlPullParser.START_TAG) {
+                    val n = parser.name
+                    if (n == "si") {
+                        inSi = true
+                        buf.setLength(0)
+                    } else if (n == "t") {
+                        inT = true
+                    }
+                } else if (ev == XmlPullParser.TEXT) {
+                    if (inSi && inT) buf.append(parser.text)
+                } else if (ev == XmlPullParser.END_TAG) {
+                    val n = parser.name
+                    if (n == "t") {
+                        inT = false
+                    } else if (n == "si") {
+                        inSi = false
+                        out.add(buf.toString())
+                    }
+                }
+                ev = parser.next()
+            }
+            return out
+        }
+
+        /**
+         * sheet XML：按 <row> 聚出 {列号: 文本}。t="s" 是 sharedStrings 下标，
+         * t="inlineStr" 的文本在 <is><t> 里，其余原样取 <v>。
+         */
+        private fun readSheetRows(input: InputStream, shared: ArrayList<String>): ArrayList<HashMap<Int, String>> {
+            val rows = ArrayList<HashMap<Int, String>>()
+            val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+            parser.setInput(input, null)
+            var cur: HashMap<Int, String>? = null
+            var col = 0
+            var cellType = ""
+            var inV = false
+            var inT = false
+            val buf = StringBuilder()
+            var ev = parser.eventType
+            while (ev != XmlPullParser.END_DOCUMENT) {
+                if (ev == XmlPullParser.START_TAG) {
+                    val n = parser.name
+                    if (n == "row") {
+                        cur = HashMap()
+                    } else if (n == "c" && cur != null) {
+                        col = colIndexOf(parser.getAttributeValue(null, "r"))
+                        cellType = parser.getAttributeValue(null, "t") ?: ""
+                        buf.setLength(0)
+                        inV = false
+                        inT = false
+                    } else if (n == "v") {
+                        inV = true
+                    } else if (n == "t") {
+                        inT = true
+                    }
+                } else if (ev == XmlPullParser.TEXT) {
+                    if (inV || inT) buf.append(parser.text)
+                } else if (ev == XmlPullParser.END_TAG) {
+                    val n = parser.name
+                    if (n == "v") {
+                        inV = false
+                    } else if (n == "t") {
+                        inT = false
+                    } else if (n == "c" && cur != null) {
+                        var v = buf.toString()
+                        if (cellType == "s") {
+                            val idx = v.toIntOrNull() ?: -1
+                            v = if (idx >= 0 && idx < shared.size) shared.get(idx) else ""
+                        }
+                        cur.put(col, v)
+                    } else if (n == "row" && cur != null) {
+                        rows.add(cur)
+                        cur = null
+                    }
+                }
+                ev = parser.next()
+            }
+            return rows
+        }
+
         // ---------- 通知与存储基建 ----------
+
+        /** 待确认通知渠道：IMPORTANCE_HIGH 才能在锁屏/后台弹出提醒 */
+        private fun createPendingChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < 26) return
+            try {
+                val nm = context.getSystemService("notification") as NotificationManager
+                val channel = NotificationChannel(
+                    CHANNEL_PENDING, "待确认账单", NotificationManager.IMPORTANCE_HIGH
+                )
+                channel.description = "确认弹层无法弹出时提醒你补记这一笔；点开后仍进确认弹层"
+                nm.createNotificationChannel(channel)
+            } catch (e: Exception) {
+                Log.w(TAG, "create pending channel failed", e)
+            }
+        }
+
+        /** 生成互不冲突的通知 ID：正常拉起的弹层也会预占一个，供 Activity 取消兜底通知 */
+        private fun nextPendingNoticeId(context: Context): Int {
+            var id = 0
+            synchronized(sheetLock) {
+                // 序号落盘：进程重启后再发通知不能复用仍挂在通知栏里的旧 ID，否则旧通知会被覆盖
+                var seq = pendingNoticeSeq
+                try {
+                    seq = prefs(context).getInt(KEY_NOTICE_SEQ, pendingNoticeSeq)
+                } catch (e: Exception) {
+                    // 读失败退回进程内序号
+                }
+                seq += 1
+                if (seq > 100000) seq = 1
+                pendingNoticeSeq = seq
+                try {
+                    prefs(context).edit().putInt(KEY_NOTICE_SEQ, seq).apply()
+                } catch (e: Exception) {
+                    // 写失败只影响重启后的 ID 连续性，不影响本次发通知
+                }
+                id = PENDING_NOTICE_BASE_ID + seq
+            }
+            return id
+        }
+
+        /**
+         * 弹层拉不起来时的通知兜底（熄屏/锁屏、ROM 拦截后台 Activity、启动超时）。
+         * 通知只负责把用户带回 BillSheetActivity，点击后的保存/取消仍由弹层完成，
+         * 通知本身不写库、不提供"直接入账"入口。
+         */
+        private fun postPendingNotice(context: Context, bill: JSONObject, noticeId: Int) {
+            try {
+                createPendingChannel(context)
+                val nm = context.getSystemService("notification") as NotificationManager
+                val cats = JSONArray()
+                for (c in recentCostTypes(context, 10)) cats.put(c)
+                val intent = Intent(context, BillSheetActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                intent.putExtra(BillSheetActivity.EXTRA_BILL, bill.toString())
+                intent.putExtra(BillSheetActivity.EXTRA_CATS, cats.toString())
+                intent.putExtra(BillSheetActivity.EXTRA_ACCENT, getCardThemeColor(context))
+                intent.putExtra(BillSheetActivity.EXTRA_NOTICE_ID, noticeId)
+                val pi = PendingIntent.getActivity(
+                    context, noticeId, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                nm.notify(noticeId, buildPendingNotice(context, bill, pi))
+            } catch (e: Exception) {
+                // Android 13+ 未授予 POST_NOTIFICATIONS 时 notify 会静默失败，只能记日志
+                Log.w(TAG, "post pending notice failed", e)
+            }
+        }
+
+        /** 锁屏上只显示"有待确认账单"，金额放在 private 版本里，避免锁屏泄露 */
+        @Suppress("DEPRECATION") // 兼容 API < 26 的 Notification.Builder(Context) / setPriority()
+        private fun buildPendingNotice(context: Context, bill: JSONObject, pi: PendingIntent): Notification {
+            val money = bill.optDouble("money", 0.0)
+            val typeText = if (money >= 0) "收入" else "支出"
+            val amountText = String.format(Locale.US, "%.2f", Math.abs(money))
+            val bank = bill.optString("bankName")
+            val clock = bill.optString("clock")
+            val title = "有一笔待确认" + typeText
+            var text = "¥" + amountText
+            if (bank.isNotEmpty()) text = text + " · " + bank
+            if (clock.isNotEmpty()) text = text + " · " + clock
+
+            val builder = if (Build.VERSION.SDK_INT >= 26) {
+                Notification.Builder(context, CHANNEL_PENDING)
+            } else {
+                Notification.Builder(context)
+            }
+            builder.setContentTitle(title)
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setSmallIcon(context.applicationInfo.icon)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .setCategory(Notification.CATEGORY_REMINDER)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+
+            val publicBuilder = if (Build.VERSION.SDK_INT >= 26) {
+                Notification.Builder(context, CHANNEL_PENDING)
+            } else {
+                Notification.Builder(context)
+            }
+            publicBuilder.setContentTitle("有一笔待确认账单")
+                .setContentText("点此打开确认弹层")
+                .setSmallIcon(context.applicationInfo.icon)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+            builder.setPublicVersion(publicBuilder.build())
+
+            if (Build.VERSION.SDK_INT < 26) {
+                builder.setPriority(Notification.PRIORITY_HIGH)
+                builder.setDefaults(Notification.DEFAULT_ALL)
+            } else {
+                builder.setTimeoutAfter(PENDING_NOTICE_TTL_MS)
+            }
+            return builder.build()
+        }
+
+        /** 弹层已经出现或这一笔已处理完：撤掉对应的兜底通知 */
+        @JvmStatic
+        fun cancelPendingNotice(context: Context, noticeId: Int) {
+            if (noticeId <= 0) return
+            try {
+                val nm = context.getSystemService("notification") as NotificationManager
+                nm.cancel(noticeId)
+            } catch (e: Exception) {
+                Log.w(TAG, "cancel pending notice failed", e)
+            }
+        }
 
         private fun openDb(context: Context): SQLiteDatabase {
             val db = SQLiteDatabase.openOrCreateDatabase(
@@ -1768,10 +2779,12 @@ class MuyianBillCore private constructor() {
 /**
  * 支付后的底部确认弹层。
  *
- * 用透明 Activity 代替悬浮窗：不需要 SYSTEM_ALERT_WINDOW，由无障碍服务直接拉起
- * （AccessibilityService 属于系统绑定服务，不受"后台禁止启动 Activity"的限制）。
+ * 用透明 Activity 代替悬浮窗：不用 WindowManager 绘制窗口；但 MIUI/HyperOS 仍要求
+ * SYSTEM_ALERT_WINDOW 才允许无障碍服务在后台启动 Activity。
  * 布局全部用 Android 框架 View，不引入任何 UI 库；分类仍然只认账单里的 costType 字符串。
- * 弹层是唯一的确认入口：用户点保存才写库，取消/返回/超时/熄屏都直接丢弃这一笔。
+ * 弹层是唯一的确认入口：用户点保存才写库；取消/返回/超时/弹层显示后熄屏都直接丢弃这一笔。
+ * 弹层从一开始就拉不起来（熄屏/锁屏/ROM 拦截）时，MuyianBillCore 会发一条待确认通知兜底，
+ * 点开仍回到这里确认，通知本身不写库。
  */
 class BillSheetActivity : Activity() {
 
@@ -1779,14 +2792,35 @@ class BillSheetActivity : Activity() {
         const val EXTRA_BILL = "bill_json"
         const val EXTRA_CATS = "cats_json"
         const val EXTRA_ACCENT = "accent_color"
+        const val EXTRA_NOTICE_ID = "notice_id"
         /** 无人操作时自动收起，避免弹层一直压在支付页上 */
         private const val TIMEOUT_MS = 60 * 1000L
 
         @Volatile
         private var alive = false
 
+        /** 已经真正拉起过的通知 ID：启动看门狗用它区分"从未出现"和"出现后又被关掉" */
+        private val startedNoticeIds = ArrayList<Int>()
+
         fun isAlive(): Boolean {
             return alive
+        }
+
+        fun markStarted(noticeId: Int) {
+            if (noticeId <= 0) return
+            synchronized(startedNoticeIds) {
+                if (!startedNoticeIds.contains(noticeId)) startedNoticeIds.add(noticeId)
+                while (startedNoticeIds.size > 64) startedNoticeIds.removeAt(0)
+            }
+        }
+
+        fun wasStarted(noticeId: Int): Boolean {
+            if (noticeId <= 0) return false
+            var hit = false
+            synchronized(startedNoticeIds) {
+                hit = startedNoticeIds.contains(noticeId)
+            }
+            return hit
         }
     }
 
@@ -1804,8 +2838,10 @@ class BillSheetActivity : Activity() {
     private var inChip: TextView? = null
     private val categoryChips = ArrayList<Pair<TextView, String>>()
     private var closing = false
+    private var noticeId = 0
     private var screenReceiver: BroadcastReceiver? = null
     private val timeoutTask = Runnable { closeSheet() }
+    private val finishTask = Runnable { finish() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1815,36 +2851,67 @@ class BillSheetActivity : Activity() {
             finish()
             return
         }
+
+        // 透明窗口：自己画遮罩，关掉系统自带的 dim
+        @Suppress("DEPRECATION")
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        if (Build.VERSION.SDK_INT >= 21) {
+            @Suppress("DEPRECATION")
+            window.statusBarColor = Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = Color.TRANSPARENT
+        }
+
+        val extraAccent = intent?.getIntExtra(EXTRA_ACCENT, 0xFFF7A600.toInt()) ?: 0xFFF7A600.toInt()
+        val catsRaw = intent?.getStringExtra(EXTRA_CATS) ?: "[]"
+        val extraNoticeId = intent?.getIntExtra(EXTRA_NOTICE_ID, 0) ?: 0
+        if (!bindBill(raw, catsRaw, extraAccent, extraNoticeId)) {
+            finish()
+            return
+        }
+        uiHandler.postDelayed(timeoutTask, TIMEOUT_MS)
+        registerScreenOff()
+    }
+
+    /** 绑定一笔账单并重建弹层内容：首次创建和通知点击换单共用 */
+    private fun bindBill(raw: String, catsRaw: String, accentValue: Int, noticeIdValue: Int): Boolean {
         val parsed = try {
             JSONObject(raw)
         } catch (e: Exception) {
             null
         }
-        if (parsed == null) {
-            finish()
-            return
-        }
+        if (parsed == null) return false
         billJson = raw
         income = parsed.optDouble("money", 0.0) >= 0
         costType = parsed.optString("costType")
-        accent = intent?.getIntExtra(EXTRA_ACCENT, 0xFFF7A600.toInt()) ?: 0xFFF7A600.toInt()
+        accent = accentValue
         accentTint = lighten(accent, 0.86f)
-
-        // 透明窗口：自己画遮罩，关掉系统自带的 dim
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        if (Build.VERSION.SDK_INT >= 21) {
-            window.statusBarColor = Color.TRANSPARENT
-            window.navigationBarColor = Color.TRANSPARENT
+        noticeId = noticeIdValue
+        if (noticeId > 0) {
+            markStarted(noticeId)
+            // 弹层已经出现，撤掉兜底通知并清掉"被系统拦截"标记
+            MuyianBillCore.cancelPendingNotice(this, noticeId)
+            MuyianBillCore.clearPopupBlocked(this)
         }
-
-        val cats = parseCats(intent?.getStringExtra(EXTRA_CATS) ?: "[]")
+        val cats = parseCats(catsRaw)
+        categoryChips.clear()
         setContentView(buildRoot(parsed, cats))
         playEnter()
-        uiHandler.postDelayed(timeoutTask, TIMEOUT_MS)
-        registerScreenOff()
+        return true
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent == null) return
+        val raw = intent.getStringExtra(EXTRA_BILL) ?: return
+        val extraNoticeId = intent.getIntExtra(EXTRA_NOTICE_ID, 0)
+        MuyianBillCore.cancelPendingNotice(this, extraNoticeId)
+        // 当前弹层还在：放回队列，等这一笔处理完再弹，不覆盖用户正在编辑的内容
+        MuyianBillCore.enqueueSheetBill(this, raw)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         closeSheet()
     }
@@ -1852,7 +2919,10 @@ class BillSheetActivity : Activity() {
     override fun onDestroy() {
         alive = false
         uiHandler.removeCallbacks(timeoutTask)
+        uiHandler.removeCallbacks(finishTask)
         unregisterScreenOff()
+        // 取消/超时/熄屏/保存都撤掉对应的兜底通知；取消即丢弃这一笔
+        MuyianBillCore.cancelPendingNotice(applicationContext, noticeId)
         super.onDestroy()
         try {
             MuyianBillCore.onSheetClosed(applicationContext)
@@ -2080,9 +3150,8 @@ class BillSheetActivity : Activity() {
         val host = sheetHost
         val dim = dimView
         if (host != null) {
-            host.animate().translationY(host.height.toFloat()).setDuration(180)
-                .withEndAction { finish() }.start()
-            uiHandler.postDelayed({ finish() }, 260)
+            host.animate().translationY(host.height.toFloat()).setDuration(180).start()
+            uiHandler.postDelayed(finishTask, 260)
         } else {
             finish()
         }
@@ -2178,5 +3247,229 @@ class BillSheetActivity : Activity() {
         drawable.setColor(color)
         drawable.setCornerRadii(floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f))
         return drawable
+    }
+}
+
+
+/**
+ * 钱迹导入的文件选择中转 Activity：透明主题，拉起系统文件选择器（SAF），
+ * 把选中的文件拷进应用私有目录（qianji_import.xlsx）后通知 MuyianBillCore，由页面侧轮询。
+ * 通过 ContentResolver 读用户选中的 Uri，不需要任何存储权限。
+ */
+class ImportPickActivity : Activity() {
+
+    companion object {
+        const val EXTRA_KIND = "pick_kind"
+        private const val REQ_PICK_FILE = 4201
+
+        @Volatile
+        private var alive = false
+
+        fun isAlive(): Boolean {
+            return alive
+        }
+    }
+
+    private var kind = "xlsx"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        alive = true
+        kind = intent?.getStringExtra(EXTRA_KIND) ?: "xlsx"
+        val isJson = kind == "json"
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.type = "*/*"
+        // 有些文件管理器会把类型标成 octet-stream，额外放开候选类型
+        val mimes = if (isJson) {
+            arrayOf("application/json", "text/plain", "application/octet-stream")
+        } else {
+            arrayOf(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel",
+                "application/zip",
+                "application/octet-stream"
+            )
+        }
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes)
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQ_PICK_FILE)
+        } catch (e: Exception) {
+            Log.w("MuyianBill", "no file picker available", e)
+            MuyianBillCore.onImportPickError("no file picker")
+            finish()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_PICK_FILE) {
+            finish()
+            return
+        }
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            MuyianBillCore.onImportPickCancelled()
+            finish()
+            return
+        }
+        try {
+            val targetName = if (kind == "json") "muyian_backup.json" else "qianji_import.xlsx"
+            val out = File(getFilesDir(), targetName)
+            val ins = contentResolver.openInputStream(uri)
+            if (ins == null) {
+                MuyianBillCore.onImportPickError("unreadable file")
+            } else {
+                val fos = FileOutputStream(out)
+                try {
+                    val buf = ByteArray(64 * 1024)
+                    var n = ins.read(buf)
+                    while (n >= 0) {
+                        fos.write(buf, 0, n)
+                        n = ins.read(buf)
+                    }
+                } finally {
+                    fos.close()
+                    ins.close()
+                }
+                MuyianBillCore.onImportPicked(out.getAbsolutePath(), queryName(uri))
+            }
+        } catch (e: Exception) {
+            Log.w("MuyianBill", "copy picked file failed", e)
+            MuyianBillCore.onImportPickError("copy failed")
+        }
+        finish()
+    }
+
+    /** 取显示文件名，拿不到就退回固定名 */
+    private fun queryName(uri: Uri): String {
+        try {
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            if (cursor != null) {
+                try {
+                    val idx = cursor.getColumnIndex("_display_name")
+                    if (idx >= 0 && cursor.moveToFirst()) {
+                        val v = cursor.getString(idx)
+                        if (v != null && v.isNotEmpty()) return v
+                    }
+                } finally {
+                    cursor.close()
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return if (kind == "json") "muyian_backup.json" else "qianji_import.xlsx"
+    }
+
+    override fun onDestroy() {
+        alive = false
+        super.onDestroy()
+    }
+}
+
+
+/**
+ * 备份导出的"另存为"中转 Activity：透明壳，拉起系统 ACTION_CREATE_DOCUMENT，
+ * 把进程内暂存的备份 JSON 写到用户选的位置（内容不走 Intent，避免大备份超过 Binder 限制）。
+ */
+class BackupSaveActivity : Activity() {
+
+    companion object {
+        const val EXTRA_NAME = "save_name"
+        private const val REQ_SAVE_FILE = 4202
+
+        @Volatile
+        private var alive = false
+
+        fun isAlive(): Boolean {
+            return alive
+        }
+    }
+
+    private var suggestedName = "muyian_backup.json"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        alive = true
+        val rawName = intent?.getStringExtra(EXTRA_NAME) ?: ""
+        if (rawName.isNotEmpty()) suggestedName = rawName
+        if (MuyianBillCore.backupContent().isEmpty()) {
+            MuyianBillCore.onBackupSaveError("no content")
+            finish()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.type = "application/json"
+        intent.putExtra(Intent.EXTRA_TITLE, suggestedName)
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQ_SAVE_FILE)
+        } catch (e: Exception) {
+            Log.w("MuyianBill", "no save document ui", e)
+            MuyianBillCore.onBackupSaveError("no file picker")
+            finish()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_SAVE_FILE) {
+            finish()
+            return
+        }
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            MuyianBillCore.onBackupSaveCancelled()
+            finish()
+            return
+        }
+        try {
+            val content = MuyianBillCore.backupContent()
+            val os = contentResolver.openOutputStream(uri)
+            if (os == null) {
+                MuyianBillCore.onBackupSaveError("write failed")
+            } else {
+                try {
+                    os.write(content.toByteArray(Charsets.UTF_8))
+                    os.flush()
+                } finally {
+                    os.close()
+                }
+                MuyianBillCore.onBackupSaved(queryName(uri))
+            }
+        } catch (e: Exception) {
+            Log.w("MuyianBill", "write backup file failed", e)
+            MuyianBillCore.onBackupSaveError("write failed")
+        }
+        finish()
+    }
+
+    /** 取显示文件名，拿不到就用建议名 */
+    private fun queryName(uri: Uri): String {
+        try {
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            if (cursor != null) {
+                try {
+                    val idx = cursor.getColumnIndex("_display_name")
+                    if (idx >= 0 && cursor.moveToFirst()) {
+                        val v = cursor.getString(idx)
+                        if (v != null && v.isNotEmpty()) return v
+                    }
+                } finally {
+                    cursor.close()
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return suggestedName
+    }
+
+    override fun onDestroy() {
+        alive = false
+        super.onDestroy()
     }
 }

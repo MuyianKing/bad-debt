@@ -9,77 +9,57 @@
     <!-- 玻璃折射层在 App.vue 的 .page::before（全站统一），这里不要再加一份 -->
     <!-- 抽屉打开时整页右移：抽屉从左侧露出，首页像卡片被推开 -->
     <view class="page-main" :style="pageStyle">
+      <!-- 顶部导航：吸顶，滚动后转玻璃底，避免白色图标压在浅色内容上 -->
+      <view :class="['hero-nav', navSolid ? 'hero-nav-solid' : '']">
+        <view class="nav-side">
+          <view class="nav-btn" @tap="openDrawer">
+            <app-icon name="menu" :color="navSolid ? theme.ink : '#ffffff'" :size="22"></app-icon>
+          </view>
+        </view>
+        <view class="hero-month" @tap="openMonthPicker">
+          <text class="hero-month-text">{{ monthLabel }}</text>
+          <app-icon name="chevron-down" :color="navSolid ? theme.ink : 'rgba(255,255,255,0.9)'" :size="15"></app-icon>
+        </view>
+        <view class="nav-side nav-side-right">
+          <view class="nav-btn" @tap="goCalendar">
+            <app-icon name="calendar" :color="navSolid ? theme.ink : '#ffffff'" :size="20"></app-icon>
+          </view>
+          <view class="nav-btn" @tap="goStats">
+            <app-icon name="bar-chart" :color="navSolid ? theme.ink : '#ffffff'" :size="20"></app-icon>
+          </view>
+        </view>
+      </view>
+
       <!-- 顶部渐变头图 -->
       <view class="hero" :class="{ 'hero-on-img': heroImg }">
         <image v-if="heroImg" class="hero-img" :src="heroImg" mode="aspectFill" @error="onHeroImgError"></image>
         <view v-if="!heroImg" class="hero-deco">
           <view class="deco-sheen"></view>
           <image
-            class="hero-nezha"
-            :src="nezhaStyle.src"
-            :style="{ width: nezhaStyle.widthRpx + 'rpx', bottom: nezhaStyle.bottomRpx + 'rpx' }"
+            v-if="activeMascotBaseStyle"
+            class="hero-mascot"
+            :src="activeMascotBaseStyle.src"
+            :style="{ width: (activeMascotBaseStyle.widthRpx || 236) + 'rpx', bottom: (activeMascotBaseStyle.bottomRpx || 0) + 'rpx' }"
             mode="widthFix"
           ></image>
           <view class="deco-scrim"></view>
         </view>
         <view class="status-bar"></view>
-        <view class="hero-nav">
-          <view class="nav-side">
-            <view class="nav-btn" @tap="openDrawer">
-              <app-icon name="menu" color="#ffffff" :size="22"></app-icon>
-            </view>
-          </view>
-          <picker mode="date" fields="month" :value="pickerValue" @change="onMonthChange">
-            <view class="hero-month">
-              <text class="hero-month-text">{{ monthLabel }}</text>
-              <app-icon name="chevron-down" color="rgba(255,255,255,0.9)" :size="15"></app-icon>
-            </view>
-          </picker>
-          <view class="nav-side nav-side-right">
-            <view class="nav-btn" @tap="goCalendar">
-              <app-icon name="calendar" color="#ffffff" :size="20"></app-icon>
-            </view>
-            <view class="nav-btn" @tap="goStats">
-              <app-icon name="bar-chart" color="#ffffff" :size="20"></app-icon>
-            </view>
-          </view>
-        </view>
+        <view class="hero-nav-space"></view>
 
         <view class="hero-body">
           <text class="hero-label">本月支出</text>
           <text class="hero-amount">¥ {{ fmtMoney(monthExpense) }}</text>
-        </view>
-
-        <!-- 悬浮概览卡：压住头图底部 -->
-        <view class="overview-card">
-          <view class="ov-col">
-            <view class="ov-label-row">
-              <view class="ov-ic">
-                <app-icon name="trending-up" :color="COLOR_IN" :size="13" :stroke-width="2.4"></app-icon>
-              </view>
-              <text class="ov-label">月收入</text>
+          <view class="hero-stats">
+            <view class="hs-col">
+              <text class="hs-label">月收入</text>
+              <text class="hs-num">{{ fmtMoney(monthIncome) }}</text>
             </view>
-            <text class="ov-num">{{ fmtMoney(monthIncome) }}</text>
-          </view>
-          <view class="ov-divider"></view>
-          <view class="ov-col">
-            <view class="ov-label-row">
-              <view class="ov-ic">
-                <app-icon name="wallet" :color="monthBalance < 0 ? COLOR_OUT : COLOR_IN" :size="13" :stroke-width="2.4"></app-icon>
-              </view>
-              <text class="ov-label">本月结余</text>
+            <view class="hs-divider"></view>
+            <view class="hs-col">
+              <text class="hs-label">本月结余</text>
+              <text class="hs-num">{{ fmtMoney(monthBalance) }}</text>
             </view>
-            <text :class="['ov-num', monthBalance < 0 ? 'ov-out' : '']">{{ fmtMoney(monthBalance) }}</text>
-          </view>
-          <view class="ov-divider"></view>
-          <view class="ov-col">
-            <view class="ov-label-row">
-              <view class="ov-ic">
-                <app-icon name="clock" :color="COLOR_OUT" :size="13" :stroke-width="2.4"></app-icon>
-              </view>
-              <text class="ov-label">日均支出</text>
-            </view>
-            <text class="ov-num">{{ fmtMoney(monthAvg) }}</text>
           </view>
         </view>
       </view>
@@ -102,8 +82,8 @@
         <app-icon name="chevron-right" color="#c2c6d1" :size="15"></app-icon>
       </view>
 
-      <!-- 最近7日支出 -->
-      <view class="card glass">
+      <!-- 最近7日支出：首页没有任何账单时不显示，和下方空态保持一致 -->
+      <view v-if="groups.length" class="card glass">
         <view class="card-head">
           <view class="card-head-left">
             <view class="card-title-row">
@@ -112,7 +92,10 @@
               </view>
               <text class="card-title">最近7日支出</text>
             </view>
-            <text class="card-sub">总计 ¥{{ fmtMoney(weekTotal) }}</text>
+          </view>
+          <view class="card-total">
+            <text class="card-total-label">总计</text>
+            <text class="card-total-num">¥{{ fmtMoney(weekTotal) }}</text>
           </view>
         </view>
         <view class="week-chart">
@@ -134,10 +117,10 @@
       <bill-list :groups="groups" @row="onRow" @rowlong="onRowLong"></bill-list>
       <view v-if="!groups.length" class="empty">
         <view class="empty-ic">
-          <app-icon name="wallet" :color="theme.primary" :size="50" :stroke-width="1.6"></app-icon>
+          <mascot-face mood="empty" head :size="152"></mascot-face>
         </view>
-        <text class="empty-text">本月还没有账单</text>
-        <text class="empty-sub">点击下方 + 记第一笔</text>
+        <text class="empty-text">这月还没开账</text>
+        <text class="empty-sub">点下方 + 记第一笔，{{ activeMascot.name }}帮你盯着</text>
       </view>
 
       <view class="bottom-safe"></view>
@@ -155,7 +138,7 @@
           <view class="drawer-ring drawer-ring-sm"></view>
           <view class="drawer-brand">
             <view class="drawer-logo">
-              <app-icon name="wallet" color="#ffffff" :size="26" :stroke-width="2.2"></app-icon>
+              <mascot-face head :size="92" mode="base"></mascot-face>
             </view>
             <view class="drawer-brand-text">
               <text class="drawer-name">孽账</text>
@@ -180,10 +163,10 @@
           </view>
 
           <view class="drawer-status" @tap="goSettings">
-            <view :class="['drawer-status-dot', listenerEnabled ? 'is-on' : 'is-off']"></view>
+            <view :class="['drawer-status-dot', 'is-' + autoBillState.level]"></view>
             <view class="drawer-status-main">
-              <text class="drawer-status-title">{{ listenerEnabled ? '自动记账运行中' : '自动记账未开启' }}</text>
-              <text class="drawer-status-sub">{{ listenerEnabled ? '无障碍服务已授权' : '点此开启无障碍服务' }}</text>
+              <text class="drawer-status-title">{{ autoBillState.title }}</text>
+              <text class="drawer-status-sub">{{ autoBillState.sub }}</text>
             </view>
             <app-icon name="chevron-right" color="#c9cdd6" :size="15"></app-icon>
           </view>
@@ -208,19 +191,32 @@
       :safe-area-inset-bottom="true"
       @select="onActionSelect"
     ></wd-action-sheet>
+
+    <!-- 月份选择：原生 picker 弹层不认主题令牌，改用 wot 日期面板（深色主题自动跟随）。
+         必须放在 page-main 之外：page-main 带 transform，会让弹层的 fixed 定位失效 -->
+    <wd-datetime-picker
+      ref="monthPickerRef"
+      v-model="monthStamp"
+      type="year-month"
+      :z-index="300"
+    >
+      <view></view>
+    </wd-datetime-picker>
   </view>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
-import { onShow, onHide, onReady, onBackPress } from '@dcloudio/uni-app'
-import { fmtMoney, fmtNum, pad2, groupByDay, weekdayCN, daysInMonth } from '@/common/fmt.js'
-import { theme, themeClass, refreshTheme, COLOR_IN, COLOR_OUT } from '@/common/theme.js'
-import { nezhaStyle, refreshNezhaStyle } from '@/common/hero-nezha.js'
+import { onShow, onHide, onReady, onBackPress, onPageScroll } from '@dcloudio/uni-app'
+import { fmtMoney, fmtNum, pad2, groupByDay, weekdayCN } from '@/common/fmt.js'
+import { theme, themeClass, refreshTheme } from '@/common/theme.js'
+import { activeMascot, activeMascotBaseStyle, refreshMascots } from '@/common/mascots.js'
 // #ifdef APP-PLUS
 import {
   isAccessibilityEnabled, getMonthBills,
   getSelfRepairState, repairAccessibilityService,
+  isNotificationListenerEnabled, areNotificationsEnabled,
+  hasOverlayPermission, getPopupPermissionState,
   isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations,
   deleteBill
 } from '@/uni_modules/muyian-bill-listener'
@@ -229,6 +225,8 @@ import {
 import {
   isAccessibilityEnabled, getMonthBills,
   getSelfRepairState, repairAccessibilityService,
+  isNotificationListenerEnabled, areNotificationsEnabled,
+  hasOverlayPermission, getPopupPermissionState,
   isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations,
   deleteBill
 } from '@/common/web-bill-api.js'
@@ -241,7 +239,15 @@ const bills = ref([])
 const listenerEnabled = ref(true)
 // 系统电池优化是否已对本应用豁免（true = 不限制）
 const batteryOk = ref(true)
+// 自动记账依赖的其它授权：设置页「自动记账」里的权限项任一未开，抽屉状态就显示异常
+const notifyEnabled = ref(true)
+const notifAllowed = ref(true)
+const overlayPerm = ref(true)
+const repairOk = ref(true)
+const popupState = ref({ miui: false, miuiPopup: -1, miuiPopupKnown: false, blocked: false })
 const drawerShow = ref(false)
+// 顶部导航是否已吸顶滚出渐变头图（决定是否换玻璃底与图标颜色）
+const navSolid = ref(false)
 const version = ref('1.0.0')
 // 账单操作菜单（wot action sheet）
 const actionShow = ref(false)
@@ -254,23 +260,63 @@ const drawerMenus = [
   { name: '分类管理', icon: 'list', url: '/pages/categories/categories', grad: 'var(--grad-blue)' },
   { name: '账单日历', icon: 'calendar', url: '/pages/calendar/calendar', grad: 'var(--grad-mint)' },
   { name: '统计分析', icon: 'bar-chart', url: '/pages/stats/stats', grad: 'var(--grad-sky)' },
-  { name: '设置', icon: 'sliders', url: '/pages/settings/settings', grad: 'var(--grad-violet)' }
+  { name: '备份·恢复', icon: 'rotate-ccw', url: '/pages/backup/backup', grad: 'var(--grad-rose)' },
+  { name: '设置·关于', icon: 'sliders', url: '/pages/settings/settings', grad: 'var(--grad-violet)' }
 ]
 
 const monthLabel = computed(() => selYear.value + '-' + pad2(selMonth.value))
-const pickerValue = computed(() => selYear.value + '-' + pad2(selMonth.value))
+// wot 日期面板吃时间戳；确认时才回写年月，滚动过程中不改首页数据
+const monthPickerRef = ref(null)
+const monthStamp = computed({
+  get: () => new Date(selYear.value, selMonth.value - 1, 1).getTime(),
+  set: (stamp) => {
+    const d = new Date(Number(stamp))
+    if (isNaN(d.getTime())) return
+    const y = d.getFullYear()
+    const m = d.getMonth() + 1
+    if (y === selYear.value && m === selMonth.value) return
+    selYear.value = y
+    selMonth.value = m
+    load()
+  }
+})
 
 const monthExpense = computed(() => sumWhere(bills.value, b => Number(b.money) < 0))
 const monthIncome = computed(() => sumWhere(bills.value, b => Number(b.money) > 0))
 const monthBalance = computed(() => monthIncome.value - monthExpense.value)
-const monthAvg = computed(() => {
-  const t = new Date()
-  const isCurrent = t.getFullYear() === selYear.value && t.getMonth() + 1 === selMonth.value
-  const elapsed = isCurrent ? t.getDate() : daysInMonth(selYear.value, selMonth.value)
-  return monthExpense.value / Math.max(1, elapsed)
-})
 
 const groups = computed(() => groupByDay(bills.value, selYear.value, selMonth.value))
+
+/**
+ * 自动记账的权限缺项：无障碍之外，弹层、兜底通知、后台存活和辅助通道任一项没开都算异常。
+ * 后台保活、从多任务隐藏是用户可自选的开关，不计入。
+ */
+const missingPerms = computed(() => {
+  const out = []
+  if (!overlayPerm.value) out.push('悬浮窗')
+  const ps = popupState.value
+  if (ps.miui) {
+    if (ps.miuiPopupKnown ? ps.miuiPopup !== 0 : ps.blocked) out.push('后台弹出界面')
+  }
+  if (!notifAllowed.value) out.push('通知权限')
+  if (!batteryOk.value) out.push('电池优化')
+  if (!notifyEnabled.value) out.push('通知使用权')
+  if (!repairOk.value) out.push('无障碍自恢复')
+  return out
+})
+
+/** 抽屉状态：无障碍未开是「未开启」，其余任一权限缺项是「异常」 */
+const autoBillState = computed(() => {
+  if (!listenerEnabled.value) {
+    return { level: 'off', title: '自动记账未开启', sub: '点此开启无障碍服务' }
+  }
+  const miss = missingPerms.value
+  if (miss.length) {
+    const names = miss.slice(0, 2).join('、') + (miss.length > 2 ? ' 等 ' + miss.length + ' 项' : '')
+    return { level: 'warn', title: '自动记账异常', sub: '缺少：' + names }
+  }
+  return { level: 'on', title: '自动记账运行中', sub: '所需权限已就绪' }
+})
 
 /** 近 7 天账单（跨月合并），用于周柱状图 */
 const weekBills = ref([])
@@ -317,11 +363,33 @@ function load() {
   selfRepairQuietly()
   try { listenerEnabled.value = isAccessibilityEnabled() } catch (e) { listenerEnabled.value = false }
   try { batteryOk.value = isIgnoringBatteryOptimizations() } catch (e) { batteryOk.value = true }
+  refreshAutoBillPermissions()
   try {
     bills.value = JSON.parse(getMonthBills(String(selYear.value), String(selMonth.value)) || '[]')
   } catch (e) { bills.value = [] }
   try { heroImg.value = uni.getStorageSync('muyian_hero_img_v1') || '' } catch (e) { heroImg.value = '' }
   loadWeekBills()
+}
+
+/** 读取无障碍之外的权限状态；只有明确读到「未开启」才计入缺项，读取失败按已开启处理 */
+function refreshAutoBillPermissions() {
+  // #ifdef APP-PLUS
+  try { notifyEnabled.value = isNotificationListenerEnabled() } catch (e) { notifyEnabled.value = true }
+  try { notifAllowed.value = areNotificationsEnabled() } catch (e) { notifAllowed.value = true }
+  try { overlayPerm.value = hasOverlayPermission() } catch (e) { overlayPerm.value = true }
+  try {
+    const ps = JSON.parse(getPopupPermissionState() || '{}')
+    popupState.value = {
+      miui: !!ps.miui,
+      miuiPopup: typeof ps.miuiPopup === 'number' ? ps.miuiPopup : -1,
+      miuiPopupKnown: !!ps.miuiPopupKnown,
+      blocked: !!ps.blocked
+    }
+  } catch (e) {
+    popupState.value = { miui: false, miuiPopup: -1, miuiPopupKnown: false, blocked: false }
+  }
+  try { repairOk.value = !!JSON.parse(getSelfRepairState() || '{}').hasPermission } catch (e) { repairOk.value = true }
+  // #endif
 }
 
 function onHeroImgError() {
@@ -351,14 +419,8 @@ function loadWeekBills() {
   }
   weekBills.value = merged
 }
-function onMonthChange(e) {
-  const v = e.detail && e.detail.value ? String(e.detail.value) : ''
-  const parts = v.split('-')
-  if (parts.length >= 2) {
-    selYear.value = Number(parts[0])
-    selMonth.value = Number(parts[1])
-    load()
-  }
+function openMonthPicker() {
+  if (monthPickerRef.value) monthPickerRef.value.open()
 }
 
 function onRow(bill) {
@@ -527,6 +589,8 @@ const fabStyle = computed(() => ({
 function openDrawer() {
   if (drawerShow.value) return
   computeDrawerWidth()
+  // 展开前刷新一次权限状态，避免显示上次打开抽屉时的旧值
+  refreshAutoBillPermissions()
   drawerPressing.value = false
   drawerProgress.value = 0
   drawerShow.value = true
@@ -593,11 +657,12 @@ function onSwipeTouchEnd() {
   else closeDrawer()
 }
 
-/** 首页头图始终是主题渐变或用户图片，导航文字/图标都是白色，状态栏统一用白色图标 */
+/** 头图上是白色图标；吸顶后玻璃底变浅（深色主题除外），状态栏要跟着换深色 */
 function applyStatusBarStyle() {
   // #ifdef APP-PLUS
   try {
-    plus.navigator.setStatusBarStyle('light')
+    const darkNav = navSolid.value && !theme.value.dark
+    plus.navigator.setStatusBarStyle(darkNav ? 'dark' : 'light')
   } catch (e) {}
   // #endif
 }
@@ -619,9 +684,21 @@ onReady(() => {
   setTimeout(() => applyStatusBarStyle(), 300)
 })
 
+/** 顶部导航吸顶：滚过 8px 转玻璃底，图标与状态栏同步换色 */
+onPageScroll((e) => {
+  const top = Number(e.scrollTop) || 0
+  if (top > 8 && !navSolid.value) {
+    navSolid.value = true
+    applyStatusBarStyle()
+  } else if (top <= 8 && navSolid.value) {
+    navSolid.value = false
+    applyStatusBarStyle()
+  }
+})
+
 onShow(() => {
   refreshTheme()
-  refreshNezhaStyle()
+  refreshMascots()
   computeDrawerWidth()
   load()
   applyStatusBarStyle()
@@ -654,9 +731,7 @@ onHide(() => {
   position: relative;
   background: var(--grad-primary-strong);
   border-radius: 0 0 36rpx 36rpx;
-  padding-bottom: 110rpx;
-  /* 给压在底边的悬浮概览卡留出空间 */
-  margin-bottom: 96rpx;
+  padding-bottom: 40rpx;
   box-shadow: var(--shadow-primary-lg);
 }
 /* 渐变头的装饰：柔光 + 右侧哪吒，纯装饰不占交互 */
@@ -679,8 +754,8 @@ onHide(() => {
   height: 130%;
   background: radial-gradient(circle, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0) 70%);
 }
-/* 首页哪吒：透明 WebP，靠右但留出间距；宽度与上提量由 common/hero-nezha.js 决定 */
-.hero-nezha {
+/* 首页角色：透明 WebP，靠右但留出间距；宽度与上提量由 common/mascots.js 决定 */
+.hero-mascot {
   position: absolute;
   right: 20rpx;
   display: block;
@@ -705,13 +780,28 @@ onHide(() => {
   border-radius: 0 0 36rpx 36rpx;
   z-index: 0;
 }
+/* 吸顶导航：负外边距让头图铺到页面顶部，导航自身叠在头图上 */
 .hero-nav {
-  position: relative;
-  z-index: 1;
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 12rpx 24rpx;
+  padding: calc(var(--status-bar-height) + 12rpx) 24rpx 12rpx;
+  margin-bottom: calc(-1 * (var(--status-bar-height) + 92rpx));
+  background-color: transparent;
+  transition: background-color 200ms ease;
+}
+/* 滚出渐变头图后转玻璃底，白图标同时换成主题墨色 */
+.hero-nav-solid {
+  background-color: var(--glass-nav-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+}
+/* 头图里给吸顶导航让出的高度：状态栏之外的导航行高 */
+.hero-nav-space {
+  height: 92rpx;
 }
 /* 左右两侧 flex:1 等宽，中间的月份切换器才能真正居中 */
 .nav-side {
@@ -755,6 +845,18 @@ onHide(() => {
   margin-right: 6rpx;
   letter-spacing: 0.5rpx;
   text-shadow: 0 2rpx 10rpx rgba(120, 70, 20, 0.28);
+  transition: color 200ms ease;
+}
+/* 玻璃底状态下改用页面墨色，白色文字/按压反馈在浅底上不可见 */
+.hero-nav-solid .hero-month-text {
+  color: var(--c-text);
+  text-shadow: none;
+}
+.hero-nav-solid .nav-btn:active {
+  background-color: var(--c-fill);
+}
+.hero-nav-solid .hero-month:active {
+  background-color: var(--c-fill);
 }
 .hero-body {
   position: relative;
@@ -777,61 +879,35 @@ onHide(() => {
   letter-spacing: 1rpx;
   text-shadow: 0 2rpx 12rpx rgba(150, 80, 0, 0.24);
 }
-/* 自定义头图模式：文字转白色系 */
-.hero-on-img .nav-btn:active {
-  background-color: rgba(255, 255, 255, 0.22);
-}
-/* ---- 悬浮概览卡 ---- */
-.overview-card {
-  position: absolute;
-  left: 32rpx;
-  right: 32rpx;
-  bottom: -70rpx;
-  z-index: 1;
-  background-color: var(--glass-bg);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
-  backdrop-filter: blur(16px) saturate(1.6);
-  border-radius: 28rpx;
-  box-shadow: var(--shadow-card);
-  border: 1rpx solid var(--glass-border);
+/* ---- 头图统计：直接排在支出金额下方，不做悬浮卡 ---- */
+.hero-stats {
   display: flex;
   flex-direction: row;
   align-items: center;
-  padding: 30rpx 0;
+  margin-top: 26rpx;
 }
-.ov-col {
-  flex: 1;
+.hs-col {
   display: flex;
   flex-direction: column;
-  align-items: center;
 }
-.ov-label-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-}
-.ov-ic {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 8rpx;
-}
-.ov-label {
+.hs-label {
   font-size: 24rpx;
-  color: var(--c-sub);
+  color: rgba(255, 255, 255, 0.82);
+  letter-spacing: 1rpx;
 }
-.ov-num {
-  margin-top: 10rpx;
+.hs-num {
+  margin-top: 6rpx;
   font-size: 32rpx;
   font-weight: 700;
-  color: var(--c-text);
+  color: #ffffff;
   font-variant-numeric: tabular-nums;
+  text-shadow: 0 2rpx 10rpx rgba(150, 80, 0, 0.22);
 }
-.ov-out { color: var(--c-out); }
-.ov-divider {
+.hs-divider {
   width: 1rpx;
   height: 52rpx;
-  background-color: var(--c-line);
+  margin: 0 44rpx;
+  background-color: rgba(255, 255, 255, 0.32);
 }
 /* ---- 提示条 ---- */
 .notice {
@@ -902,10 +978,22 @@ onHide(() => {
   font-weight: 700;
   color: var(--c-text);
 }
-.card-sub {
-  margin-top: 6rpx;
-  font-size: 24rpx;
+.card-total {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-shrink: 0;
+}
+.card-total-label {
+  margin-right: 8rpx;
+  font-size: 20rpx;
   color: var(--c-sub);
+}
+.card-total-num {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--c-sub);
+  font-variant-numeric: tabular-nums;
 }
 /* ---- 7 日柱状图 ---- */
 .week-chart {
@@ -971,15 +1059,19 @@ onHide(() => {
   align-items: center;
 }
 .empty-ic {
-  width: 140rpx;
-  height: 140rpx;
-  border-radius: 44rpx;
+  width: 168rpx;
+  height: 168rpx;
+  padding: 8rpx;
+  box-sizing: border-box;
+  border-radius: 50%;
   background-color: var(--c-primary-weak);
+  border: 1rpx solid var(--c-primary-tint);
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: var(--shadow-card);
   margin-bottom: 28rpx;
+  overflow: hidden;
 }
 .empty-text {
   color: var(--c-sub);
@@ -1062,7 +1154,7 @@ onHide(() => {
 .drawer-logo {
   width: 92rpx;
   height: 92rpx;
-  border-radius: 28rpx;
+  border-radius: 50%;
   background: rgba(255, 255, 255, 0.22);
   border: 1rpx solid rgba(255, 255, 255, 0.4);
   box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35);
@@ -1071,6 +1163,7 @@ onHide(() => {
   justify-content: center;
   margin-right: 24rpx;
   flex-shrink: 0;
+  overflow: hidden;
 }
 .drawer-brand-text {
   display: flex;
@@ -1161,6 +1254,10 @@ onHide(() => {
 .drawer-status-dot.is-off {
   background-color: var(--c-out);
   box-shadow: 0 0 0 6rpx rgba(240, 101, 94, 0.14);
+}
+.drawer-status-dot.is-warn {
+  background-color: #ff9f43;
+  box-shadow: 0 0 0 6rpx rgba(255, 159, 67, 0.14);
 }
 .drawer-status-main {
   flex: 1;

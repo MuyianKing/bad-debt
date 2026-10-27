@@ -204,11 +204,22 @@ page {
   --shadow-primary-lg: 0 12rpx 30rpx rgba(0, 0, 0, 0.5);
   /* 柱条：黑底上用浅灰 */
   --c-bar: #b9b9c2;
-  /* wot 组件深色底（wd-cell / wd-action-sheet 等），跟随本主题的黑灰层级 */
+  /* wot 组件深色底（wd-cell / wd-action-sheet / wd-popup / picker 等），跟随本主题的黑灰层级 */
   --wot-dark-background: #0d0d0f;
   --wot-dark-background2: #17171a;
+  --wot-dark-background3: #0b0b0c;
+  --wot-dark-background4: #232327;
+  --wot-dark-background5: #3a3a3f;
+  --wot-dark-background6: #2a1716;
+  --wot-dark-background7: #55555c;
   --wot-dark-color: #f2f2f4;
+  --wot-dark-color2: #ff6f68;
   --wot-dark-color3: rgba(242, 242, 244, 0.72);
+  --wot-dark-color-gray: #a2a2aa;
+  --wot-dark-border-color: #2a2a2e;
+  --wot-overlay-bg-dark: rgba(0, 0, 0, 0.72);
+  /* picker 上下渐隐遮罩：wot 默认是白色渐变，深色主题不换会露出两条白带 */
+  --wot-picker-mask: linear-gradient(180deg, rgba(23, 23, 26, 0.92), rgba(23, 23, 26, 0.25));
 }
 /* ---- 毛玻璃：半透明 + 背景模糊；底色一律走令牌，深色主题随之变深 ---- */
 .glass {
@@ -251,5 +262,14 @@ page {
   background-color: var(--c-card) !important;
   color: var(--c-text) !important;
   font-weight: 500 !important;
+}
+/* ---- wot 选择器弹层：确定键跟随主题色，取消键弱化；深色主题里 wot 默认的蓝色会跳色 ---- */
+.wd-picker__action,
+.wd-datetime-picker__action {
+  color: var(--c-primary-deep) !important;
+}
+.wd-picker__action--cancel,
+.wd-datetime-picker__action--cancel {
+  color: var(--c-sub) !important;
 }
 </style>

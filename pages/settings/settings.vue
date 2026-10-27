@@ -1,7 +1,7 @@
 <template>
   <view :class="['page', themeClass]">
     <wd-navbar
-      title="设置"
+      title="设置·关于"
       :left-arrow="true"
       :fixed="true"
       :placeholder="true"
@@ -43,26 +43,33 @@
         </view>
       </view>
     </view>
-    <view class="theme-card glass nezha-card">
+    <view v-if="activeMascot && activeMascotBaseStyle" class="theme-card glass mascot-card">
       <view class="theme-head">
         <view class="cell-ic ic-rose">
           <app-icon name="smile" color="#ffffff" :size="16"></app-icon>
         </view>
         <view class="theme-head-text">
-          <text class="theme-head-title">首页哪吒</text>
-          <text class="theme-head-desc">当前：{{ nezhaStyle.name }}，回首页生效</text>
+          <text class="theme-head-title">{{ activeMascot.name }}表情</text>
+          <text class="theme-head-desc">当前：{{ activeMascotBaseStyle.name }}{{ autoMood ? '，跟随场景' : '，固定表情' }}</text>
         </view>
       </view>
-      <view class="theme-list nezha-list">
+      <view class="mood-row">
+        <view class="mood-row-text">
+          <text class="mood-row-title">跟随场景</text>
+          <text class="mood-row-desc">{{ moodHint }}</text>
+        </view>
+        <wd-switch :model-value="autoMood" active-color="var(--c-primary)" @change="onAutoMoodChange" />
+      </view>
+      <view class="theme-list mascot-list">
         <view
-          v-for="n in NEZHA_STYLES"
+          v-for="n in activeMascot.styles"
           :key="n.id"
-          :class="['theme-tile', 'nezha-tile', nezhaStyle.id === n.id ? 'theme-tile-active' : '']"
-          @tap="applyNezha(n.id)"
+          :class="['theme-tile', 'mascot-tile', activeMascotBaseStyle.id === n.id ? 'theme-tile-active' : '']"
+          @tap="applyMascotStyle(n.id)"
         >
-          <view class="nezha-preview">
-            <image class="nezha-thumb" :src="n.src" mode="aspectFit"></image>
-            <view v-if="nezhaStyle.id === n.id" class="theme-check">
+          <view class="mascot-preview">
+            <image class="mascot-thumb" :src="n.headSrc || n.src" mode="aspectFit"></image>
+            <view v-if="activeMascotBaseStyle.id === n.id" class="theme-check">
               <app-icon name="check" :color="theme.primary" :size="12" :stroke-width="3.4"></app-icon>
             </view>
           </view>
@@ -142,11 +149,26 @@
               <view class="cell-ic ic-blue">
                 <app-icon name="maximize" color="#ffffff" :size="16"></app-icon>
               </view>
-              <text class="cell-title">后台弹出界面</text>
+              <text class="cell-title">显示在其他应用上层</text>
               <text :class="['state', overlayPerm ? 'state-ok' : 'state-warn', overlayPerm ? 'state-right' : '']">{{ overlayPerm ? '已允许' : '未允许' }}</text>
               <text v-if="!overlayPerm" class="cell-action">去允许</text>
             </view>
-            <text class="cell-desc">MIUI/HyperOS 需要允许「显示在其他应用上层」和「后台弹出界面」两个开关，否则付款后弹层会被系统拦掉。这里只开系统开关，不绘制悬浮窗。</text>
+            <text class="cell-desc">系统级悬浮窗开关，弹层要盖在支付页上方必须先允许。这里只开系统开关，不绘制悬浮窗。</text>
+          </view>
+        </template>
+      </wd-cell>
+      <wd-cell v-if="popupState.miui" :is-link="!miuiPopupState.ok" :custom-class="miuiPopupState.ok ? 'cell-flush' : ''" :clickable="true" @click="onMiuiPopupPermission">
+        <template #title>
+          <view class="cell-title-wrap">
+            <view class="cell-title-row">
+              <view class="cell-ic ic-violet">
+                <app-icon name="shield" color="#ffffff" :size="16"></app-icon>
+              </view>
+              <text class="cell-title">后台弹出界面（MIUI）</text>
+              <text :class="['state', miuiPopupState.ok ? 'state-ok' : 'state-warn', miuiPopupState.ok ? 'state-right' : '']">{{ miuiPopupState.text }}</text>
+              <text v-if="!miuiPopupState.ok" class="cell-action">去开启</text>
+            </view>
+            <text class="cell-desc">MIUI/HyperOS 单独的后台启动 Activity 开关，和上面的悬浮窗开关不是一个。点「去开启」后进入权限页，再点「其他权限」→「后台弹出界面」；未开启时弹层会被系统拦掉，只能收到待确认通知。</text>
           </view>
         </template>
       </wd-cell>
@@ -162,7 +184,7 @@
               <text :class="['state', notifAllowed ? 'state-ok' : 'state-warn', notifAllowed ? 'state-right' : '']">{{ notifAllowed ? '已开启' : '未开启' }}</text>
               <text v-if="!notifAllowed" class="cell-action">请求权限</text>
             </view>
-            <text class="cell-desc">Android 13+ 需要，用于后台保活常驻通知；关闭后保活服务仍在运行，只是通知栏看不到</text>
+            <text class="cell-desc">Android 13+ 需要。用于后台保活常驻通知，以及确认弹层被系统拦住时的待确认提醒；关闭后这两类通知都收不到</text>
           </view>
         </template>
       </wd-cell>
@@ -263,7 +285,7 @@
 import { ref, computed } from 'vue'
 import { onShow, onHide, onPageScroll } from '@dcloudio/uni-app'
 import { THEMES, theme, themeClass, refreshTheme, setTheme } from '@/common/theme.js'
-import { NEZHA_STYLES, nezhaStyle, refreshNezhaStyle, setNezhaStyle } from '@/common/hero-nezha.js'
+import { activeMascot, activeMascotBaseStyle, autoMood, refreshMascots, setMascotStyle, setAutoMood } from '@/common/mascots.js'
 import { isHideRecentsEnabled, setHideRecentsEnabled } from '@/common/recents.js'
 // #ifdef APP-PLUS
 import {
@@ -275,6 +297,7 @@ import {
   isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations,
   openAppSettings,
   hasOverlayPermission, requestOverlayPermission,
+  getPopupPermissionState, openPopupPermissionSettings,
   setCardThemeColor
 } from '@/uni_modules/muyian-bill-listener'
 // #endif
@@ -288,6 +311,7 @@ import {
   isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations,
   openAppSettings,
   hasOverlayPermission, requestOverlayPermission,
+  getPopupPermissionState, openPopupPermissionSettings,
   setCardThemeColor
 } from '@/common/web-bill-api.js'
 // #endif
@@ -295,8 +319,20 @@ import {
 const listenerEnabled = ref(false)
 const notifyEnabled = ref(false)
 const notifAllowed = ref(true)
-// MIUI/HyperOS 的"后台弹出界面"开关：只是系统允许后台启动 Activity 的前置条件
+// 系统"显示在其他应用上层"（SYSTEM_ALERT_WINDOW）：弹层要盖在支付页上方的前置条件
 const overlayPerm = ref(false)
+// MIUI「后台弹出界面」是小米/Redmi/POCO 独有的独立 AppOp，非 MIUI 机型不显示这一项
+const popupState = ref({ miui: false, overlay: false, miuiPopup: -1, miuiPopupKnown: false, blocked: false })
+const miuiPopupState = computed(() => {
+  const s = popupState.value
+  if (s.miuiPopupKnown) {
+    if (s.miuiPopup === 0) return { ok: true, text: '已允许' }
+    if (s.miuiPopup === 1) return { ok: false, text: '未允许' }
+    return { ok: false, text: '未检测' }
+  }
+  if (s.blocked) return { ok: false, text: '被系统拦截' }
+  return { ok: false, text: '未检测' }
+})
 // 后台运行：电池优化是否已豁免、后台保活开关
 const batteryOk = ref(true)
 const keepAlive = ref(true)
@@ -324,6 +360,16 @@ const heroMenuItems = [
   { name: '恢复默认' }
 ]
 
+/** 空态/成功态用哪张表情：没有对应 mood 的角色给一句兜底 */
+const moodHint = computed(() => {
+  const parts = []
+  const empty = activeMascot.value.styles.find(s => s.mood === 'empty')
+  const success = activeMascot.value.styles.find(s => s.mood === 'success')
+  if (empty) parts.push('空态用「' + empty.name + '」')
+  if (success) parts.push('成功用「' + success.name + '」')
+  return parts.length ? parts.join('，') : '按场景自动切换表情'
+})
+
 /** 切换主题：页面根节点的主题类立即变化，原生底部弹层用字面色同步一次 */
 function applyTheme(id) {
   if (theme.value.id === id) return
@@ -334,11 +380,18 @@ function applyTheme(id) {
   uni.showToast({ title: '已切换为' + t.name, icon: 'none' })
 }
 
-/** 切换首页哪吒表情：只影响首页头图，回首页 onShow 读取 */
-function applyNezha(id) {
-  if (nezhaStyle.value.id === id) return
-  const n = setNezhaStyle(id)
-  uni.showToast({ title: '已切换为「' + n.name + '」', icon: 'none' })
+/** 切换当前角色的基础表情：全局生效，其他页面 onShow 读取 */
+function applyMascotStyle(id) {
+  if (activeMascotBaseStyle.value && activeMascotBaseStyle.value.id === id) return
+  const n = setMascotStyle(id)
+  if (n) uni.showToast({ title: '已切换为「' + n.name + '」', icon: 'none' })
+}
+
+/** 跟随场景：开启后空态/成功态自动换 mood 对应的表情 */
+function onAutoMoodChange(e) {
+  const val = !!(e && e.value)
+  setAutoMood(val)
+  uni.showToast({ title: val ? '已开启跟随场景' : '已固定当前表情', icon: 'none' })
 }
 
 function refresh() {
@@ -346,6 +399,19 @@ function refresh() {
   try { notifyEnabled.value = isNotificationListenerEnabled() } catch (e) { notifyEnabled.value = false }
   try { notifAllowed.value = areNotificationsEnabled() } catch (e) { notifAllowed.value = true }
   try { overlayPerm.value = hasOverlayPermission() } catch (e) { overlayPerm.value = false }
+  try {
+    const ps = JSON.parse(getPopupPermissionState() || '{}')
+    popupState.value = {
+      miui: !!ps.miui,
+      overlay: !!ps.overlay,
+      miuiPopup: typeof ps.miuiPopup === 'number' ? ps.miuiPopup : -1,
+      miuiPopupKnown: !!ps.miuiPopupKnown,
+      blocked: !!ps.blocked
+    }
+    overlayPerm.value = popupState.value.overlay
+  } catch (e) {
+    popupState.value = { miui: false, overlay: false, miuiPopup: -1, miuiPopupKnown: false, blocked: false }
+  }
   try { batteryOk.value = isIgnoringBatteryOptimizations() } catch (e) { batteryOk.value = true }
   try { keepAlive.value = isKeepAliveEnabled() } catch (e) { keepAlive.value = false }
   hideRecents.value = isHideRecentsEnabled()
@@ -404,6 +470,14 @@ function onOverlayPermission() {
   try { requestOverlayPermission() } catch (e) {}
   // #endif
   uni.showToast({ title: '请允许"显示在其他应用上层"，返回后自动生效', icon: 'none' })
+}
+
+/** MIUI/HyperOS：单独的后台弹出界面权限（AppOp 10021），和上面的悬浮窗开关不是一个 */
+function onMiuiPopupPermission() {
+  // #ifdef APP-PLUS
+  try { openPopupPermissionSettings() } catch (e) {}
+  // #endif
+  uni.showToast({ title: '点「其他权限」→「后台弹出界面」', icon: 'none' })
 }
 
 /** 国产 ROM 的自启动/后台管理入口在应用详情页 */
@@ -590,7 +664,7 @@ onPageScroll((e) => {
 
 onShow(() => {
   refreshTheme()
-  refreshNezhaStyle()
+  refreshMascots()
   refresh()
   applyStatusBarStyle()
 })
@@ -729,18 +803,44 @@ onHide(() => {
   font-size: 21rpx;
   color: var(--c-sub);
 }
-/* ---- 首页哪吒选择 ---- */
-.nezha-preview {
+/* ---- 角色表情选择 ---- */
+.mood-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 20rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 16rpx;
+  background-color: var(--c-fill);
+}
+.mood-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mood-row-title {
+  font-size: 27rpx;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.mood-row-desc {
+  margin-top: 4rpx;
+  font-size: 21rpx;
+  color: var(--c-sub);
+  line-height: 1.5;
+}
+.mascot-preview {
   position: relative;
   height: 170rpx;
   border-radius: 14rpx;
   overflow: hidden;
   background-color: var(--c-primary-weak);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
 }
-.nezha-thumb {
+.mascot-thumb {
   width: 100%;
   height: 170rpx;
   display: block;

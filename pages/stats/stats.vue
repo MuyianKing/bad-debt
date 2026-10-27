@@ -15,11 +15,9 @@
           <view class="nav-step" @tap="shiftPeriod(-1)">
             <app-icon name="chevron-left" color="#8a90a0" :size="16"></app-icon>
           </view>
-          <picker mode="date" :fields="range === 'month' ? 'month' : 'year'" :value="pickerValue" @change="onPeriodChange">
-            <view class="nav-date">
-              <text class="nav-date-text">{{ periodDisplay }}</text>
-            </view>
-          </picker>
+          <view class="nav-date" @tap="openPeriodPicker">
+            <text class="nav-date-text">{{ periodDisplay }}</text>
+          </view>
           <view class="nav-step" @tap="shiftPeriod(1)">
             <app-icon name="chevron-right" color="#8a90a0" :size="16"></app-icon>
           </view>
@@ -38,6 +36,10 @@
 
     <!-- 收支总览 -->
     <view class="card total-card">
+      <!-- 总览卡常驻角色：和首页一样用整身图；结余为负用不服，为正用大笑，持平/无账单用基础表情 -->
+      <view v-if="totalMood" class="total-mascot">
+        <mascot-face :mood="totalMood" :size="190"></mascot-face>
+      </view>
       <view class="total-head">
         <text class="total-label">{{ range === 'month' ? '本月支出' : '本年支出' }}</text>
         <view class="total-count">{{ bills.length }} 笔</view>
@@ -49,18 +51,13 @@
 
       <view class="total-metrics">
         <view class="metric">
-          <text class="metric-label">收入</text>
+          <text class="metric-label">{{ range === 'month' ? '月收入' : '年收入' }}</text>
           <text class="metric-value">{{ fmtMoney(incomeTotal) }}</text>
         </view>
         <view class="metric-div"></view>
         <view class="metric">
-          <text class="metric-label">结余</text>
+          <text class="metric-label">{{ range === 'month' ? '本月结余' : '本年结余' }}</text>
           <text class="metric-value">{{ fmtMoney(balance) }}</text>
-        </view>
-        <view class="metric-div"></view>
-        <view class="metric">
-          <text class="metric-label">{{ range === 'month' ? '日均支出' : '月均支出' }}</text>
-          <text class="metric-value">{{ fmtMoney(avgExpense) }}</text>
         </view>
       </view>
     </view>
@@ -91,26 +88,34 @@
         <view class="bar-y">
           <text v-for="(t, i) in yTicks" :key="i" class="bar-y-label">{{ fmtTick(t) }}</text>
         </view>
-        <view id="line-wrap" class="bar-body">
-          <view class="chart-grid">
-            <view v-for="n in 4" :key="n" class="grid-line" :style="{ top: ((n - 1) * 25) + '%' }"></view>
-          </view>
-          <canvas
-            v-if="chartType === 'line'"
-            canvas-id="dailyLine"
-            id="dailyLine"
-            class="line-canvas"
-            :style="{ width: lineW + 'px', height: lineH + 'px' }"
-          ></canvas>
-          <view v-else :class="['bar-cols', range === 'year' ? 'is-year' : '']">
-            <view
-              v-for="(b, i) in bars"
-              :key="i"
-              class="bar-col"
-              @tap="onBarTap(b)"
-            >
-              <view class="bar-bar bar-out" :style="{ height: b.height + 'rpx' }"></view>
+        <!-- 横轴与绘图区同宽，标签才能和柱体/折线左右对齐 -->
+        <view class="bar-main">
+          <view id="line-wrap" class="bar-body">
+            <view class="chart-grid">
+              <view v-for="n in 4" :key="n" class="grid-line" :style="{ top: ((n - 1) * 25) + '%' }"></view>
             </view>
+            <canvas
+              v-if="chartType === 'line'"
+              canvas-id="dailyLine"
+              id="dailyLine"
+              class="line-canvas"
+              :style="{ width: lineW + 'px', height: lineH + 'px' }"
+            ></canvas>
+            <view v-else :class="['bar-cols', range === 'year' ? 'is-year' : '']">
+              <view
+                v-for="(b, i) in bars"
+                :key="i"
+                class="bar-col"
+                @tap="onBarTap(b)"
+              >
+                <view class="bar-bar bar-out" :style="{ height: b.height + 'rpx' }"></view>
+              </view>
+            </view>
+          </view>
+          <view class="bar-x">
+            <text class="bar-x-label">{{ xLabels[0] }}</text>
+            <text class="bar-x-label bar-x-mid">{{ xLabels[1] }}</text>
+            <text class="bar-x-label">{{ xLabels[2] }}</text>
           </view>
         </view>
       </view>
@@ -119,11 +124,6 @@
           <text class="empty-text">该期间暂无支出</text>
           <text class="empty-hint">记一笔后显示每日趋势</text>
         </view>
-      </view>
-      <view class="bar-x" v-if="maxBarValue > 0">
-        <text class="bar-x-label">{{ xLabels[0] }}</text>
-        <text class="bar-x-label bar-x-mid">{{ xLabels[1] }}</text>
-        <text class="bar-x-label">{{ xLabels[2] }}</text>
       </view>
     </view>
 
@@ -236,7 +236,7 @@
     </wd-popup>
 
     <!-- 日报表 / 月报表：月视图按天、年视图按月 -->
-    <view class="card">
+    <view class="card glass">
       <view class="card-head">
         <view class="card-head-title">
           <view class="card-icon">
@@ -267,15 +267,27 @@
     </view>
 
     <view class="bottom-safe"></view>
+
+    <!-- 期间选择：wot 日期面板（原生 picker 在深色主题下是白底）。
+         弹层放在 navbar 之外，避免导航栏的 fixed/毛玻璃样式影响弹层定位 -->
+    <wd-datetime-picker
+      ref="periodPickerRef"
+      v-model="periodStamp"
+      :type="range === 'month' ? 'year-month' : 'year'"
+      :z-index="300"
+    >
+      <view></view>
+    </wd-datetime-picker>
   </view>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, getCurrentInstance } from 'vue'
-import { onReady, onShow, onPageScroll } from '@dcloudio/uni-app'
+import { onReady, onShow, onHide, onPageScroll } from '@dcloudio/uni-app'
 import { fmtMoney, fmtTick, pad2, daysInMonth } from '@/common/fmt.js'
 import { topNameOf, colorOf, iconOf, tintOf } from '@/common/cats.js'
 import { theme, themeClass, refreshTheme } from '@/common/theme.js'
+import { refreshMascots } from '@/common/mascots.js'
 // #ifdef APP-PLUS
 import { getMonthBills, getYearBills } from '@/uni_modules/muyian-bill-listener'
 // #endif
@@ -288,6 +300,8 @@ const range = ref('month')
 const year = ref(now.getFullYear())
 const month = ref(now.getMonth() + 1)
 const bills = ref([])
+// 当前时间戳：每次 load 时刷新，跨天后"到今天为止"的边界也能跟着走
+const nowStamp = ref(Date.now())
 // 趋势图形态：柱状 / 折线（两者都只画支出，收入看下方分类报表）
 const chartType = ref('bar')
 const donutKind = ref('expense')
@@ -299,7 +313,29 @@ const lineW = ref(Math.round(uni.upx2px(548)))
 const pageInst = getCurrentInstance()
 
 const rangeLabel = computed(() => (range.value === 'month' ? '月' : '年'))
-const pickerValue = computed(() => (range.value === 'month' ? year.value + '-' + pad2(month.value) : String(year.value)))
+// wot 日期面板吃时间戳；确认时才回写期间，滚动过程中不改统计数据
+const periodPickerRef = ref(null)
+const periodStamp = computed({
+  get: () => (range.value === 'month'
+    ? new Date(year.value, month.value - 1, 1).getTime()
+    : new Date(year.value, 0, 1).getTime()),
+  set: (stamp) => {
+    const d = new Date(Number(stamp))
+    if (isNaN(d.getTime())) return
+    if (range.value === 'month') {
+      const y = d.getFullYear()
+      const m = d.getMonth() + 1
+      if (y === year.value && m === month.value) return
+      year.value = y
+      month.value = m
+    } else {
+      const y = d.getFullYear()
+      if (y === year.value) return
+      year.value = y
+    }
+    load()
+  }
+})
 const periodDisplay = computed(() => (range.value === 'month' ? year.value + '年' + month.value + '月' : year.value + '年'))
 // 顶栏滚动态：静止时透明让状态栏与页面同色，滚动后转毛玻璃避免内容从标题下穿过
 const navSolid = ref(false)
@@ -316,6 +352,13 @@ const incomeBills = computed(() => bills.value.filter(b => Number(b.money) > 0))
 const expenseTotal = computed(() => expenseBills.value.reduce((s, b) => s + Math.abs(Number(b.money)), 0))
 const incomeTotal = computed(() => incomeBills.value.reduce((s, b) => s + Number(b.money), 0))
 const balance = computed(() => incomeTotal.value - expenseTotal.value)
+
+/** 总览卡常驻角色：结余为负用「不服」，为正用「大笑」；持平/无账单用基础表情 */
+const totalMood = computed(() => {
+  if (balance.value < 0) return 'warn'
+  if (balance.value > 0) return 'success'
+  return 'idle'
+})
 
 // 日报表/月报表：月视图按天、年视图按月，只列有账单的行，倒序
 const reportRows = computed(() => {
@@ -338,23 +381,24 @@ const reportRows = computed(() => {
     }))
 })
 
-const avgExpense = computed(() => {
+/* ---------- 趋势图（柱状 / 折线，数据同为支出） ---------- */
+// 当前期间已过去的槽位数：当月只画到今天、当年只画到本月，未来日期不进图
+const chartSlots = computed(() => {
+  const t = new Date(nowStamp.value)
   if (range.value === 'month') {
-    const t = new Date()
     const isCurrent = t.getFullYear() === year.value && t.getMonth() + 1 === month.value
-    const elapsed = isCurrent ? t.getDate() : daysInMonth(year.value, month.value)
-    return expenseTotal.value / Math.max(1, elapsed)
+    if (isCurrent) return t.getDate()
+    const isFuture = year.value > t.getFullYear() || (year.value === t.getFullYear() && month.value > t.getMonth() + 1)
+    return isFuture ? 0 : daysInMonth(year.value, month.value)
   }
-  const t = new Date()
-  const elapsed = t.getFullYear() === year.value ? t.getMonth() + 1 : 12
-  return expenseTotal.value / Math.max(1, elapsed)
+  if (year.value === t.getFullYear()) return t.getMonth() + 1
+  return year.value > t.getFullYear() ? 0 : 12
 })
 
-/* ---------- 趋势图（柱状 / 折线，数据同为支出） ---------- */
 // 每日/每月支出汇总；柱高统一按 axisMax 换算，柱顶才能和左侧刻度对齐
 const barSums = computed(() => {
   const out = []
-  const slots = range.value === 'month' ? daysInMonth(year.value, month.value) : 12
+  const slots = chartSlots.value
   const sums = new Array(slots).fill(0)
   for (const b of expenseBills.value) {
     const idx = range.value === 'month' ? Number(b.day) - 1 : Number(b.month) - 1
@@ -397,12 +441,20 @@ const yTicks = computed(() => {
   return [max, max * 0.75, max * 0.5, max * 0.25, 0]
 })
 
+// 轴标签跟着已过去的槽位走，末位不能落在未来日期上
 const xLabels = computed(() => {
+  const slots = chartSlots.value
+  if (slots <= 0) return ['', '', '']
   if (range.value === 'month') {
-    const dim = daysInMonth(year.value, month.value)
-    return [month.value + '-01', month.value + '-' + pad2(Math.ceil(dim / 2)), month.value + '-' + pad2(dim)]
+    const head = month.value + '-01'
+    const mid = month.value + '-' + pad2(Math.ceil(slots / 2))
+    const end = month.value + '-' + pad2(slots)
+    if (slots === 1) return [head, '', '']
+    return [head, mid === head || mid === end ? '' : mid, end]
   }
-  return ['1月', '6月', '12月']
+  if (slots === 1) return ['1月', '', '']
+  const mid = Math.ceil(slots / 2) + '月'
+  return ['1月', mid === '1月' || mid === slots + '月' ? '' : mid, slots + '月']
 })
 
 function onBarTap(b) {
@@ -471,7 +523,8 @@ watch(chartType, (v) => {
   if (v === 'line') nextTick(() => setTimeout(measureLine, 30))
 })
 watch(bars, () => {
-  if (chartType.value === 'line') nextTick(() => setTimeout(drawLineChart, 30))
+  // 刻度文字宽度随数据变化，折线画布宽度要重新测量再画
+  if (chartType.value === 'line') nextTick(() => setTimeout(measureLine, 30))
 })
 
 /* ---------- 环形图（同时喂给下方明细列表与底部弹层） ---------- */
@@ -672,6 +725,7 @@ watch(selName, () => {
 
 /* ---------- 数据加载 ---------- */
 function load() {
+  nowStamp.value = Date.now()
   try {
     const raw = range.value === 'month'
       ? getMonthBills(String(year.value), String(month.value))
@@ -688,19 +742,8 @@ function onRangeChange(e) {
   }
 }
 
-function onPeriodChange(e) {
-  const v = e.detail && e.detail.value ? String(e.detail.value) : ''
-  if (!v) return
-  if (range.value === 'month') {
-    const parts = v.split('-')
-    if (parts.length >= 2) {
-      year.value = Number(parts[0])
-      month.value = Number(parts[1])
-    }
-  } else {
-    year.value = Number(v)
-  }
-  load()
+function openPeriodPicker() {
+  if (periodPickerRef.value) periodPickerRef.value.open()
 }
 
 function shiftPeriod(delta) {
@@ -744,13 +787,31 @@ onReady(() => {
   setTimeout(drawDonut, 200)
 })
 
+/** 深色主题的黑底需要白色状态栏图标（与设置页一致） */
+function applyStatusBarStyle() {
+  // #ifdef APP-PLUS
+  try {
+    plus.navigator.setStatusBarStyle(theme.value.dark ? 'light' : 'dark')
+  } catch (e) {}
+  // #endif
+}
+
 onShow(() => {
   refreshTheme()
+  refreshMascots()
+  applyStatusBarStyle()
   load()
   nextTick(() => {
     setTimeout(drawDonut, 200)
     if (chartType.value === 'line') setTimeout(measureLine, 200)
   })
+})
+
+onHide(() => {
+  // 下一层页面沿用清单默认的深色图标
+  // #ifdef APP-PLUS
+  try { plus.navigator.setStatusBarStyle('dark') } catch (e) {}
+  // #endif
 })
 </script>
 
@@ -793,7 +854,7 @@ onShow(() => {
   }
 }
 .nav-date-text {
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: var(--c-text);
   font-variant-numeric: tabular-nums;
@@ -842,22 +903,33 @@ onShow(() => {
   background-color: var(--c-primary-fill);
   box-shadow: var(--shadow-card-soft);
 }
+/* 总览卡右侧角色：和首页一样用整身图，底部压住卡片边 */
+.total-mascot {
+  position: absolute;
+  right: 8rpx;
+  bottom: 0;
+  z-index: 0;
+  width: 190rpx;
+  pointer-events: none;
+  filter: drop-shadow(0 6rpx 14rpx rgba(0, 0, 0, 0.18));
+}
 .total-head {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 .total-label {
-  font-size: 24rpx;
+  font-size: 30rpx;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.82);
   letter-spacing: 1rpx;
 }
 .total-count {
-  font-size: 20rpx;
+  margin-left: 14rpx;
+  font-size: 22rpx;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.92);
   padding: 6rpx 16rpx;
@@ -873,55 +945,55 @@ onShow(() => {
   margin-top: 16rpx;
 }
 .total-currency {
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.72);
   margin-right: 10rpx;
 }
 .total-value {
-  font-size: 76rpx;
+  font-size: 78rpx;
   font-weight: 600;
   color: #ffffff;
   line-height: 1.06;
   font-variant-numeric: tabular-nums;
   letter-spacing: -2rpx;
 }
-/* 三项明细：不加面板底色，只靠细分隔线分组，留白比色块更透气 */
+/* 两项明细：和首页一样左对齐、标签在上、金额在下，不再均分整行 */
 .total-metrics {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: row;
   align-items: center;
-  margin-top: 30rpx;
+  margin-top: 26rpx;
 }
 .metric {
-  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 .metric-label {
-  font-size: 20rpx;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.82);
+  letter-spacing: 1rpx;
 }
 .metric-value {
-  margin-top: 8rpx;
-  font-size: 28rpx;
-  font-weight: 600;
+  margin-top: 6rpx;
+  max-width: 170rpx;
+  font-size: 32rpx;
+  font-weight: 700;
   color: #ffffff;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.4rpx;
-  /* 七位数以上的极端金额不许撑破卡片 */
+  /* 极端金额不许顶到右侧角色身上 */
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .metric-div {
   width: 1rpx;
-  height: 44rpx;
-  margin: 0 20rpx;
-  background-color: rgba(255, 255, 255, 0.2);
+  height: 52rpx;
+  margin: 0 44rpx;
+  background-color: rgba(255, 255, 255, 0.32);
 }
 .card {
   background-color: var(--c-card);
@@ -948,7 +1020,7 @@ onShow(() => {
   margin-right: 12rpx;
 }
 .card-title {
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: var(--c-text);
   letter-spacing: -0.2rpx;
@@ -984,24 +1056,30 @@ onShow(() => {
   display: flex;
   flex-direction: row;
 }
+/* 绘图区 + 横轴刻度的共同容器：占满 y 轴刻度列以外的宽度 */
+.bar-main {
+  flex: 1;
+  min-width: 0;
+}
 .bar-y {
-  width: 78rpx;
+  /* 不再固定宽度：按最宽的刻度文字收缩，避免短刻度左侧留出一大块空白 */
+  flex: none;
   height: 330rpx;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   align-items: flex-end;
-  padding-right: 14rpx;
+  padding-right: 10rpx;
 }
 .bar-y-label {
-  font-size: 19rpx;
+  font-size: 24rpx;
   color: var(--c-dim);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .bar-body {
   position: relative;
-  flex: 1;
+  width: 100%;
   height: 330rpx;
   display: flex;
   flex-direction: row;
@@ -1068,7 +1146,7 @@ onShow(() => {
 }
 .bar-x-label {
   flex: 1;
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: var(--c-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -1078,7 +1156,7 @@ onShow(() => {
 .bar-x .bar-x-label:last-child {
   text-align: right;
 }
-/* 空状态：只留两行文案，不放图标（小尺寸实心图标在灰底上会糊成一团） */
+/* 空状态：只留两行文案，不放图标；角色统一放在总览卡 */
 .empty {
   display: flex;
   flex-direction: column;
@@ -1092,13 +1170,13 @@ onShow(() => {
 }
 .empty-text {
   color: var(--c-sub);
-  font-size: 25rpx;
+  font-size: 27rpx;
   font-weight: 500;
 }
 .empty-hint {
   margin-top: 6rpx;
   color: var(--c-dim);
-  font-size: 20rpx;
+  font-size: 22rpx;
 }
 /* 环形图 + 分类明细 */
 .donut-wrap {
@@ -1135,7 +1213,7 @@ onShow(() => {
   pointer-events: none;
 }
 .donut-center-name {
-  font-size: 21rpx;
+  font-size: 23rpx;
   color: var(--c-sub);
   max-width: 96%;
   overflow: hidden;
@@ -1144,7 +1222,7 @@ onShow(() => {
 }
 .donut-center-amount {
   margin-top: 6rpx;
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: var(--c-text);
   font-variant-numeric: tabular-nums;
@@ -1152,7 +1230,7 @@ onShow(() => {
 }
 .donut-center-pct {
   margin-top: 4rpx;
-  font-size: 19rpx;
+  font-size: 21rpx;
   color: var(--c-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -1190,7 +1268,7 @@ onShow(() => {
   align-items: baseline;
 }
 .cat-name {
-  font-size: 27rpx;
+  font-size: 29rpx;
   font-weight: 500;
   color: var(--c-text);
   max-width: 260rpx;
@@ -1200,7 +1278,7 @@ onShow(() => {
 }
 .cat-pct {
   margin-left: 12rpx;
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--c-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -1217,7 +1295,7 @@ onShow(() => {
 }
 .cat-amt {
   margin-left: 16rpx;
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 600;
   color: var(--c-text);
   font-variant-numeric: tabular-nums;
@@ -1255,18 +1333,18 @@ onShow(() => {
   min-width: 0;
 }
 .cat-sheet-name {
-  font-size: 32rpx;
+  font-size: 34rpx;
   font-weight: 700;
   color: var(--c-text);
 }
 .cat-sheet-meta {
   margin-top: 4rpx;
-  font-size: 21rpx;
+  font-size: 23rpx;
   color: var(--c-sub);
 }
 .cat-sheet-total {
   margin-left: 20rpx;
-  font-size: 32rpx;
+  font-size: 34rpx;
   font-weight: 700;
   color: var(--c-text);
   font-variant-numeric: tabular-nums;
@@ -1299,12 +1377,12 @@ onShow(() => {
   flex-direction: column;
 }
 .cat-bill-name {
-  font-size: 28rpx;
+  font-size: 30rpx;
   color: var(--c-text);
 }
 .cat-bill-meta {
   margin-top: 5rpx;
-  font-size: 21rpx;
+  font-size: 23rpx;
   color: var(--c-sub);
   overflow: hidden;
   white-space: nowrap;
@@ -1312,7 +1390,7 @@ onShow(() => {
 }
 .cat-bill-amt {
   margin-left: 20rpx;
-  font-size: 29rpx;
+  font-size: 31rpx;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -1323,9 +1401,9 @@ onShow(() => {
 .cat-bill-amt.is-in {
   color: var(--c-in);
 }
-/* 日报表 / 月报表：日期左对齐、金额右对齐，表头只做弱化说明 */
+/* 日报表 / 月报表：日期列靠左，金额列居中；表头只做弱化说明 */
 .report-hint {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--c-dim);
 }
 .report-table {
@@ -1343,14 +1421,14 @@ onShow(() => {
   padding: 0 0 14rpx;
 }
 .report-th .report-td {
-  font-size: 20rpx;
+  font-size: 24rpx;
   color: var(--c-dim);
   font-weight: 500;
   letter-spacing: 0.6rpx;
 }
 .report-td {
   min-width: 0;
-  font-size: 26rpx;
+  font-size: 28rpx;
   color: var(--c-text);
   font-variant-numeric: tabular-nums;
 }
@@ -1361,7 +1439,7 @@ onShow(() => {
 }
 .report-num {
   flex: 1;
-  text-align: right;
+  text-align: center;
   font-weight: 500;
 }
 .report-out {

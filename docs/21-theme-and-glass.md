@@ -5,10 +5,12 @@
 ## 主题切换（悟空黄 / 哪吒红 / 沙僧黑）
 
 - **主题切换（悟空黄 / 哪吒红 / 沙僧黑）**：`common/theme.js` 是主题唯一来源（`THEMES` / 响应式 `theme` / `themeClass` / `setTheme` / `refreshTheme`，storage key `muyian_theme_v1`）。令牌本体在 App.vue：`page` 是默认「悟空黄」，`.theme-nezha` / `.theme-shaseng` 分别覆盖为「哪吒红」「沙僧黑」。**每个页面根节点必须绑 `:class="['page', themeClass]"`，并在 `onShow` 调 `refreshTheme()`**；需要字面色的地方（`app-icon` 的 color、canvas 画笔）用 `theme.primary`/`theme.primaryDeep`/`theme.primaryFill`（中性图标用 `theme.ink`/`theme.inkSub`），不要写死主题色或深灰。主题相关的阴影/柱条/光斑走令牌（`--shadow-primary-sm/-lg`、`--grad-bar`、`--blob-a/b/c`）。原生弹层不认 CSS 变量：切换主题时页面调用 `setCardThemeColor(theme.cardColor || theme.primary)` 同步——深色主题的页面强调色是亮银，而原生弹层是浅色底，必须传 `cardColor` 这种深色值，不能直接传 `primary`；新增主题要同时补 `cardColor`（必要时补 `dark: true`）。
+- **主题与角色解耦**：主题只管配色，主题对应哪个角色由 `common/mascots.js` 的 `THEME_MASCOT` 决定。当前哪吒已启用；悟空已预置但 `ready: false`，素材到位前 `activeMascot` 回退到哪吒；沙僧仍映射到哪吒。新增/启用角色只改注册表与映射，不要把角色写进主题令牌或页面样式。`autoMood` 控制空态/成功态是否自动换表情，基础表情按角色分别持久化。
 
 ## 深色主题（沙僧黑）
 
-- **深色主题（沙僧黑）的额外约定**：`theme.dark` 为 true 时 `themeClass` 会额外带 `wot-theme-dark`，让 wd-cell / wd-action-sheet / wd-popup 等 wot 组件切到深色底（配合 `.theme-shaseng` 里的 `--wot-dark-*`）。深色主题的 `--c-primary` 是**强调色**（亮银，供给柱条/选中描边/图标字面色），**承载白字的实底填充改用 `--c-primary-fill` / `--c-primary-press`**（统计总览卡、记一笔保存键）；`--c-key-*` 是键盘键帽专用令牌，`--c-raised` 是分段滑块/底部弹层这类浮起面。`common/cats.js` 的 `tintOf()` 在深色主题按黑色混合，页面不要自己拼浅色底。**新增页面或改配色时必须两套主题各看一遍**，禁止写死 `#fff` / `rgba(29,33,41,...)` 这类浅色值。
+- **深色主题（沙僧黑）的额外约定**：`theme.dark` 为 true 时 `themeClass` 会额外带 `wot-theme-dark`，让 wd-cell / wd-action-sheet / wd-popup / wd-picker / wd-datetime-picker 等 wot 组件切到深色底。`.theme-shaseng` 里除 `--wot-dark-background/2`、`--wot-dark-color/3` 外，还要补齐 `--wot-dark-background3~7`、`--wot-dark-color2/-gray`、`--wot-dark-border-color`、`--wot-overlay-bg-dark`；picker 的上/下渐隐遮罩用 `--wot-picker-mask` 换成深色，否则会在黑底上露出两条白带。深色主题的 `--c-primary` 是**强调色**（亮银，供给柱条/选中描边/图标字面色），**承载白字的实底填充改用 `--c-primary-fill` / `--c-primary-press`**（统计总览卡、记一笔保存键）；`--c-key-*` 是键盘键帽专用令牌，`--c-raised` 是分段滑块/底部弹层这类浮起面。`common/cats.js` 的 `tintOf()` 在深色主题按黑色混合，页面不要自己拼浅色底。**新增页面或改配色时必须两套主题各看一遍**，禁止写死 `#fff` / `rgba(29,33,41,...)` 这类浅色值。
+- **日期/期间选择一律用 wot 日期面板，不用原生 `<picker>`**：uni-app 的 `<picker mode="date">` 弹层不认主题令牌，沙僧黑下是白底。统一写成 `<wd-datetime-picker>` + 自定义触发器插槽：触发器照旧放在导航/表单里，组件本体放到**页面根节点**（与 wd-action-sheet 同级）并加 `ref`，点击时调 `ref.open()`；`v-model` 绑定一个「时间戳 ↔ 年月/日期字符串」的 computed（`type` 为 `year-month` / `date` / `year`），确认时才回写页面状态并刷新数据。**弹层不能放进 `page-main`、`wd-navbar` 或 `.glass` 这类带 `transform` / `backdrop-filter` 的容器**——它们会成为 fixed 后代的包含块，导致弹层贴在容器底部而不是屏幕底部。深色主题下状态栏图标也要跟着换：新页面在 `onShow` 调 `applyStatusBarStyle()`（`light` / `dark` 由 `theme.dark` 决定），`onHide` 恢复 `dark`。
 
 ## 彩色图标
 

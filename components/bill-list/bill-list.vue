@@ -1,6 +1,6 @@
 <template>
   <view>
-    <view v-for="g in groups" :key="g.day" class="bl-group glass">
+    <view v-for="g in groups" :key="g.day" :class="['bl-group', flush ? 'bl-group-flush' : 'glass']">
       <view v-if="!hideHead" class="bl-head">
         <text class="bl-title">{{ g.title }}</text>
         <view class="bl-head-right">
@@ -45,7 +45,9 @@ export default {
   name: 'bill-list',
   props: {
     groups: { type: Array, default: () => [] },
-    hideHead: { type: Boolean, default: false }
+    hideHead: { type: Boolean, default: false },
+    // 嵌进外层卡片时用：去掉自带的卡片底/圆角/阴影，只保留行内容与行分隔
+    flush: { type: Boolean, default: false }
   },
   emits: ['row', 'rowlong'],
   methods: {
@@ -86,6 +88,14 @@ export default {
   padding: 6rpx 28rpx;
   margin: 0 24rpx 24rpx;
   box-shadow: var(--shadow-card);
+}
+/* 嵌进别的卡片：只留列表内容，卡片底/圆角/阴影由外层负责 */
+.bl-group-flush {
+  background-color: transparent;
+  border-radius: 0;
+  padding: 0 28rpx;
+  margin: 0;
+  box-shadow: none;
 }
 .bl-head {
   display: flex;
