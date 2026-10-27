@@ -16,8 +16,9 @@
     </wd-navbar>
 
     <view class="hint-bar">
-      <app-icon name="edit-3" :color="theme.primaryDeep" :size="14"></app-icon>
-      <text class="hint-text">长按分类拖动排序，单击可修改图标与名称</text>
+      <mascot-face class="hint-mascot" :mood="hintMood" :head="true" :size="52"></mascot-face>
+      <text class="hint-name">{{ activeMascot.name }}</text>
+      <text class="hint-text">：{{ hintLine }}</text>
     </view>
 
     <view
@@ -33,10 +34,10 @@
         :key="c.name"
         class="cat-block"
         :class="{ 'cat-block-border': i > 0 }"
+        :style="blockStyle(i)"
       >
         <view
-          :class="['cat-row', isDragTarget('top', i) ? 'drag-target' : '']"
-          :style="dragStyle('top', i)"
+          class="cat-row"
           @longpress="startDrag('top', i)"
           @tap="openEditTop(i)"
         >
@@ -63,8 +64,8 @@
           <view
             v-for="(s, si) in (c.subs || [])"
             :key="s.name"
-            :class="['sub-item', isDragTarget('sub', si) ? 'drag-target' : '']"
-            :style="dragStyle('sub', si)"
+            class="sub-item"
+            :style="subItemStyle(si)"
             @longpress="startDrag('sub', si, i)"
             @tap="openEditSub(i, si)"
           >
@@ -149,10 +150,11 @@
 </template>
 
 <script setup>
-import { ref, computed, getCurrentInstance } from 'vue'
+import { ref, computed, getCurrentInstance, onUnmounted } from 'vue'
 import { onShow, onHide } from '@dcloudio/uni-app'
-import { getCategories, saveCategories, listByType, ICON_CHOICES, DEFAULT_ICON, PALETTE, gradOf, tintOf } from '@/common/cats.js'
+import { getCategories, saveCategories, listByType, ICON_CHOICES, DEFAULT_ICON, PALETTE, tintOf } from '@/common/cats.js'
 import { theme, themeClass, refreshTheme } from '@/common/theme.js'
+import { activeMascot, refreshMascots } from '@/common/mascots.js'
 
 const type = ref('expense')
 const expanded = ref(-1)
@@ -192,7 +194,7 @@ function catColor(i) {
 function iconCircleStyle(c) {
   const idx = list.value.findIndex(x => x.name === c.name)
   const color = PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
-  return { background: gradOf(color) }
+  return { backgroundColor: color }
 }
 function subColor(i) {
   return PALETTE[i % PALETTE.length]
@@ -227,9 +229,36 @@ function toggleExpand(i) {
 }
 
 /* ---------- 长按拖拽排序 ---------- */
-const drag = ref(null) // { type:'top'|'sub', parentIdx, from, to, startY, dy, rects }
+// drag 状态：{ kind, parentIdx, from, to, startX, startY, dx, dy, rects, settling }
+const drag = ref(null)
 let lastTouch = { x: 0, y: 0 }
 let justDraggedAt = 0
+const SETTLE_MS = 200
+
+/* ---------- 提示条角色：常态报操作，拖拽/保存后换表情与台词 ---------- */
+const savedTip = ref('')
+let savedTimer = null
+
+const hintMood = computed(() => {
+  if (savedTip.value) return 'success'
+  return drag.value ? 'warn' : 'idle'
+})
+
+const hintLine = computed(() => {
+  if (savedTip.value) return savedTip.value
+  const d = drag.value
+  if (d) {
+    if (d.settling) return '放好了'
+    return d.to === d.from ? '按住，上下挪' : '松手，放这儿'
+  }
+  return type.value === 'income' ? '点一下改名，长按能拖动' : '长按排序，点一下改图标'
+})
+
+function flashSaved(text) {
+  savedTip.value = text
+  clearTimeout(savedTimer)
+  savedTimer = setTimeout(() => { savedTip.value = '' }, 1200)
+}
 
 function onCardTouch(e) {
   const t = e.touches && e.touches[0]
@@ -242,20 +271,29 @@ function onCardTouch(e) {
 
 function startDrag(kind, from, parentIdx = -1) {
   if (drag.value) return
-  const sel = kind === 'top' ? '.cat-row' : '.sub-item'
+  // 父类量整块（行 + 展开的子类面板），子类量每个格子
+  const sel = kind === 'top' ? '.cat-block' : '.sub-item'
   const query = uni.createSelectorQuery().in(instance.proxy)
   query.selectAll(sel).boundingClientRect()
   query.exec(res => {
-    const rects = (res && res[0]) || []
+    let rects = (res && res[0]) || []
+    if (kind === 'sub') {
+      // 末尾的「添加子类」不是排序目标，按真实子类数量截掉
+      const subCount = ((list.value[parentIdx] || {}).subs || []).length
+      rects = rects.slice(0, subCount)
+    }
     if (!rects.length) return
     drag.value = {
       kind,
       parentIdx,
       from,
       to: from,
+      startX: lastTouch.x,
       startY: lastTouch.y,
+      dx: 0,
       dy: 0,
-      rects
+      rects,
+      settling: false
     }
     if (uni.vibrateShort) {
       try { uni.vibrateShort() } catch (e) { /* ignore */ }
@@ -263,50 +301,142 @@ function startDrag(kind, from, parentIdx = -1) {
   })
 }
 
-function isDragTarget(kind, i) {
+/** 父类块：被拖的整块（含子类面板）跟手，其余块按目标槽位实时让位 */
+function blockStyle(i) {
   const d = drag.value
-  return !!d && d.kind === kind && i === d.to && i !== d.from
+  if (!d || d.kind !== 'top') return {}
+  if (i === d.from) {
+    return {
+      transform: 'translate3d(0,' + d.dy + 'px,0)',
+      transition: d.settling ? 'transform ' + SETTLE_MS + 'ms ease' : 'none',
+      position: 'relative',
+      zIndex: 20,
+      // 用主题淡底托住整块，别用纯白块把玻璃卡盖住
+      backgroundColor: 'var(--c-primary-weak)',
+      borderRadius: '16rpx',
+      boxShadow: '0 12rpx 30rpx rgba(60, 50, 20, 0.2)'
+    }
+  }
+  const shift = topShift(d, i)
+  return {
+    transform: shift ? 'translate3d(0,' + shift + 'px,0)' : '',
+    transition: 'transform ' + SETTLE_MS + 'ms ease'
+  }
 }
 
-function dragStyle(kind, i) {
+/** 子类格子：被拖的跟手，其余格子补到前/后一个格位 */
+function subItemStyle(i) {
   const d = drag.value
-  if (!d || d.kind !== kind || i !== d.from) return {}
-  return {
-    transform: 'translateY(' + d.dy + 'px)',
-    zIndex: 10,
-    position: 'relative',
-    borderRadius: '16rpx',
-    // 拖动中的行用主题淡底托住，别用纯白块把玻璃卡盖住
-    backgroundColor: 'var(--c-primary-weak)',
-    boxShadow: '0 12rpx 30rpx rgba(60, 50, 20, 0.2)'
+  if (!d || d.kind !== 'sub') return {}
+  if (i === d.from) {
+    return {
+      transform: 'translate3d(' + d.dx + 'px,' + d.dy + 'px,0)',
+      transition: d.settling ? 'transform ' + SETTLE_MS + 'ms ease' : 'none',
+      position: 'relative',
+      zIndex: 20,
+      backgroundColor: 'var(--c-primary-weak)',
+      borderRadius: '16rpx',
+      boxShadow: '0 12rpx 30rpx rgba(60, 50, 20, 0.2)'
+    }
   }
+  const off = subShift(d, i)
+  return {
+    transform: off ? 'translate3d(' + off.dx + 'px,' + off.dy + 'px,0)' : '',
+    transition: 'transform ' + SETTLE_MS + 'ms ease'
+  }
+}
+
+/** 父类让位：向下拖时上面的块整体上移一格，向上拖反之 */
+function topShift(d, i) {
+  const h = d.rects[d.from].height
+  if (i > d.from && i <= d.to) return -h
+  if (i < d.from && i >= d.to) return h
+  return 0
+}
+
+/** 子类让位：把受影响的格子平移到它前/后一个格子原来的位置（可跨行） */
+function subShift(d, i) {
+  if (i > d.from && i <= d.to) {
+    return {
+      dx: d.rects[i - 1].left - d.rects[i].left,
+      dy: d.rects[i - 1].top - d.rects[i].top
+    }
+  }
+  if (i < d.from && i >= d.to) {
+    return {
+      dx: d.rects[i + 1].left - d.rects[i].left,
+      dy: d.rects[i + 1].top - d.rects[i].top
+    }
+  }
+  return null
 }
 
 function onDragMove(e) {
   const d = drag.value
-  if (!d) return
+  if (!d || d.settling) return
   const t = e.touches && e.touches[0]
   if (!t) return
   if (e.preventDefault) e.preventDefault()
   if (e.stopPropagation) e.stopPropagation()
+  d.dx = t.clientX - d.startX
   d.dy = t.clientY - d.startY
-  // 命中检测：指针落在哪个条目上，就是目标位置
-  let hit = d.from
+  const hit = hitTest(d, t.clientX, t.clientY)
+  if (hit !== d.to) d.to = hit
+}
+
+/** 命中检测：父类按块、子类按格子横纵坐标，落在缝隙里保持上一个目标 */
+function hitTest(d, x, y) {
+  let hit = d.to
   for (let i = 0; i < d.rects.length; i++) {
     const r = d.rects[i]
-    if (t.clientY >= r.top && t.clientY <= r.bottom) {
-      hit = i
-      break
-    }
+    const inY = y >= r.top && y <= r.bottom
+    if (!inY) continue
+    if (d.kind === 'sub' && (x < r.left || x > r.right)) continue
+    hit = i
+    break
   }
-  d.to = hit
+  return hit
+}
+
+let settleTimer = null
+
+function clearSettle() {
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
 }
 
 function onDragEnd() {
   const d = drag.value
+  if (!d || d.settling) return
+  justDraggedAt = Date.now()
+  d.settling = true
+  if (d.to === d.from) {
+    // 原位放回：滑回原槽位
+    d.dx = 0
+    d.dy = 0
+  } else if (d.kind === 'top') {
+    const from = d.rects[d.from]
+    const to = d.rects[d.to]
+    // 向下拖时，让位后空出来的槽在目标块旧位置的下沿
+    d.dy = (d.to > d.from ? to.top + to.height - from.height : to.top) - from.top
+  } else {
+    d.dx = d.rects[d.to].left - d.rects[d.from].left
+    d.dy = d.rects[d.to].top - d.rects[d.from].top
+  }
+  clearSettle()
+  // 吸附动画由视图层执行，样式下发有一两帧的桥接延迟，
+  // 落库时间要比动画时长再多留一点，避免动画没播完就被改数据截断
+  settleTimer = setTimeout(commitDrag, SETTLE_MS + 100)
+}
+
+/** 松手后先播完吸附动画，再改数据落库 */
+function commitDrag() {
+  settleTimer = null
+  const d = drag.value
   if (!d) return
   drag.value = null
-  justDraggedAt = Date.now()
   if (d.to === d.from) return
   if (d.kind === 'top') {
     const arr = type.value === 'income' ? data.value.income : data.value.expense
@@ -318,7 +448,17 @@ function onDragEnd() {
     }
   }
   persist()
+  flashSaved('排好了')
 }
+
+onUnmounted(() => {
+  // 页面被直接销毁时别让吸附定时器继续跑
+  if (settleTimer) {
+    clearSettle()
+    commitDrag()
+  }
+  clearTimeout(savedTimer)
+})
 
 /* ---------- 弹窗 ---------- */
 function openAddTop() {
@@ -404,6 +544,7 @@ function confirmDialog() {
   }
   dlgShow.value = false
   persist()
+  flashSaved('记下了')
   uni.showToast({ title: '已保存', icon: 'success' })
 }
 
@@ -471,13 +612,20 @@ function applyStatusBarStyle() {
 
 onShow(() => {
   refreshTheme()
+  refreshMascots()
   applyStatusBarStyle()
   refresh()
 })
 
 onHide(() => {
-  // 拖拽中途切后台时 touchend 可能收不到，复位拖拽状态，避免回到页面后条目还悬着
+  // 拖拽中途切后台时 touchend 可能收不到：吸附中的直接落位，其余复位
+  if (settleTimer) {
+    clearSettle()
+    commitDrag()
+  }
   drag.value = null
+  clearTimeout(savedTimer)
+  savedTip.value = ''
   // 下一层页面沿用清单默认的深色图标
   // #ifdef APP-PLUS
   try { plus.navigator.setStatusBarStyle('dark') } catch (e) {}
@@ -561,20 +709,35 @@ export default {
   width: 48rpx;
   height: 6rpx;
   border-radius: 4rpx;
-  background: var(--grad-primary);
+  background-color: var(--c-primary);
 }
 .hint-bar {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
-  background: var(--grad-primary-soft);
-  padding: 16rpx 0;
+  justify-content: flex-start;
+  background-color: var(--c-primary-weak);
+  padding: 12rpx 28rpx;
+}
+.hint-mascot {
+  flex-shrink: 0;
+  margin-right: 10rpx;
+}
+.hint-name {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--c-primary-deep);
+  flex-shrink: 0;
 }
 .hint-text {
-  margin-left: 8rpx;
+  flex: 1;
+  min-width: 0;
+  margin-left: 0;
   font-size: 24rpx;
-  color: var(--c-primary-deep);
+  color: var(--c-sub);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .cat-card {
   background-color: var(--c-card);
@@ -598,10 +761,6 @@ export default {
   flex-direction: row;
   align-items: center;
   padding: 24rpx 28rpx;
-}
-.drag-target {
-  background-color: var(--c-primary-weak);
-  border-radius: 16rpx;
 }
 .cat-icon-circle {
   width: 66rpx;
@@ -793,7 +952,7 @@ export default {
   width: 46rpx;
   height: 46rpx;
   border-radius: 14rpx;
-  background: var(--grad-primary);
+  background-color: var(--c-primary-fill);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -814,7 +973,7 @@ export default {
   background-color: var(--c-card) !important;
 }
 .dlg-btn-primary {
-  background: var(--grad-primary) !important;
+  background-color: var(--c-primary-fill) !important;
   color: #ffffff !important;
   box-shadow: var(--shadow-primary-sm);
 }

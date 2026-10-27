@@ -31,6 +31,7 @@
 ## 分类排序
 
 - 分类管理的排序交互是**长按拖拽**（categories.vue 的 startDrag/onDragMove/onDragEnd，矩形命中 + 松手落位 + 立即持久化），不要改回点菜单移一步的旧交互；子类面板渲染在父类行的紧下方（cat-block 内）。
+- **拖动必须有实时让位动画**：被拖的父类**整块**（行 + 展开的子类面板）跟手平移，其余块按当前目标槽位整块上/下让位（`transform` + 200ms 过渡）；子类按宫格的**横纵坐标**命中，受影响的格子平移到前/后一个格位（可跨行对角移动），末尾「添加子类」不是排序目标。松手先把被拖条目吸附到目标槽位（200ms），动画结束再改数组并 `persist()`，不要松手瞬间硬跳；`to === from` 时滑回原位。父类命中用 `.cat-block` 矩形（含面板），让位距离取被拖块高度，这样不同高度的块也能严丝合缝。
 - **拖拽期间必须锁住页面滚动**：App 端页面 `<script setup>` 跑在逻辑层（`app-service.js`），**那里没有 `document`**，在页面脚本里挂 `document.addEventListener('touchmove', ...)` 是死代码（H5 同层可用，但统一走同一份实现）。锁滚动写在 categories.vue 的 `<script module="scrollGuard" lang="renderjs">` 里：页面渲染时挂**捕获阶段 + 非 passive** 的 `touchmove` 守卫，监听视图层派发的 `longpress` DOM 事件（与 `@longpress` 是同一个事件，350ms/10px）判定拖拽开始，拖拽中 `preventDefault`，`touchend/touchcancel` 复位，`touchstart` 兜底自愈。不要把这段逻辑挪回 `<script setup>`。
 
 ## 记一笔子类展开
