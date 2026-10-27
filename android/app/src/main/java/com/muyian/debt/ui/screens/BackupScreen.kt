@@ -1,5 +1,11 @@
 package com.muyian.debt.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +52,7 @@ import com.muyian.debt.data.Cats
 import com.muyian.debt.data.pad2
 import com.muyian.debt.ui.components.GhostButton
 import com.muyian.debt.ui.components.GroupTitle
+import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.PrimaryButton
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
@@ -394,14 +401,23 @@ fun BackupScreen(app: AppState) {
             Spacer(Modifier.width(rpx(72)))
         }
 
+        AnimatedContent(
+            targetState = step,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            transitionSpec = {
+                (fadeIn(tween(220, easing = Motion.Out)) +
+                    slideInVertically(tween(260, easing = Motion.Out), initialOffsetY = { it / 14 }))
+                    .togetherWith(fadeOut(tween(150, easing = Motion.InOut)))
+            },
+            label = "backup-step"
+        ) { current ->
         Column(
             Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
         ) {
-            if (step == "idle") {
+            if (current == "idle") {
                 GroupTitle("导出备份")
                 BackupCard(
                     icon = "download",
@@ -456,7 +472,7 @@ fun BackupScreen(app: AppState) {
                 }
             }
 
-            if (step == "preview") {
+            if (current == "preview") {
                 GroupTitle("备份内容")
                 Column(
                     Modifier
@@ -509,7 +525,7 @@ fun BackupScreen(app: AppState) {
                 }
             }
 
-            if (step == "done") {
+            if (current == "done") {
                 Spacer(Modifier.height(rpx(32)))
                 Column(
                     Modifier
@@ -552,6 +568,7 @@ fun BackupScreen(app: AppState) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = rpx(24), vertical = rpx(36))
                 )
             }
+        }
         }
     }
 }

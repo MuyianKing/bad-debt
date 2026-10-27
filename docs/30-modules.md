@@ -2,22 +2,33 @@
 
 > 新增页面/组件/工具函数前先读本文件：同一件事只能有一个唯一来源，页面里不许另起一套。
 
-## common/
+## data/（纯 Kotlin 数据与状态）
 
-- `common/cats.js` — 分类体系唯一来源：默认分类播种、`uni.storage`（key：`muyian_categories_v1`）读写、图标/调色板查询、子类归并（`topNameOf`）。页面禁止自带分类常量。
-- `common/fmt.js` — 金额千分位（`fmtMoney`）、数字缩写（`fmtNum`/`fmtTick`）、金额输入回填去尾零（`fmtMoneyInput`）、按日分组（`groupByDay`）、日期标签、键盘金额表达式求值（`evalExpr`）。
-- `common/qianji-import.js` — 钱迹 Excel 导入的唯一数据逻辑：表头定位、时间/类型/金额校验、汇总统计、分类计数、钱迹分类 → 叶子名映射、入库账单拼装。原生插件只把 xlsx 读成「表头 + 原始单元格行」并批量写库，页面只负责 UI 与调用顺序；纯函数，可在 H5/Node 直接验证。
-- `common/lunar.js` — 农历与节日（1900–2100），仅供日历角标使用。
-- `common/merchants.js` — 商户分类建议：内置词典（商户关键词→分类叶子名，有序数组、具体词优先）+ 用户修正回流（storage key `muyian_merchant_cats_v1`，上限 500 条）。`suggestCategory(merchant, isIncome)` / `learnCategory(merchant, leafName)`。词典不定义分类体系，叶子名必须与 cats.js 一致；原生只负责提取商户名（解析结果 `merchant` 字段），建议与回流都在页面侧。**当前未接入任何页面（草稿模式已移除），保留待后续在原生弹层/记一笔页复用。**
-- `common/theme.js` — 主题唯一来源：主题清单（含 SVG/canvas 字面色 `primary/primaryDeep/primaryFill`、中性图标墨色 `ink/inkSub`、原生弹层强调色 `cardColor`、深色标记 `dark`）、当前主题的响应式状态与持久化。页面禁止自建主题常量。
-- `common/recents.js` — 最近任务可见性唯一来源：`isHideRecentsEnabled` / `setHideRecentsEnabled` / `applyRecentsVisibility`（runtime `AppTask.setExcludeFromRecents`，兼容忽略清单标记的 ROM）。设置页开关与 `App.onLaunch/onShow` 都走这里，不要在页面里重复写 plus.android 反射。
-- `common/mascots.js` — 角色（吉祥物）唯一来源：`MASCOTS`（角色 → 表情列表，每项含 `src` / `headSrc` / `mood` / `widthRpx`，可用 `moodAliases` 把一个 mood 复用已有表情，如 `warn: 'grumpy'`）、`THEME_MASCOT`（主题 → 角色）、`activeMascot` / `activeMascotBaseStyle`、`autoMood`、`setMascotStyle` / `setAutoMood` / `refreshMascots`。角色可带 `ready: false` 表示素材未齐，`activeMascot` 会回退到 `FALLBACK_MASCOT_ID`（当前哪吒）。storage：`muyian_mascot_style_v1:<角色id>`、`muyian_mascot_auto_mood_v1`；旧 `muyian_nezha_v1` 自动迁移。素材在 `static/<角色>/`。新增角色只改这个模块 + 放图 + 改主题映射，页面不要写死角色名或路径。
+- `Models.kt` — 数据模型与通用工具：`Bill` / `Category` / `SubCat` / `CategoryData` / `DayGroup` / `AddDraft`，金额格式化（`fmtMoney` / `fmtNum` / `fmtTick` / `fmtMoneyInput`）、表达式求值（`evalExpr`）、按日分组（`groupByDay`）、日期标签（`dayGroupTitle`）与 `pad2` / `todayStr` / `daysInMonth` / `weekdayCN`。
+- `Bills.kt` — 账单读写唯一入口：调用 `MuyianBillCore` 的 SQLite 方法，把 JSON 解析成 `Bill`；页面禁止直接拼 SQL 或自己解析账单 JSON。`month()` / `year()` / `all()` / `save()` / `update()` / `delete()` 是页面使用的 API。
+- `Categories.kt`（`Cats`）— 分类体系唯一来源：默认分类播种、SharedPreferences 读写（key `muyian_categories_v2`）、图标/调色板、`iconOf` / `topNameOf` / `colorOf` / `parentOf` / `exists`。页面禁止自带分类常量。
+- `Prefs.kt` — 本地设置存储（SharedPreferences `muyian_native`）：`str` / `bool` / `putStr` / `putBool`，并负责旧版本 `DCStorage` 的一次性只读迁移（key `legacy_migrated_v1`）。页面不要直接持有 `SharedPreferences`。
+- `Mascots.kt` — 角色（吉祥物）唯一来源：`MASCOTS` / `THEME_MASCOT` / `NEZHA` / `WUKONG`、表情列表、`active` / `styleOf` / `resolve` / `setStyle` / `setAutoMood`。存储 key `muyian_mascot_style_v1:<角色id>`、`muyian_mascot_auto_mood_v1`；素材在 `app/src/main/assets/mascots/`。新增角色只改这个模块 + 放图 + 改主题映射。
+- `Qianji.kt` — 钱迹 Excel 的纯数据处理：表头定位、时间/类型/金额校验、汇总统计、分类计数、钱迹分类 → 叶子名映射、入库账单拼装（`parseSheet` / `buildLeafColumns` / `buildMappings` / `buildBillsJson` / `orderNos`）。原生只负责把 xlsx 读成「表头 + 原始单元格行」并批量写库。
+- `Lunar.kt` / `LunarData.kt` — 农历与节日（1900–2100），仅供日历角标使用。
+- `AppState.kt` — 应用级状态：主题、分类、角色、导航栈（`Screen` / `stack` / `navigate` / `pop`）、记一笔草稿、全局弹层状态、`resumeToken`、最近任务可见性、首页月份。页面共享同一个实例，不自己建状态容器。
 
-## components/
+## ui/
 
-- `components/bill-list/bill-list.vue` — 按日分组账单列表，首页与日历页共用；`flush` 为 `true` 时去掉自带的卡片底/圆角/阴影，供嵌进外层卡片（日历页与选中日摘要合并）；新列表需求优先扩展它，不要复制粘贴一份。
-- `components/mascot-face/mascot-face.vue` — 通用角色表情渲染：`mood`（idle / success / empty）、`size`（rpx）、`head`（方形头像模式）、`mode`（auto / base）。空态、抽屉头像统一用它，不要直接 `<image :src="/static/...">`。
+- `ui/theme/Theme.kt` — 设计令牌唯一来源：`Palette`、`Wukong` / `Nezha` / `Shaseng`、`AllPalettes` / `paletteOf` / `LocalPalette`、`LocalRpx` 与 `rpx()` / `rsp()`、`tintColor()` / `categoryGradient()`。
+- `ui/icons/Icons.kt` + `IconData.kt` — 图标唯一来源：24x24 viewBox 路径数据（描边与实体两套）与 `AppIcon` 绘制。新增图标只往 `IconData.kt` 加路径。
+- `ui/components/Basics.kt` — 通用基础件：`Modifier.glass` / `solidCard` / `pressable`、`MascotFace` / `MascotImage`、`GroupTitle`、`AppFab`、`AppSwitch`、`MiniToggle`、`StateChip`、`IconBlock`、`Chevron`、`DividerLine`、`EmptyCopy`、`TopBar`、`PrimaryButton`、`GhostButton`。
+- `ui/components/BillList.kt` — 按日分组账单列表，首页与日历页共用；`flush = true` 时去掉自带卡片底，供嵌进外层卡片。新列表需求优先扩展它。
+- `ui/components/Overlays.kt` — 全局浮层：Toast、确认框、操作菜单、滚轮选择器、日期选择器、图片预览。页面只改 `AppState` 状态位，不自己写 Dialog。
+- `ui/components/WheelPicker.kt` — 滚轮列/行，供日期与选项选择器复用。
+- `ui/components/Motion.kt` — 动效唯一入口：页面转场、`AnimatedSheet`、`AnimatedCenter`、`RiseIn`、`countUp`、`stagger`。页面不要各写时长/曲线。
+- `ui/screens/` — 首页、记一笔、统计、日历、分类、设置、导入、备份八个页面。页面只做布局与事件，数据逻辑回 `data/`。
+
+## 原生核心
+
+- `app/src/main/java/muyian/bill/listener/hybrid.kt` — 包名 `muyian.bill.listener`，系统级能力的唯一实现：无障碍采集、通知监听、解析与去重、SQLite、确认弹层、后台保活、SAF 选文件、xlsx 读取、备份导出/恢复。对外入口是 `MuyianBillCore`（`@JvmStatic` 同步方法）。
+- `android/app/src/main/AndroidManifest.xml` — 权限与服务/Activity 注册；`res/xml/muyian_accessibility_config.xml` 是无障碍服务配置。
 
 ## 数据格式
 
-- 备注中的图片以 `{{img:<path>}}` token 存在 `orderRemark` 末尾，由 bill-list 负责解析展示；其他页面不得另定图片存储格式。
+- 备注中的图片以 `{{img:<path>}}` token 存在 `orderRemark` 末尾，由 `Bill.remarkText` / `Bill.imgPath` 解析展示；其他页面不得另定图片存储格式。

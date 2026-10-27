@@ -1,9 +1,15 @@
 package com.muyian.debt.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -59,6 +65,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -77,8 +84,10 @@ import com.muyian.debt.data.Category
 import com.muyian.debt.data.CategoryData
 import com.muyian.debt.data.SubCat
 import com.muyian.debt.ui.components.AppFab
+import com.muyian.debt.ui.components.AnimatedCenter
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
+import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
@@ -424,6 +433,16 @@ fun CategoriesScreen(app: AppState) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 for (t in listOf("expense" to "支出", "income" to "收入")) {
                     val active = type == t.first
+                    val tabFg by animateColorAsState(
+                        if (active) p.text else p.dim,
+                        tween(180, easing = Motion.InOut),
+                        label = "cat-tab-fg"
+                    )
+                    val underline by animateFloatAsState(
+                        if (active) 1f else 0f,
+                        tween(200, easing = Motion.Out),
+                        label = "cat-tab-line"
+                    )
                     Column(
                         Modifier
                             .clickable {
@@ -438,22 +457,19 @@ fun CategoriesScreen(app: AppState) {
                     ) {
                         Text(
                             t.second,
-                            color = if (active) p.text else p.dim,
+                            color = tabFg,
                             fontSize = rsp(32),
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
                         )
                         Spacer(Modifier.height(rpx(6)))
-                        if (active) {
-                            Box(
-                                Modifier
-                                    .width(rpx(48))
-                                    .height(rpx(6))
-                                    .clip(RoundedCornerShape(rpx(4)))
-                                    .background(p.primary)
-                            )
-                        } else {
-                            Spacer(Modifier.height(rpx(6)))
-                        }
+                        Box(
+                            Modifier
+                                .width(rpx(48))
+                                .height(rpx(6))
+                                .graphicsLayer { alpha = underline }
+                                .clip(RoundedCornerShape(rpx(4)))
+                                .background(p.primary)
+                        )
                     }
                 }
             }
@@ -598,7 +614,13 @@ fun CategoriesScreen(app: AppState) {
                                 AppIcon(if (expanded == i) "chevron-down" else "chevron-right", p.dim, 16.dp)
                             }
                         }
-                        if (expanded == i) {
+                        AnimatedVisibility(
+                            visible = expanded == i,
+                            enter = fadeIn(tween(160)) +
+                                expandVertically(tween(240, easing = Motion.Out), expandFrom = Alignment.Top),
+                            exit = fadeOut(tween(110, easing = Motion.InOut)) +
+                                shrinkVertically(tween(190, easing = Motion.InOut), shrinkTowards = Alignment.Top)
+                        ) {
                             SubPanel(
                                 subs = c.subs,
                                 paletteColor = hex(Cats.PALETTE[i % Cats.PALETTE.size]),
@@ -626,15 +648,7 @@ fun CategoriesScreen(app: AppState) {
             .padding(end = rpx(40), bottom = rpx(48))
     )
 
-    if (dlgShow) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(p.mask)
-                .clickable { dlgShow = false }
-                .imePadding(),
-            contentAlignment = Alignment.Center
-        ) {
+    AnimatedCenter(value = if (dlgShow) dlgTitle else null, onDismiss = { dlgShow = false }) {
             Column(
                 Modifier
                     .widthIn(max = rpx(640))
@@ -720,8 +734,6 @@ fun CategoriesScreen(app: AppState) {
             }
         }
     }
-}
-
 }
 
 @OptIn(ExperimentalLayoutApi::class)

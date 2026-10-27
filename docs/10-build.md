@@ -1,34 +1,47 @@
 # 工程形态与构建
 
-> 通用约束见根目录 `AGENTS.md`。本文件覆盖运行方式、依赖、ABI、基座、最近任务、启动图与 H5。
+> 通用约束见根目录 `AGENTS.md`。本文件覆盖 Gradle 工程、SDK/ABI、构建与签名、相机与权限、最近任务、启动画面。
 
 ## 工程与依赖
 
-- 用 **HBuilderX 打开整个项目目录**运行/打包（非 CLI 工程）。禁止引入 vite/cli 脚手架改造、禁止改 manifest.json 的 appid。
-- npm 仅用于装 uni-app 兼容的前端依赖（当前只有 `wot-design-uni`）。装依赖前确认它支持 HBuilderX 非 cli 用法（easycom 引用，不需要额外构建配置）。
-- `package.json` 必须保持 `"type": "commonjs"`（不影响 uni-app 编译，只影响本地 node 工具对 ESM 的解析）。
-- 目标平台：仅 Android 真机。iOS 侧只维护 `app-ios/index.uts` 桩文件，不做功能投入。
+- 唯一工程在 `android/`，用 Android Studio 或命令行 Gradle 构建。根工程名 `MuyianNative`（`settings.gradle.kts`），模块 `:app`。
+- 版本：Gradle 8.13、AGP 8.10.1、Kotlin 2.0.21、Compose BOM 2024.10.01。
+- 依赖只有 AndroidX 与 Compose：`core-ktx`、`activity-compose`、`lifecycle-runtime-ktx`、`compose.ui`、`compose.foundation`、`compose.material3`。禁止引入第三方 UI/图表/网络/统计库；确需新增依赖必须在 `docs/` 写明理由，并确认不违反隐私红线。
+- `compileSdk 36`、`buildToolsVersion 36.0.0`、`minSdk 23`、`targetSdk 33`；Java/JVM target 17。
+- `applicationId = com.muyian.debt`，`versionCode 100`，`versionName 0.1.0`。
+- 目标平台只有 Android 真机。工程没有 NDK 与 `.so`，不需要 `abiFilters`；产物是纯 Kotlin/DEX，任意 ABI 的真机都能安装。
 
-## ABI 与自定义基座
+## 构建与签名
 
-- **Android 只出 `arm64-v8a` 包**：`manifest.json` 的 `abiFilters` 只保留 arm64-v8a（已放弃 armeabi-v7a，APK 约 20MB → 14MB）；离线打包时 Android Studio 侧同样只能保留 arm64 的 .so，不要补回 32 位。改 ABI 后需重新制作自定义调试基座。
-- 运行验证必须用**自定义调试基座**（含 UTS 插件，标准基座跑不了）。改动 `hybrid.kt`/`interface.uts`/`index.uts` 后必须重新制作基座。
+- 环境：JDK 17+、Android SDK Platform 36、Build-Tools 36.0.0。`android/local.properties` 写 `sdk.dir`（本机示例：`sdk.dir=D\:\\AndroidDev\\sdk`）。
+- 调试构建：
+  ```bash
+  cd android
+  ./gradlew assembleDebug
+  # 产物：app/build/outputs/apk/debug/app-debug.apk
+  ```
+- 发布构建：
+  ```bash
+  ./gradlew assembleRelease
+  ```
+  release 默认只开 R8 与资源裁剪，**没有配置签名**；正式分发请自行配置 `signingConfig`，或用 `apksigner` 对产物签名。
+- 改 `hybrid.kt`、`android/app/src/main/AndroidManifest.xml` 或资源后重新构建安装即可；没有自定义调试基座这一层。
 
-## 相机模块（打包配置）
+## 相机与权限
 
-- 承担功能：记一笔备注图片的拍照入口、设置页头图相册选择，均走 `uni.chooseImage`；H5 端由浏览器自己的文件选择兜底，不读本配置。
-- `manifest.json` 的 `app-plus.modules.Camera` 对应 HBuilderX「App 模块配置 → Camera&Gallery(相机和相册)」，值为空对象；同时在 `distribute.android.permissions` 显式声明 `android.permission.CAMERA`。**不要只在模块界面勾选而不提交 manifest**，两者要保持一致，否则换机/重做基座后会漏配置。
-- 首次拍照时由系统弹运行时权限；设置页头图只从相册选，不会触发相机权限。只申请 CAMERA，不额外申请存储/位置等与本功能无关的权限。
-- 模块与权限属于**原生打包配置**：改完必须重新制作自定义调试基座，云打包才会生效；H5/Web 运行看不到差异。
+- 记一笔备注图片的拍照入口用 `ActivityResultContracts.TakePicture()`；首次拍照前用 `RequestPermission()` 申请 `android.permission.CAMERA`。相册入口用 `ActivityResultContracts.GetContent()`，设置页头图只从相册选，不触发相机权限。
+- `android/app/src/main/AndroidManifest.xml` 声明的权限：`CAMERA`、`POST_NOTIFICATIONS`、`SYSTEM_ALERT_WINDOW`、`VIBRATE`、`WRITE_SECURE_SETTINGS`（无障碍自恢复，需 adb 授予）、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`（后台保活）、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`。
+- 只申请与功能直接相关的权限，不额外申请存储/位置/通讯录等权限；文件选择走 SAF，不需要存储权限。
+- 权限属于安装时/运行时配置：清单增删权限后必须重新安装；`WRITE_SECURE_SETTINGS`、无障碍、通知使用权、悬浮窗、MIUI「后台弹出界面」、电池优化白名单在新包/新签名上都要重新授权。
 
 ## 最近任务隐藏
 
-- **最近任务隐藏**：根目录 `AndroidManifest.xml` 是云打包合并用的应用清单（HBuilderX 3.6+ 支持），给 `io.dcloud.PandoraEntry`（正式包里的 LAUNCHER 任务根）和 `io.dcloud.PandoraEntryActivity` 加 `excludeFromRecents="true"` 作为基线；但**实测 HyperOS 会忽略清单里的这个标记**，所以 `common/recents.js` 会在 `App.onLaunch/onShow` 用 `AppTask.setExcludeFromRecents` 再设置一次。设置页「后台运行 → 从多任务页面隐藏」是开关（storage key `muyian_hide_recents_v1`，默认开启），切换后立即生效。根清单只加这个属性，禁止在里面配置 `theme`/`screenOrientation`/`configChanges`/`windowSoftInputMode`/`launchMode`（DCloud 明确禁止）；改动只在云端打包或重做自定义调试基座后生效。隐藏后最近任务里看不到应用，返回只能靠桌面图标或常驻通知，属预期行为，不要当成 bug 修。
+- `MainActivity` 在清单里带 `android:excludeFromRecents="true"` 作为基线；部分 ROM 会忽略清单标记，所以 `AppState.applyRecentsVisibility()` 还会用 `ActivityManager.appTasks` 的 `setExcludeFromRecents()` 再设置一次。
+- 设置页「后台运行 → 从多任务页面隐藏」是开关，key `muyian_hide_recents_v1`（默认开启），切换后立即生效。隐藏后最近任务里看不到应用，返回只能靠桌面图标或常驻通知，属预期行为，不要当成 bug 修。
+- 切换开关只改运行时任务标记与 SharedPreferences，不改清单。
 
-## 启动界面
+## 启动画面
 
-- **启动界面**：DCloud 默认启动图带雪花等待动画，已用 `app-plus.splashscreen.waiting:false` 关闭；启动图由 `design/splash/build.py` 生成 9-patch（`unpackage/res/splashscreen/{hdpi,xhdpi,xxhdpi}.9.png`，由 manifest 的 `distribute.splashscreen` 引用），品牌块固定、只拉伸四周纯色空白，禁止改回普通 PNG（长屏会把图标拉扁）。背景必须取 `--c-bg`(#f7f4ec) 与首页无缝；改完需重新打包并重做自定义调试基座。Android 12+ 的系统启动画面（居中 App 图标）属系统行为，uni-app 配置关不掉。
-
-## H5 / Web 运行
-
-- **H5/Web 运行的两个必需品，删任何一个 H5 编译即失败**：根目录 `index.html`（vue3 模板入口，含 viewport 脚本与 `/main.js` 引用）；项目 devDependencies 的 `sass`（wot 组件 SCSS 编译用，固定 `sass@1.78.0`）。H5 启动：`D:\HBuilderX\cli.exe launch web --project E:\project\muyian\muyian-app`（默认端口 5173，被占自动顺延）。
+- 不设品牌启动页。Android 12+ 强制的一帧系统 SplashScreen 在 `values-v31/themes.xml` 里只留 `#F7F4EC` 底色、图标透明；首帧直接是首页。
+- `MainActivity.onCreate` 按用户主题 `setTheme` 成 `Theme.Muyian.{Wukong,Nezha,Shaseng}`，应用窗口底色跟随主题（`values/themes.xml` + `values/colors.xml` 的 `hero_*` 平均色）；系统启动帧本身用清单里的静态主题，不能按应用内主题变。选沙僧黑时系统启动帧仍是浅色，会先亮一下再切黑，属预期。
+- 首页第一帧用同色 `SplashColor` 覆盖并在 100ms 内淡出，避免 hero 的橙/红硬切；只做淡出，不额外增加等待时间。

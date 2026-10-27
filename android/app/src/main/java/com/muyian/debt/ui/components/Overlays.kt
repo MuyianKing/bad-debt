@@ -1,6 +1,12 @@
 package com.muyian.debt.ui.components
 
 import android.graphics.BitmapFactory
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,30 +67,32 @@ fun AppToastHost(app: AppState) {
             visible = false
         }
     }
-    if (!visible) return
     val p = LocalPalette.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            app.toastText,
-            color = Color.White,
-            fontSize = rsp(26),
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .clip(RoundedCornerShape(rpx(14)))
-                .background(if (p.dark) Color(0xE6232327) else Color(0xD91D2129))
-                .padding(horizontal = rpx(34), vertical = rpx(20))
-        )
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(150)) + scaleIn(tween(220, easing = Motion.Out), initialScale = 0.9f),
+            exit = fadeOut(tween(190, easing = Motion.InOut)) +
+                scaleOut(tween(190, easing = Motion.InOut), targetScale = 0.94f)
+        ) {
+            Text(
+                app.toastText,
+                color = Color.White,
+                fontSize = rsp(26),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(rpx(14)))
+                    .background(if (p.dark) Color(0xE6232327) else Color(0xD91D2129))
+                    .padding(horizontal = rpx(34), vertical = rpx(20))
+            )
+        }
     }
 }
 
 @Composable
 fun ConfirmDialogHost(app: AppState) {
-    val dialog = app.dialog ?: return
-    val p = LocalPalette.current
-    Dialog(
-        onDismissRequest = { app.dialog = null },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedCenter(value = app.dialog, onDismiss = { app.dialog = null }) { dialog ->
+        val p = LocalPalette.current
         Column(
             Modifier
                 .fillMaxWidth(0.86f)
@@ -151,21 +159,11 @@ fun ConfirmDialogHost(app: AppState) {
 
 @Composable
 fun ActionSheetHost(app: AppState) {
-    val sheet = app.actionSheet ?: return
-    val p = LocalPalette.current
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(p.mask)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    app.actionSheet = null
-                }
-        )
+    AnimatedSheet(value = app.actionSheet, onDismiss = { app.actionSheet = null }) { sheet ->
+        val p = LocalPalette.current
         Column(
             Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
                 .clip(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
                 .background(p.raised)
                 .navigationBarsPadding()
@@ -208,21 +206,11 @@ fun ActionSheetHost(app: AppState) {
 
 @Composable
 fun PickerSheetHost(app: AppState) {
-    val state = app.picker ?: return
-    val p = LocalPalette.current
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(p.mask)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    app.picker = null
-                }
-        )
+    AnimatedSheet(value = app.picker, onDismiss = { app.picker = null }) { state ->
+        val p = LocalPalette.current
         Column(
             Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
                 .clip(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
                 .background(p.raised)
                 .navigationBarsPadding()
@@ -273,34 +261,24 @@ fun PickerSheetHost(app: AppState) {
 
 @Composable
 fun DatePickerHost(app: AppState) {
-    val s = app.datePicker ?: return
-    val p = LocalPalette.current
-    var year by remember(s.year) { mutableIntStateOf(s.year.coerceIn(1970, 2100)) }
-    var month by remember(s.month) { mutableIntStateOf(s.month.coerceIn(1, 12)) }
-    var day by remember(s.day) { mutableIntStateOf(s.day.coerceIn(1, daysInMonth(s.year.coerceIn(1970, 2100), s.month.coerceIn(1, 12)))) }
+    AnimatedSheet(value = app.datePicker, onDismiss = { app.datePicker = null }) { s ->
+        val p = LocalPalette.current
+        var year by remember(s.year) { mutableIntStateOf(s.year.coerceIn(1970, 2100)) }
+        var month by remember(s.month) { mutableIntStateOf(s.month.coerceIn(1, 12)) }
+        var day by remember(s.day) { mutableIntStateOf(s.day.coerceIn(1, daysInMonth(s.year.coerceIn(1970, 2100), s.month.coerceIn(1, 12)))) }
 
-    fun clampDay() {
-        val max = daysInMonth(year, month)
-        if (day > max) day = max
-    }
+        fun clampDay() {
+            val max = daysInMonth(year, month)
+            if (day > max) day = max
+        }
 
-    val years = remember { (1970..2100).map { "${it}年" } }
-    val months = remember { (1..12).map { "${it}月" } }
-    val days = remember(year, month) { (1..daysInMonth(year, month)).map { "${it}日" } }
+        val years = remember { (1970..2100).map { "${it}年" } }
+        val months = remember { (1..12).map { "${it}月" } }
+        val days = remember(year, month) { (1..daysInMonth(year, month)).map { "${it}日" } }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(p.mask)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    app.datePicker = null
-                }
-        )
         Column(
             Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
                 .clip(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
                 .background(p.raised)
                 .navigationBarsPadding()
@@ -339,31 +317,43 @@ fun DatePickerHost(app: AppState) {
                 )
             }
             DividerLine(color = p.line)
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = rpx(20), vertical = rpx(8)),
-                horizontalArrangement = Arrangement.SpaceEvenly
+            Box(
+                Modifier.fillMaxWidth().padding(horizontal = rpx(20), vertical = rpx(8))
             ) {
-                WheelColumn(
-                    years,
-                    (year - 1970).coerceIn(0, years.lastIndex),
-                    { year = 1970 + it; clampDay() },
-                    Modifier.weight(if (s.mode == "Y") 1f else 1.25f)
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .height(rpx(84))
+                        .clip(RoundedCornerShape(rpx(12)))
+                        .background(p.fill)
                 )
-                if (s.mode != "Y") {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
                     WheelColumn(
-                        months,
-                        month - 1,
-                        { month = it + 1; clampDay() },
-                        Modifier.weight(1f)
+                        years,
+                        (year - 1970).coerceIn(0, years.lastIndex),
+                        { year = 1970 + it; clampDay() },
+                        Modifier.weight(if (s.mode == "Y") 1f else 1.25f)
                     )
-                }
-                if (s.mode == "YMD") {
-                    WheelColumn(
-                        days,
-                        (day - 1).coerceIn(0, days.lastIndex),
-                        { day = it + 1 },
-                        Modifier.weight(1f)
-                    )
+                    if (s.mode != "Y") {
+                        WheelColumn(
+                            months,
+                            month - 1,
+                            { month = it + 1; clampDay() },
+                            Modifier.weight(1f)
+                        )
+                    }
+                    if (s.mode == "YMD") {
+                        WheelColumn(
+                            days,
+                            (day - 1).coerceIn(0, days.lastIndex),
+                            { day = it + 1 },
+                            Modifier.weight(1f)
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(rpx(12)))
@@ -373,19 +363,14 @@ fun DatePickerHost(app: AppState) {
 
 @Composable
 fun ImagePreviewHost(app: AppState) {
-    val path = app.previewImage ?: return
-    val p = LocalPalette.current
-    val bitmap = remember(path) {
-        try {
-            BitmapFactory.decodeFile(path.removePrefix("file://"))
-        } catch (_: Exception) {
-            null
+    AnimatedFade(value = app.previewImage) { path ->
+        val bitmap = remember(path) {
+            try {
+                BitmapFactory.decodeFile(path.removePrefix("file://"))
+            } catch (_: Exception) {
+                null
+            }
         }
-    }
-    Dialog(
-        onDismissRequest = { app.previewImage = null },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             if (bitmap != null) {
                 Image(

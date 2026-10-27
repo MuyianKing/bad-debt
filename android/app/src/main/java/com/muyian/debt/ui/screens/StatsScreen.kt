@@ -1,5 +1,7 @@
 package com.muyian.debt.ui.screens
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -60,12 +63,16 @@ import com.muyian.debt.data.fmtTick
 import com.muyian.debt.data.pad2
 import com.muyian.debt.data.daysInMonth
 import com.muyian.debt.ui.icons.AppIcon
+import com.muyian.debt.ui.components.AnimatedSheet
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.EmptyCopy
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.MiniToggle
+import com.muyian.debt.ui.components.Motion
+import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
+import com.muyian.debt.ui.components.stagger
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
@@ -122,6 +129,19 @@ fun StatsScreen(app: AppState) {
     val expenseTotal = expenseBills.sumOf { kotlin.math.abs(it.money) }
     val incomeTotal = incomeBills.sumOf { it.money }
     val balance = incomeTotal - expenseTotal
+    val expenseShown = countUp(expenseTotal)
+    val incomeShown = countUp(incomeTotal)
+    val balanceShown = countUp(balance)
+    val barGrow = remember { Animatable(0f) }
+    val donutGrow = remember { Animatable(0f) }
+    LaunchedEffect(bills, range) {
+        barGrow.snapTo(0f)
+        barGrow.animateTo(1f, tween(700, easing = Motion.Out))
+    }
+    LaunchedEffect(expenseBills, incomeBills, donutKind) {
+        donutGrow.snapTo(0f)
+        donutGrow.animateTo(1f, tween(760, easing = Motion.Out))
+    }
     val totalMood = when {
         balance < 0 -> "warn"
         balance > 0 -> "success"
@@ -296,75 +316,76 @@ fun StatsScreen(app: AppState) {
             )
         ) {
             item {
-                Column(
+                Box(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = rpx(32), vertical = rpx(20))
                         .clip(RoundedCornerShape(rpx(32)))
                         .background(p.primaryFill)
-                        .padding(start = rpx(32), end = rpx(32), top = rpx(34), bottom = rpx(30))
                 ) {
-                    Box(Modifier.fillMaxWidth()) {
-                        MascotFace(
-                            app, totalMood, 190,
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(end = rpx(8))
-                        )
-                        Column(Modifier.fillMaxWidth(0.7f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth(0.7f)
+                            .padding(start = rpx(32), top = rpx(34), bottom = rpx(30))
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (range == "month") "本月支出" else "本年支出",
+                                color = Color.White.copy(alpha = 0.82f),
+                                fontSize = rsp(30)
+                            )
+                            Spacer(Modifier.width(rpx(14)))
+                            Text(
+                                "${bills.size} 笔",
+                                color = Color.White.copy(alpha = 0.92f),
+                                fontSize = rsp(22),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(rpx(999)))
+                                    .background(Color.White.copy(alpha = 0.18f))
+                                    .padding(horizontal = rpx(16), vertical = rpx(6))
+                            )
+                        }
+                        Spacer(Modifier.height(rpx(16)))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text("¥", color = Color.White.copy(alpha = 0.72f), fontSize = rsp(32), modifier = Modifier.padding(bottom = rpx(10), end = rpx(10)))
                                 Text(
-                                    if (range == "month") "本月支出" else "本年支出",
-                                    color = Color.White.copy(alpha = 0.82f),
-                                    fontSize = rsp(30)
-                                )
-                                Spacer(Modifier.width(rpx(14)))
-                                Text(
-                                    "${bills.size} 笔",
-                                    color = Color.White.copy(alpha = 0.92f),
-                                    fontSize = rsp(22),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(rpx(999)))
-                                        .background(Color.White.copy(alpha = 0.18f))
-                                        .padding(horizontal = rpx(16), vertical = rpx(6))
-                                )
-                            }
-                            Spacer(Modifier.height(rpx(16)))
-                            Row(verticalAlignment = Alignment.Bottom) {
-                                Text("¥", color = Color.White.copy(alpha = 0.72f), fontSize = rsp(32), modifier = Modifier.padding(bottom = rpx(10), end = rpx(10)))
-                                Text(
-                                    fmtMoney(expenseTotal),
+                                    fmtMoney(expenseShown),
                                     color = Color.White,
                                     fontSize = rsp(78),
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                        }
+                        Spacer(Modifier.height(rpx(26)))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column {
+                                Text(if (range == "month") "月收入" else "年收入", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
+                                    Text(
+                                        fmtMoney(incomeShown),
+                                        color = Color.White,
+                                        fontSize = rsp(32),
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = rpx(6)).widthIn(max = rpx(170))
+                                    )
                             }
-                            Spacer(Modifier.height(rpx(26)))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column {
-                                    Text(if (range == "month") "月收入" else "年收入", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
+                            Box(Modifier.padding(horizontal = rpx(44)).width(rpx(1)).height(rpx(52)).background(Color.White.copy(alpha = 0.32f)))
+                            Column {
+                                Text(if (range == "month") "本月结余" else "本年结余", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
                                     Text(
-                                        fmtMoney(incomeTotal),
+                                        fmtMoney(balanceShown),
                                         color = Color.White,
                                         fontSize = rsp(32),
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(top = rpx(6)).widthIn(max = rpx(170))
                                     )
-                                }
-                                Box(Modifier.padding(horizontal = rpx(44)).width(rpx(1)).height(rpx(52)).background(Color.White.copy(alpha = 0.32f)))
-                                Column {
-                                    Text(if (range == "month") "本月结余" else "本年结余", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
-                                    Text(
-                                        fmtMoney(balance),
-                                        color = Color.White,
-                                        fontSize = rsp(32),
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(top = rpx(6)).widthIn(max = rpx(170))
-                                    )
-                                }
                             }
                         }
                     }
+                    MascotFace(
+                        app, totalMood, 190,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(end = rpx(8))
+                    )
                 }
             }
 
@@ -415,13 +436,16 @@ fun StatsScreen(app: AppState) {
                                     if (chartType == "line") {
                                         val tint = p.primaryTint
                                         val line = p.primary
+                                        val grow = barGrow.value
                                         Canvas(Modifier.fillMaxSize()) {
                                             if (barSums.size < 2) return@Canvas
                                             val step = size.width / (barSums.size - 1)
                                             val top = 4.dp.toPx()
                                             val plotH = size.height - top
+                                            // 从基线向上生长：grow=0 时整条线贴在底部
                                             val pts = barSums.mapIndexed { i, v ->
-                                                Offset(i * step, top + plotH * (1 - v / axisMax).toFloat())
+                                                val targetY = top + plotH * (1 - v / axisMax).toFloat()
+                                                Offset(i * step, size.height + (targetY - size.height) * grow)
                                             }
                                             val path = Path().apply {
                                                 moveTo(pts[0].x, pts[0].y)
@@ -442,6 +466,7 @@ fun StatsScreen(app: AppState) {
                                             for (i in barSums.indices) {
                                                 val v = barSums[i]
                                                 val h = if (v > 0) max(10, (v / axisMax * 328).roundToInt()) else 0
+                                                val grow = stagger(barGrow.value, i, barSums.size)
                                                 Box(
                                                     Modifier
                                                         .weight(1f)
@@ -456,7 +481,7 @@ fun StatsScreen(app: AppState) {
                                                     Box(
                                                         Modifier
                                                             .width(rpx(if (range == "year") 18 else 10))
-                                                            .height(rpx(h))
+                                                            .height(rpx((h * grow).roundToInt()))
                                                             .clip(RoundedCornerShape(rpx(if (range == "year") 9 else 5)))
                                                             .background(p.primary)
                                                     )
@@ -507,7 +532,8 @@ fun StatsScreen(app: AppState) {
                                 onSelect = { selectedSegName = if (selectedSegName == it) "" else it },
                                 total = donutTotal,
                                 selectedSeg = selectedSeg,
-                                totalLabel = if (donutKind == "expense") "总支出" else "总收入"
+                                totalLabel = if (donutKind == "expense") "总支出" else "总收入",
+                                progress = donutGrow.value
                             )
                         }
                         Spacer(Modifier.height(rpx(16)))
@@ -539,7 +565,10 @@ fun StatsScreen(app: AppState) {
                                     Box(Modifier.fillMaxWidth().height(rpx(6)).clip(RoundedCornerShape(rpx(3))).background(p.fill)) {
                                         Box(
                                             Modifier
-                                                .fillMaxWidth(if (maxCat > 0) max(0.06f, (seg.value / maxCat).toFloat()) else 0f)
+                                                .fillMaxWidth(
+                                                    (if (maxCat > 0) max(0.06f, (seg.value / maxCat).toFloat()) else 0f) *
+                                                        donutGrow.value
+                                                )
                                                 .fillMaxHeight()
                                                 .clip(RoundedCornerShape(rpx(3)))
                                                 .background(seg.color)
@@ -613,29 +642,20 @@ fun StatsScreen(app: AppState) {
         }
     }
 
-    if (detailSeg != null) {
-        val seg = detailSeg!!
+    AnimatedSheet(value = detailSeg, onDismiss = { detailSeg = null }) { seg ->
         val sorted = remember(seg) {
             seg.bills.sortedWith(
                 compareByDescending<Bill> { it.year * 10000 + it.month * 100 + it.day }
                     .thenByDescending { it.clock }
             )
         }
-        Box(Modifier.fillMaxSize()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(p.mask)
-                    .clickable { detailSeg = null }
-            )
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
-                    .background(p.raised)
-                    .navigationBarsPadding()
-            ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
+                .background(p.raised)
+                .navigationBarsPadding()
+        ) {
                 Box(Modifier.padding(top = rpx(16), bottom = rpx(4)).width(rpx(72)).height(rpx(8)).clip(RoundedCornerShape(rpx(4))).background(p.line).align(Alignment.CenterHorizontally))
                 Row(Modifier.fillMaxWidth().padding(horizontal = rpx(32), vertical = rpx(18)), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(rpx(60)).clip(RoundedCornerShape(rpx(18))).background(seg.color), contentAlignment = Alignment.Center) {
@@ -688,7 +708,6 @@ fun StatsScreen(app: AppState) {
                         }
                     }
                 }
-            }
         }
     }
 }
@@ -700,10 +719,12 @@ private fun Donut(
     onSelect: (String) -> Unit,
     total: Double,
     selectedSeg: DonutSeg?,
-    totalLabel: String
+    totalLabel: String,
+    progress: Float
 ) {
     val p = LocalPalette.current
     val size = rpx(300)
+    val t = progress.coerceIn(0f, 1f)
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(
             Modifier
@@ -736,29 +757,37 @@ private fun Donut(
             val rOuter = c - 7.dp.toPx()
             val rInner = c * 0.62f
             val rMid = (rOuter + rInner) / 2f
-            var start = -90f
+            var acc = 0f
             val selIdx = segments.indexOfFirst { it.name == selected }
             segments.forEachIndexed { index, seg ->
                 val sweep = (seg.value / total * 360.0).toFloat()
                 val isSel = index == selIdx
-                val off = if (isSel) 4.dp.toPx() else 0f
-                val mid = Math.toRadians((start + sweep / 2).toDouble())
+                val shown = sweep * t
+                val arcStart = -90f + acc * t
+                val off = if (isSel) 4.dp.toPx() * t else 0f
+                val mid = Math.toRadians((arcStart + shown / 2).toDouble())
                 val cx = c + Math.cos(mid).toFloat() * off
                 val cy = c + Math.sin(mid).toFloat() * off
                 val color = if (selIdx >= 0 && !isSel) seg.color.copy(alpha = 0.45f) else seg.color
-                drawArc(
-                    color = color,
-                    startAngle = start + 0.7f,
-                    sweepAngle = (sweep - 1.4f).coerceAtLeast(0.5f),
-                    useCenter = false,
-                    topLeft = Offset(cx - rMid, cy - rMid),
-                    size = Size(rMid * 2, rMid * 2),
-                    style = Stroke(width = rOuter - rInner)
-                )
-                start += sweep
+                val gap = min(1.4f, shown * 0.4f)
+                if (shown > gap) {
+                    drawArc(
+                        color = color,
+                        startAngle = arcStart + gap / 2,
+                        sweepAngle = shown - gap,
+                        useCenter = false,
+                        topLeft = Offset(cx - rMid, cy - rMid),
+                        size = Size(rMid * 2, rMid * 2),
+                        style = Stroke(width = rOuter - rInner)
+                    )
+                }
+                acc += sweep
             }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.graphicsLayer { alpha = t },
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Text(
                 selectedSeg?.name ?: totalLabel,
                 color = p.sub,

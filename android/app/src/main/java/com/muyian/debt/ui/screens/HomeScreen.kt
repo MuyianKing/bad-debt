@@ -1,9 +1,8 @@
 package com.muyian.debt.ui.screens
 
 import android.app.Activity
-import android.content.Intent
 import android.graphics.BitmapFactory
-import android.provider.Settings
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.activity.compose.BackHandler
@@ -85,21 +84,21 @@ import com.muyian.debt.ui.components.BillList
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.EmptyCopy
 import com.muyian.debt.ui.components.MascotFace
+import com.muyian.debt.ui.components.Motion
+import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
+import com.muyian.debt.ui.components.stagger
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import muyian.bill.listener.MuyianBillCore
-import org.json.JSONObject
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.min
-
-private data class AutoBillState(val level: String, val title: String, val sub: String)
+import kotlin.math.roundToInt
 
 @Composable
 fun HomeScreen(app: AppState, activity: Activity) {
@@ -110,16 +109,6 @@ fun HomeScreen(app: AppState, activity: Activity) {
     var month by remember { mutableIntStateOf(app.homeMonth) }
     var bills by remember { mutableStateOf<List<Bill>>(emptyList()) }
     var weekBills by remember { mutableStateOf<List<Bill>>(emptyList()) }
-    var listenerEnabled by remember { mutableStateOf(true) }
-    var batteryOk by remember { mutableStateOf(true) }
-    var notifyEnabled by remember { mutableStateOf(true) }
-    var notifAllowed by remember { mutableStateOf(true) }
-    var overlayPerm by remember { mutableStateOf(true) }
-    var repairOk by remember { mutableStateOf(true) }
-    var miui by remember { mutableStateOf(false) }
-    var miuiPopup by remember { mutableIntStateOf(-1) }
-    var miuiPopupKnown by remember { mutableStateOf(false) }
-    var popupBlocked by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val navSolid by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8 } }
 
@@ -155,29 +144,6 @@ fun HomeScreen(app: AppState, activity: Activity) {
     }
 
     fun load() {
-        // 先静默补回掉开关的服务，再读状态
-        try {
-            val st = JSONObject(MuyianBillCore.getSelfRepairState(ctx))
-            if (st.optBoolean("hasPermission") && !st.optBoolean("serviceEnabled")) {
-                MuyianBillCore.repairAccessibilityService(ctx)
-            }
-        } catch (_: Exception) {
-        }
-        listenerEnabled = try { MuyianBillCore.isAccessibilityEnabled(ctx) } catch (_: Exception) { false }
-        batteryOk = try { MuyianBillCore.isIgnoringBatteryOptimizations(ctx) } catch (_: Exception) { true }
-        try { notifyEnabled = MuyianBillCore.isNotificationListenerEnabled(ctx) } catch (_: Exception) { notifyEnabled = true }
-        try { notifAllowed = MuyianBillCore.areNotificationsEnabled(ctx) } catch (_: Exception) { notifAllowed = true }
-        try { overlayPerm = MuyianBillCore.hasOverlayPermission(ctx) } catch (_: Exception) { overlayPerm = true }
-        try {
-            val ps = JSONObject(MuyianBillCore.getPopupPermissionState(ctx))
-            miui = ps.optBoolean("miui")
-            miuiPopup = if (ps.has("miuiPopup")) ps.optInt("miuiPopup") else -1
-            miuiPopupKnown = ps.optBoolean("miuiPopupKnown")
-            popupBlocked = ps.optBoolean("blocked")
-        } catch (_: Exception) {
-            miui = false
-        }
-        try { repairOk = JSONObject(MuyianBillCore.getSelfRepairState(ctx)).optBoolean("hasPermission") } catch (_: Exception) { repairOk = true }
         bills = Bills.month(ctx, year, month)
         loadWeekBills()
     }
@@ -213,30 +179,11 @@ fun HomeScreen(app: AppState, activity: Activity) {
         Triple(values, heights, values.sumOf { it.second })
     }
 
-    val missingPerms = buildList {
-        if (!overlayPerm) add("悬浮窗")
-        if (miui && (if (miuiPopupKnown) miuiPopup != 0 else popupBlocked)) add("后台弹出界面")
-        if (!notifAllowed) add("通知权限")
-        if (!batteryOk) add("电池优化")
-        if (!notifyEnabled) add("通知使用权")
-        if (!repairOk) add("无障碍自恢复")
-    }
-    val autoBillState = when {
-        !listenerEnabled -> AutoBillState("off", "自动记账未开启", "点此开启无障碍服务")
-        missingPerms.isNotEmpty() -> {
-            val names = missingPerms.take(2).joinToString("、") +
-                if (missingPerms.size > 2) " 等 ${missingPerms.size} 项" else ""
-            AutoBillState("warn", "自动记账异常", "缺少：$names")
-        }
-        else -> AutoBillState("on", "自动记账运行中", "所需权限已就绪")
-    }
-
     fun closeDrawer() {
         animateDrawer(0f)
     }
 
     fun openDrawer() {
-        load()
         animateDrawer(1f)
     }
 
@@ -321,38 +268,6 @@ fun HomeScreen(app: AppState, activity: Activity) {
                     onStats = { app.navigate(Screen.Stats) }
                 )
             }
-            if (!listenerEnabled) {
-                item(key = "notice-access") {
-                    Notice(
-                        icon = "bell",
-                        text = "未开启“无障碍服务”，点此去开启自动记账",
-                        onClick = {
-                            try {
-                                ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            } catch (_: Exception) {
-                            }
-                        }
-                    )
-                }
-            }
-            if (!batteryOk) {
-                item(key = "notice-battery") {
-                    Notice(
-                        icon = "battery-charging",
-                        text = "电池策略受限制，点此设为“不限制”以免后台被回收",
-                        onClick = {
-                            app.confirm(
-                                "关闭电池优化",
-                                "在接下来的系统弹窗中选择“不限制”，锁屏或切到后台后自动记账才不会被系统回收。部分机型还需在“应用详情”里允许自启动。",
-                                "去设置"
-                            ) {
-                                try { MuyianBillCore.requestIgnoreBatteryOptimizations(ctx) } catch (_: Exception) {
-                                }
-                            }
-                        }
-                    )
-                }
-            }
             if (groups.isNotEmpty()) {
                 item(key = "week") {
                     WeekCard(
@@ -367,7 +282,8 @@ fun HomeScreen(app: AppState, activity: Activity) {
                     app = app,
                     groups = listOf(group),
                     onRow = { showRowMenu(it) },
-                    onRowLong = { askDelete(it) }
+                    onRowLong = { askDelete(it) },
+                    modifier = Modifier.animateItem()
                 )
             }
             if (groups.isEmpty()) {
@@ -492,16 +408,11 @@ fun HomeScreen(app: AppState, activity: Activity) {
         // 抽屉面板
         Drawer(
             app = app,
-            state = autoBillState,
             width = drawerWidth,
             progress = drawerProgress,
             onCloseAndOpen = { screen ->
                 closeDrawer()
                 app.navigate(screen)
-            },
-            onSettings = {
-                closeDrawer()
-                app.navigate(Screen.Settings)
             }
         )
 
@@ -524,6 +435,9 @@ private fun Hero(
 ) {
     val p = LocalPalette.current
     val ctx = LocalContext.current
+    val expenseShown = countUp(expense)
+    val incomeShown = countUp(income)
+    val balanceShown = countUp(balance)
     val heroBitmap = remember(app.heroImg) {
         if (app.heroImg.isEmpty()) null else try {
             BitmapFactory.decodeFile(app.heroImg.removePrefix("file://"))
@@ -590,7 +504,7 @@ private fun Hero(
                 letterSpacing = rsp(2)
             )
             Text(
-                "¥ ${fmtMoney(expense)}",
+                "¥ ${fmtMoney(expenseShown)}",
                 color = Color.White,
                 fontSize = rsp(72),
                 fontWeight = FontWeight.Bold,
@@ -603,7 +517,7 @@ private fun Hero(
                 Column {
                     Text("月收入", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
                     Text(
-                        fmtMoney(income),
+                        fmtMoney(incomeShown),
                         color = Color.White,
                         fontSize = rsp(32),
                         fontWeight = FontWeight.Bold,
@@ -620,7 +534,7 @@ private fun Hero(
                 Column {
                     Text("本月结余", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
                     Text(
-                        fmtMoney(balance),
+                        fmtMoney(balanceShown),
                         color = Color.White,
                         fontSize = rsp(32),
                         fontWeight = FontWeight.Bold,
@@ -635,34 +549,13 @@ private fun Hero(
 }
 
 @Composable
-private fun Notice(icon: String, text: String, onClick: () -> Unit) {
-    val p = LocalPalette.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = rpx(24), vertical = rpx(12))
-            .clip(RoundedCornerShape(rpx(22)))
-            .background(p.primaryWeak)
-            .clickable(onClick = onClick)
-            .padding(horizontal = rpx(24), vertical = rpx(22)),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier
-                .size(rpx(60))
-                .clip(RoundedCornerShape(rpx(18)))
-                .background(p.primaryWeak),
-            contentAlignment = Alignment.Center
-        ) { AppIcon(icon, Color(0xFFFF9F43), 18.dp) }
-        Spacer(Modifier.width(rpx(18)))
-        Text(text, color = p.primaryDeep, fontSize = rsp(26), modifier = Modifier.weight(1f))
-        AppIcon("chevron-right", p.dim, 15.dp)
-    }
-}
-
-@Composable
 private fun WeekCard(values: List<Pair<String, Double>>, heights: List<Int>, total: Double) {
     val p = LocalPalette.current
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(values) {
+        grow.snapTo(0f)
+        grow.animateTo(1f, tween(620, easing = Motion.Out))
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -693,6 +586,7 @@ private fun WeekCard(values: List<Pair<String, Double>>, heights: List<Int>, tot
             for (i in values.indices) {
                 val (label, value) = values[i]
                 val isToday = i == values.lastIndex
+                val barT = if (value > 0) stagger(grow.value, i, values.size) else 1f
                 Column(
                     Modifier.weight(1f),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -706,12 +600,14 @@ private fun WeekCard(values: List<Pair<String, Double>>, heights: List<Int>, tot
                             if (value > 0) fmtNum(value) else "",
                             color = p.primaryDeep,
                             fontSize = rsp(21),
-                            modifier = Modifier.height(rpx(34))
+                            modifier = Modifier
+                                .height(rpx(34))
+                                .graphicsLayer { alpha = barT }
                         )
                         Box(
                             Modifier
                                 .width(rpx(26))
-                                .height(rpx(heights[i]))
+                                .height(rpx((heights[i] * barT).roundToInt()))
                                 .clip(RoundedCornerShape(rpx(13)))
                                 .background(
                                     when {
@@ -738,11 +634,9 @@ private fun WeekCard(values: List<Pair<String, Double>>, heights: List<Int>, tot
 @Composable
 private fun Drawer(
     app: AppState,
-    state: AutoBillState,
     width: androidx.compose.ui.unit.Dp,
     progress: Float,
-    onCloseAndOpen: (Screen) -> Unit,
-    onSettings: () -> Unit
+    onCloseAndOpen: (Screen) -> Unit
 ) {
     val p = LocalPalette.current
     val density = LocalDensity.current
@@ -824,10 +718,16 @@ private fun Drawer(
                 letterSpacing = rsp(2),
                 modifier = Modifier.padding(start = rpx(24), bottom = rpx(14))
             )
-            for ((item, grad) in menus) {
+            for ((mi, entry) in menus.withIndex()) {
+                val (item, grad) = entry
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .graphicsLayer {
+                            val t = ((progress - mi * 0.06f) / 0.76f).coerceIn(0f, 1f)
+                            alpha = t
+                            translationX = -(1f - t) * 18.dp.toPx()
+                        }
                         .clip(RoundedCornerShape(rpx(22)))
                         .pressable(p.primaryWeak) { onCloseAndOpen(item.third) }
                         .padding(rpx(20)),
@@ -845,35 +745,6 @@ private fun Drawer(
                     AppIcon("chevron-right", p.dim, 16.dp)
                 }
             }
-            }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = rpx(20))
-                    .padding(bottom = rpx(18))
-                    .clip(RoundedCornerShape(rpx(22)))
-                    .glass()
-                    .clickable(onClick = onSettings)
-                    .padding(horizontal = rpx(20), vertical = rpx(22)),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val dotColor = when (state.level) {
-                    "on" -> p.inn
-                    "off" -> p.out
-                    else -> Color(0xFFFF9F43)
-                }
-                Box(
-                    Modifier
-                        .size(rpx(14))
-                        .clip(CircleShape)
-                        .background(dotColor)
-                )
-                Spacer(Modifier.width(rpx(18)))
-                Column(Modifier.weight(1f)) {
-                    Text(state.title, color = p.text, fontSize = rsp(25), fontWeight = FontWeight.SemiBold)
-                    Text(state.sub, color = p.sub, fontSize = rsp(21), modifier = Modifier.padding(top = rpx(4)))
-                }
-                AppIcon("chevron-right", p.dim, 15.dp)
             }
         }
         Column(

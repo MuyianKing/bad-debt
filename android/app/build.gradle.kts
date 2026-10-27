@@ -10,7 +10,7 @@ android {
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = (project.findProperty("appId") as String?) ?: "com.muyian.debt"
+        applicationId = "com.muyian.debt"
         minSdk = 23
         targetSdk = 33
         versionCode = 100

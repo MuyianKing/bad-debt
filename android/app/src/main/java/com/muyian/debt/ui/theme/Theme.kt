@@ -29,7 +29,7 @@ fun hex(value: String, alpha: Float = 1f): Color {
 }
 
 /**
- * 设计令牌。字段与 App.vue 的 CSS 变量一一对应，切换主题只换一整个 Palette。
+ * 设计令牌。切换主题只换一整个 Palette。
  */
 data class Palette(
     val id: String,
@@ -220,7 +220,7 @@ fun paletteOf(id: String): Palette = AllPalettes.firstOrNull { it.id == id } ?: 
 
 val LocalPalette = staticCompositionLocalOf { Wukong }
 
-/** 1rpx 对应的 dp：屏幕逻辑宽度 / 750。与 uni-app 的 rpx 口径一致。 */
+/** 1 设计单位对应的 dp：屏幕逻辑宽度 / 750。 */
 val LocalRpx = staticCompositionLocalOf { 0.5f }
 
 @Composable

@@ -6,7 +6,17 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -80,6 +90,7 @@ import com.muyian.debt.data.fmtMoneyInput
 import com.muyian.debt.data.todayStr
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
+import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
@@ -411,7 +422,21 @@ fun AddScreen(app: AppState) {
                             }
                         }
                     }
-                    if (subList.isNotEmpty() && subRowEndIndex in (row * 5)..(row * 5 + 4)) {
+                    AnimatedVisibility(
+                        visible = subList.isNotEmpty() && subRowEndIndex in (row * 5)..(row * 5 + 4),
+                        enter = fadeIn(tween(170)) +
+                            expandVertically(
+                                tween(250, easing = Motion.Out),
+                                expandFrom = Alignment.Top,
+                                clip = false
+                            ),
+                        exit = fadeOut(tween(120, easing = Motion.InOut)) +
+                            shrinkVertically(
+                                tween(200, easing = Motion.InOut),
+                                shrinkTowards = Alignment.Top,
+                                clip = false
+                            )
+                    ) {
                         SubPanel(
                             app = app,
                             selectedIndex = safeTop,
@@ -452,6 +477,11 @@ fun AddScreen(app: AppState) {
                 // 底部 24 = 键盘最后一行的 10rpx 下边距 + 面板自身的 14rpx
                 .padding(start = rpx(24), end = rpx(24), top = rpx(20), bottom = rpx(24))
         ) {
+            val amountColor by animateColorAsState(
+                if (income) p.inn else p.out,
+                tween(220, easing = Motion.InOut),
+                label = "amount-fg"
+            )
             Row(
                 Modifier.fillMaxWidth().padding(start = rpx(12), end = rpx(12), bottom = rpx(16)),
                 verticalAlignment = Alignment.CenterVertically
@@ -481,10 +511,10 @@ fun AddScreen(app: AppState) {
                 )
                 Spacer(Modifier.width(rpx(24)))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text("¥", color = if (income) p.inn else p.out, fontSize = rsp(30), fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = rpx(8), end = rpx(4)).graphicsLayer { alpha = 0.55f })
+                    Text("¥", color = amountColor, fontSize = rsp(30), fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = rpx(8), end = rpx(4)).graphicsLayer { alpha = 0.55f })
                     Text(
                         if (draft.expr.isEmpty()) "0.0" else draft.expr,
-                        color = if (income) p.inn else p.out,
+                        color = amountColor,
                         fontSize = rsp(54),
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1
@@ -494,6 +524,21 @@ fun AddScreen(app: AppState) {
             DividerLine(color = p.line)
             Spacer(Modifier.height(rpx(16)))
             Row(horizontalArrangement = Arrangement.spacedBy(rpx(16)), verticalAlignment = Alignment.CenterVertically) {
+                val reimbFg by animateColorAsState(
+                    if (draft.reimb) Color.White else p.text,
+                    tween(170, easing = Motion.InOut),
+                    label = "reimb-fg"
+                )
+                val imgFg by animateColorAsState(
+                    if (draft.imgPath.isNotEmpty()) Color.White else p.sub,
+                    tween(170, easing = Motion.InOut),
+                    label = "img-fg"
+                )
+                val starFg by animateColorAsState(
+                    if (draft.starred) Color.White else p.sub,
+                    tween(170, easing = Motion.InOut),
+                    label = "star-fg"
+                )
                 Row(
                     Modifier
                         .clip(RoundedCornerShape(rpx(14)))
@@ -517,15 +562,15 @@ fun AddScreen(app: AppState) {
                     Text(dateChip, color = p.text, fontSize = rsp(26))
                 }
                 Chip(draft.reimb, { setDraft(draft.copy(reimb = !draft.reimb)) }) {
-                    Text("报销", color = if (draft.reimb) Color.White else p.text, fontSize = rsp(26), fontWeight = if (draft.reimb) FontWeight.SemiBold else FontWeight.Normal)
+                    Text("报销", color = reimbFg, fontSize = rsp(26), fontWeight = if (draft.reimb) FontWeight.SemiBold else FontWeight.Normal)
                 }
                 Chip(draft.imgPath.isNotEmpty(), ::onImageChip) {
-                    AppIcon("image", if (draft.imgPath.isNotEmpty()) Color.White else p.sub, 15.dp)
+                    AppIcon("image", imgFg, 15.dp)
                     Spacer(Modifier.width(rpx(6)))
-                    Text("图片", color = if (draft.imgPath.isNotEmpty()) Color.White else p.text, fontSize = rsp(26))
+                    Text("图片", color = imgFg, fontSize = rsp(26))
                 }
                 Chip(draft.starred, { setDraft(draft.copy(starred = !draft.starred)) }) {
-                    AppIcon("star", if (draft.starred) Color.White else p.sub, 15.dp, 2.2f)
+                    AppIcon("star", starFg, 15.dp, 2.2f)
                 }
             }
             Spacer(Modifier.height(rpx(16)))
@@ -557,7 +602,13 @@ fun AddScreen(app: AppState) {
         }
     }
 
-    if (flashVisible) {
+    AnimatedVisibility(
+        visible = flashVisible,
+        enter = fadeIn(tween(150)) + scaleIn(tween(240, easing = Motion.Out), initialScale = 0.88f),
+        exit = fadeOut(tween(180, easing = Motion.InOut)) +
+            scaleOut(tween(180, easing = Motion.InOut), targetScale = 0.94f),
+        modifier = Modifier.fillMaxSize()
+    ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(
                 Modifier
@@ -578,6 +629,26 @@ fun AddScreen(app: AppState) {
 @Composable
 private fun CatItem(app: AppState, category: Category, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
+    val bubble by animateColorAsState(
+        if (selected) p.primaryTint else Color.Transparent,
+        tween(180, easing = Motion.InOut),
+        label = "cat-bubble"
+    )
+    val scale by animateFloatAsState(
+        if (selected) 1.08f else 1f,
+        tween(230, easing = Motion.Out),
+        label = "cat-scale"
+    )
+    val fg by animateColorAsState(
+        if (selected) p.primaryDeep else Color(0xFF7A8194),
+        tween(180, easing = Motion.InOut),
+        label = "cat-fg"
+    )
+    val nameFg by animateColorAsState(
+        if (selected) p.primaryDeep else p.sub,
+        tween(180, easing = Motion.InOut),
+        label = "cat-name"
+    )
     Column(
         modifier.padding(vertical = rpx(14)).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -585,13 +656,17 @@ private fun CatItem(app: AppState, category: Category, selected: Boolean, onClic
         Box(
             Modifier
                 .size(rpx(88))
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
                 .clip(CircleShape)
-                .background(if (selected) p.primaryTint else Color.Transparent),
+                .background(bubble),
             contentAlignment = Alignment.Center
         ) {
             AppIcon(
                 category.icon.ifEmpty { "grid" },
-                if (selected) p.primaryDeep else Color(0xFF7A8194),
+                fg,
                 25.dp,
                 solid = true
             )
@@ -599,7 +674,7 @@ private fun CatItem(app: AppState, category: Category, selected: Boolean, onClic
         Spacer(Modifier.height(rpx(10)))
         Text(
             category.name,
-            color = if (selected) p.primaryDeep else p.sub,
+            color = nameFg,
             fontSize = rsp(24),
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             maxLines = 1,
@@ -710,10 +785,15 @@ private fun SubCaret(fill: Color, border: Color, centerX: Dp) {
 @Composable
 private fun Chip(active: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
     val p = LocalPalette.current
+    val bg by animateColorAsState(
+        if (active) p.primaryFill else p.card.copy(alpha = if (p.dark) 0.72f else 0.7f),
+        tween(180, easing = Motion.InOut),
+        label = "chip-bg"
+    )
     Row(
         Modifier
             .clip(RoundedCornerShape(rpx(14)))
-            .background(if (active) p.primaryFill else p.card.copy(alpha = if (p.dark) 0.72f else 0.7f))
+            .background(bg)
             .clickable(onClick = onClick)
             .padding(horizontal = rpx(24), vertical = rpx(11)),
         verticalAlignment = Alignment.CenterVertically

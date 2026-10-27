@@ -1,8 +1,12 @@
 package com.muyian.debt.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,7 +85,14 @@ fun BillList(
                 }
                 group.bills.forEachIndexed { index, bill ->
                     if (index > 0) DividerLine(Modifier.padding(horizontal = 0.dp), p.line)
-                    BillRow(app, bill, onRow, onRowLong)
+                    RiseIn(
+                        index = index,
+                        key = bill.id,
+                        modifier = Modifier.fillMaxWidth(),
+                        distance = rpx(14)
+                    ) {
+                        BillRow(app, bill, onRow, onRowLong)
+                    }
                 }
             }
         }
@@ -113,10 +126,20 @@ fun BillRow(
     val top = Cats.parentOf(app.categories, bill.costType, type).ifEmpty { bill.costType }
     val color = Cats.colorOf(app.categories, top, type)
     val icon = Cats.iconOf(app.categories, bill.costType)
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val pressBg by animateColorAsState(
+        if (pressed) p.fill else Color.Transparent,
+        tween(120, easing = Motion.InOut),
+        label = "row-press"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(pressBg)
             .combinedClickable(
+                interactionSource = source,
+                indication = null,
                 onClick = { onRow(bill) },
                 onLongClick = { onRowLong(bill) }
             )

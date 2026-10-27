@@ -1,5 +1,8 @@
 package com.muyian.debt.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,6 +58,8 @@ import com.muyian.debt.data.pad2
 import com.muyian.debt.ui.components.BillList
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
+import com.muyian.debt.ui.components.Motion
+import com.muyian.debt.ui.components.RiseIn
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
@@ -238,12 +244,31 @@ fun CalendarScreen(app: AppState) {
                                         t.get(Calendar.YEAR) == year && t.get(Calendar.MONTH) + 1 == month && t.get(Calendar.DAY_OF_MONTH) == day
                                     }
                                     val mark = markOf(day)
+                                    val cellBg by animateColorAsState(
+                                        if (selected) p.primaryWeak else Color.Transparent,
+                                        tween(180, easing = Motion.InOut),
+                                        label = "day-bg"
+                                    )
+                                    val cellScale by animateFloatAsState(
+                                        if (selected) 1.06f else 1f,
+                                        tween(230, easing = Motion.Out),
+                                        label = "day-scale"
+                                    )
+                                    val dayFg by animateColorAsState(
+                                        when {
+                                            selected -> Color.White
+                                            isToday -> p.primaryDeep
+                                            else -> p.text
+                                        },
+                                        tween(180, easing = Motion.InOut),
+                                        label = "day-fg"
+                                    )
                                     Column(
                                         Modifier
                                             .fillMaxSize()
                                             .heightIn(max = rpx(100))
                                             .clip(RoundedCornerShape(rpx(if (selected) 22 else 18)))
-                                            .background(if (selected) p.primaryWeak else Color.Transparent)
+                                            .background(cellBg)
                                             .clickable { selectedDay = day },
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center
@@ -252,6 +277,10 @@ fun CalendarScreen(app: AppState) {
                                             Modifier
                                                 .height(rpx(44))
                                                 .width(rpx(44))
+                                                .graphicsLayer {
+                                                    scaleX = cellScale
+                                                    scaleY = cellScale
+                                                }
                                                 .clip(RoundedCornerShape(rpx(16)))
                                                 .background(
                                                     when {
@@ -264,11 +293,7 @@ fun CalendarScreen(app: AppState) {
                                         ) {
                                             Text(
                                                 day.toString(),
-                                                color = when {
-                                                    selected -> Color.White
-                                                    isToday -> p.primaryDeep
-                                                    else -> p.text
-                                                },
+                                                color = dayFg,
                                                 fontSize = rsp(29),
                                                 fontWeight = if (selected || isToday) FontWeight.Bold else FontWeight.Medium
                                             )
@@ -350,6 +375,7 @@ fun CalendarScreen(app: AppState) {
                             MascotFace(app, dayMood, 158)
                         }
                     }
+                    RiseIn(key = selectedDay to mode, distance = rpx(10)) {
                     Column(Modifier.fillMaxWidth().padding(end = if (dayBills.isNotEmpty()) rpx(188) else 0.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(dayTitle, color = p.text, fontSize = rsp(30), fontWeight = FontWeight.Bold)
@@ -396,6 +422,7 @@ fun CalendarScreen(app: AppState) {
                             Text(app.activeMascot.name, color = p.primaryDeep, fontSize = rsp(23), fontWeight = FontWeight.SemiBold)
                             Text("：$dayLine", color = p.sub, fontSize = rsp(23))
                         }
+                    }
                     }
                 }
                 DividerLine(Modifier.padding(horizontal = rpx(28)), p.line)

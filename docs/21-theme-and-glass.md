@@ -1,21 +1,41 @@
 # 主题与毛玻璃
 
-> 基础样式与纯色约束见 `20-ui-basics.md`。本文件所有令牌的最终本体都在 `App.vue`。
+> 基础组件与绘制规范见 `20-ui-basics.md`。本文件所有令牌的最终本体都在 `ui/theme/Theme.kt`。
 
 ## 主题切换（悟空黄 / 哪吒红 / 沙僧黑）
 
-- **主题切换（悟空黄 / 哪吒红 / 沙僧黑）**：`common/theme.js` 是主题唯一来源（`THEMES` / 响应式 `theme` / `themeClass` / `setTheme` / `refreshTheme`，storage key `muyian_theme_v1`）。令牌本体在 App.vue：`page` 是默认「悟空黄」，`.theme-nezha` / `.theme-shaseng` 分别覆盖为「哪吒红」「沙僧黑」。**每个页面根节点必须绑 `:class="['page', themeClass]"`，并在 `onShow` 调 `refreshTheme()`**；需要字面色的地方（`app-icon` 的 color、canvas 画笔）用 `theme.primary`/`theme.primaryDeep`/`theme.primaryFill`（中性图标用 `theme.ink`/`theme.inkSub`），不要写死主题色或深灰。主题相关的阴影/柱条/光斑走令牌（`--shadow-primary-sm/-lg`、`--grad-bar`、`--blob-a/b/c`）。原生弹层不认 CSS 变量：切换主题时页面调用 `setCardThemeColor(theme.cardColor || theme.primary)` 同步——深色主题的页面强调色是亮银，而原生弹层是浅色底，必须传 `cardColor` 这种深色值，不能直接传 `primary`；新增主题要同时补 `cardColor`（必要时补 `dark: true`）。
-- **主题与角色解耦**：主题只管配色，主题对应哪个角色由 `common/mascots.js` 的 `THEME_MASCOT` 决定。当前哪吒已启用；悟空已预置但 `ready: false`，素材到位前 `activeMascot` 回退到哪吒；沙僧仍映射到哪吒。新增/启用角色只改注册表与映射，不要把角色写进主题令牌或页面样式。`autoMood` 控制空态/成功态是否自动换表情，基础表情按角色分别持久化。
+- 主题唯一来源是 `ui/theme/Theme.kt`：`Wukong`（默认）、`Nezha`、`Shaseng` 三个 `Palette`，`AllPalettes` 是全部主题，`paletteOf(id)` 按 id 取，`LocalPalette` 是 Compose 侧的当前主题。
+- 当前主题由 `AppState.themeId` 持有，持久化 key `muyian_theme_v1`；切换走 `AppState.setTheme(id)`，它会写 SharedPreferences、更新 `LocalPalette`，并调用 `applyCardTheme()` 同步原生确认弹层的强调色。
+- **原生弹层不认 Compose 主题**：`applyCardTheme()` 通过 `MuyianBillCore.setCardThemeColor(context, hex)` 传色。深色主题的页面强调色是亮银，而原生弹层是浅色底，所以深色主题传固定的深色 `#1A1A1D`，浅色主题传 `palette.primary`；新增主题要同时确认这一分支。
+- 页面取色一律 `LocalPalette.current.xxx`，不要写死主题色；只有在 SVG/Canvas 必须字面色的地方才用 `palette` 字段。
+
+## 主题与角色解耦
+
+- 主题只管配色。主题对应哪个角色由 `data/Mascots.kt` 的 `THEME_MASCOT` 决定：`wukong → wukong`、`nezha → nezha`、`shaseng → nezha`。悟空已预置但 `ready = false`，素材到位前 `Mascots.active()` 回退到哪吒。
+- `AppState.activeMascot`、`mascotStyle(mood, mode)`、`baseMascotStyle` 是页面取角色的入口；表情持久化 key `muyian_mascot_style_v1:<角色id>`，旧 key `muyian_nezha_v1` 会自动迁移。
+- `autoMood`（key `muyian_mascot_auto_mood_v1`，默认开启）控制空态/成功态是否自动换表情；关闭后固定基础表情。
+- 新增/启用角色只改 `Mascots.kt` 与 `app/src/main/assets/mascots/` 素材，页面不要写死角色名、图片路径或按主题写 if/else。
 
 ## 深色主题（沙僧黑）
 
-- **深色主题（沙僧黑）的额外约定**：`theme.dark` 为 true 时 `themeClass` 会额外带 `wot-theme-dark`，让 wd-cell / wd-action-sheet / wd-popup / wd-picker / wd-datetime-picker 等 wot 组件切到深色底。`.theme-shaseng` 里除 `--wot-dark-background/2`、`--wot-dark-color/3` 外，还要补齐 `--wot-dark-background3~7`、`--wot-dark-color2/-gray`、`--wot-dark-border-color`、`--wot-overlay-bg-dark`；picker 的上/下渐隐遮罩用 `--wot-picker-mask` 换成深色，否则会在黑底上露出两条白带。深色主题的 `--c-primary` 是**强调色**（亮银，供给柱条/选中描边/图标字面色），**承载白字的实底填充改用 `--c-primary-fill` / `--c-primary-press`**（统计总览卡、记一笔保存键）；`--c-key-*` 是键盘键帽专用令牌，`--c-raised` 是分段滑块/底部弹层这类浮起面。`common/cats.js` 的 `tintOf()` 在深色主题按黑色混合，页面不要自己拼浅色底。**新增页面或改配色时必须两套主题各看一遍**，禁止写死 `#fff` / `rgba(29,33,41,...)` 这类浅色值。
-- **日期/期间选择一律用 wot 日期面板，不用原生 `<picker>`**：uni-app 的 `<picker mode="date">` 弹层不认主题令牌，沙僧黑下是白底。统一写成 `<wd-datetime-picker>` + 自定义触发器插槽：触发器照旧放在导航/表单里，组件本体放到**页面根节点**（与 wd-action-sheet 同级）并加 `ref`，点击时调 `ref.open()`；`v-model` 绑定一个「时间戳 ↔ 年月/日期字符串」的 computed（`type` 为 `year-month` / `date` / `year`），确认时才回写页面状态并刷新数据。**弹层不能放进 `page-main`、`wd-navbar` 或 `.glass` 这类带 `transform` / `backdrop-filter` 的容器**——它们会成为 fixed 后代的包含块，导致弹层贴在容器底部而不是屏幕底部。深色主题下状态栏图标也要跟着换：新页面在 `onShow` 调 `applyStatusBarStyle()`（`light` / `dark` 由 `theme.dark` 决定），`onHide` 恢复 `dark`。
+- `Palette.dark = true` 时，所有页面、浮层、键盘、滚轮都要用深色令牌：`bg` / `pageWash` / `card` / `line` / `fill` / `raised` / `key*`。禁止写死 `Color.White`、`#fff`、`rgba(29,33,41,...)` 这类浅色值。
+- 深色主题的 `primary` 是**强调色**（亮银，用于柱条、选中描边、图标字面色）；承载白字的实底填充用 `primaryFill` / `primaryPress`（统计总览卡、记一笔保存键）。
+- `Cats.colorOf()` 与 `ui/theme/tintColor(base, dark)` 已按主题处理浅底/深底混合，页面不要自己拼浅色底。
+- 日期/期间选择不要用平台 `DatePickerDialog`（深色主题下是白底），统一用 `DatePickerHost`（`WheelPicker` 自绘）或 `AppState.showDatePicker()`。
+- 状态栏图标由 `MainActivity` 按「当前页面 + 首页滚动 + 主题深浅」统一设置 `LIGHT_STATUS_BAR`；页面不要自己改。
+- **新增页面或改配色时必须三个主题各看一遍**（悟空黄、哪吒红、沙僧黑）。
 
 ## 彩色图标
 
-- **彩色图标规范**：分类图标在 `bill-list` / `stats` / `categories` 三处用分类色做圆角块（圆角约 30%：64rpx 块配 20rpx 圆角），里面压 `<app-icon :solid="true" color="#ffffff">` 白色实体图标；**统计页已改为纯色块（`gradOf` → 分类原色，去掉阴影），其余两处改版时同步换成纯色**。子类/图标选择器用 `tintOf(色)` 淡底 + 同色实体图标（层级更轻）。**记一笔页（add）的分类宫格是例外**：保持克制的原版样式——圆形透明底 + 灰色实体图标（#7a8194），选中项用 `--c-primary-tint` 淡圆底 + `theme.primaryDeep` 主题色图标。区块标题的图标一律用**实心字形直接着主题色**（无底座）；设置项/抽屉这类列表里的功能图标仍用白色图标压纯色块上，禁止灰底灰图标的旧写法。
+- 分类图标在账单列表、统计、分类管理三处用分类色做圆角块（约 30% 圆角），里面压白色实体图标；分类色取 `Cats.colorOf()`，不要另建色板。
+- 子类/图标选择器用 `tintColor(色, dark)` 淡底 + 同色实体图标（层级更轻）。
+- **记一笔页的分类宫格是例外**：保持克制的原版样式——圆形透明底 + 灰色实体图标，选中项用 `primaryTint` 淡圆底 + `primaryDeep` 主题色图标。
+- 区块标题的图标用实心字形直接着主题色（无底座）；设置项/抽屉这类列表里的功能图标用白色图标压纯色块上。
 
 ## 毛玻璃与统一底色
 
-- **毛玻璃用 App.vue 里的全局工具类**：`.glass`（通用半透明卡）、`.glass-nav`（内页 wd-navbar，传入 custom-class）。直接写 `backdrop-filter` 时必须同时给 `-webkit-backdrop-filter` 和不支持环境的半透明兜底（`@supports` 渐进增强），模糊半径控制在 10-22px。**玻璃底色一律取令牌，禁止页面里硬编码 rgba 白色**：`--glass-bg`(0.52 标准卡)、`--glass-bg-strong`(0.88 抽屉/弹窗)、`--glass-border`、`--glass-nav-bg`。`.glass` 的背景带 `!important`——页面样式加载晚于全局样式，卡片自带白色背景会覆盖它（踩过的坑：玻璃卡显示成白实卡）。透明度下限 0.5，否则与渐变背景对比度不足；毛玻璃面板必须真的有内容从其下方经过才有意义。**首页 / 抽屉 / 记一笔页统一底色**：都用极淡主题色纯色底 `--c-page-wash`（黄/红各约 6% 主题色 + 白，深色主题为纯黑），三处必须保持一致；**折射层不铺**：卡片后面没有可模糊的内容时，玻璃就只是"半透明 + 细边 + 阴影"，不要用 `.page::before`、光斑、光晕去伪造玻璃（已按要求删掉，属纯色/无光效的硬约束，见 `20-ui-basics.md`）。纯色底上白玻璃和底色只差约 2%（#fffdf7 vs #fef9ed），这是该约束下的预期效果——**不要再用"把卡改成 `--c-card` 实底白"来救**（那样玻璃感就没了），宁可接受通透感弱一点。玻璃面自己的层次只靠 `--glass-border` + 卡片阴影。**所有页面的卡片都走 `.glass`**（首页、账单分组、日历、设置、分类、统计、记一笔键盘面板）；唯一例外是统计页顶部的总览卡——它用 `--c-primary-fill` 实底承载白字，挂 `.glass` 会把底色冲掉。
+- 毛玻璃统一用 `ui/components/Basics.kt` 的 `Modifier.glass()`：浅色主题是白色 72% + 白色描边，深色主题是 `card` 82% + 10% 白描边，外加 `shadow(10.dp)`。
+- 实底卡用 `Modifier.solidCard()`；需要强调的实底区域（如统计总览卡）直接用 `primaryFill`，不要再叠 `glass` 把底色冲掉。
+- **首页 / 抽屉 / 记一笔页统一底色**：都用 `pageWash`（浅色是极淡主题色，深色是纯黑），三处保持一致。
+- 玻璃面层次只靠描边 + 阴影；不要用 `Canvas` 画光斑、光晕或 `.page::before` 式的折射层来伪造玻璃。
+- 所有页面的普通卡片都走 `glass` 或 `solidCard`；例外只有统计页总览卡这类 `primaryFill` 实底。

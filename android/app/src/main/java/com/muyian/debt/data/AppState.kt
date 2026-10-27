@@ -130,16 +130,27 @@ class AppState(val context: Context) {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     val current: Screen get() = stack.last()
 
+    /** 最近一次导航方向：true 进栈（页面向上推入），false 出栈（页面向下滑出）。 */
+    var navForward by mutableStateOf(true)
+        private set
+
     fun navigate(screen: Screen) {
+        navForward = true
         stack.add(screen)
     }
 
     fun pop() {
-        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+        if (stack.size > 1) {
+            navForward = false
+            stack.removeAt(stack.lastIndex)
+        }
     }
 
     fun popToHome() {
-        while (stack.size > 1) stack.removeAt(stack.lastIndex)
+        if (stack.size > 1) {
+            navForward = false
+            while (stack.size > 1) stack.removeAt(stack.lastIndex)
+        }
     }
 
     var addDraft by mutableStateOf<AddDraft?>(null)
@@ -263,7 +274,7 @@ class AppState(val context: Context) {
         darkStatusIcons = !isDark
     }
 
-    /** 每次 Activity onResume 自增：页面用它触发权限/数据重载（从系统设置返回时）。 */
+    /** 每次 Activity onResume 自增：页面用它触发数据重载（从系统设置或其他页面返回时）。 */
     var resumeToken by mutableStateOf(0)
         private set
 

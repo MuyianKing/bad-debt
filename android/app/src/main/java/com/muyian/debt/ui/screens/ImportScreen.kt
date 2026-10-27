@@ -1,5 +1,11 @@
 package com.muyian.debt.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +52,7 @@ import com.muyian.debt.data.Qianji
 import com.muyian.debt.data.fmtNum
 import com.muyian.debt.ui.components.GhostButton
 import com.muyian.debt.ui.components.GroupTitle
+import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.PrimaryButton
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
@@ -249,14 +256,23 @@ fun ImportScreen(app: AppState) {
             Spacer(Modifier.width(rpx(72)))
         }
 
+        AnimatedContent(
+            targetState = step,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            transitionSpec = {
+                (fadeIn(tween(220, easing = Motion.Out)) +
+                    slideInVertically(tween(260, easing = Motion.Out), initialOffsetY = { it / 14 }))
+                    .togetherWith(fadeOut(tween(150, easing = Motion.InOut)))
+            },
+            label = "import-step"
+        ) { current ->
         Column(
             Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
         ) {
-            if (step == "pick") {
+            if (current == "pick") {
                 GroupTitle("从钱迹导入")
                 Column(
                     Modifier
@@ -310,7 +326,7 @@ fun ImportScreen(app: AppState) {
                 }
             }
 
-            if (step == "review") {
+            if (current == "review") {
                 GroupTitle("解析结果")
                 Column(
                     Modifier
@@ -436,7 +452,7 @@ fun ImportScreen(app: AppState) {
                 }
             }
 
-            if (step == "done") {
+            if (current == "done") {
                 Spacer(Modifier.height(rpx(32)))
                 Column(
                     Modifier
@@ -476,6 +492,7 @@ fun ImportScreen(app: AppState) {
                     modifier = Modifier.fillMaxWidth().padding(horizontal = rpx(24), vertical = rpx(36))
                 )
             }
+        }
         }
     }
 }

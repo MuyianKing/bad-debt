@@ -6,7 +6,11 @@ import android.content.ContextWrapper
 import android.view.View
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -100,8 +104,13 @@ fun Modifier.solidCard(shape: Shape? = null): Modifier {
 fun Modifier.pressable(color: Color = LocalPalette.current.fill, onClick: () -> Unit): Modifier {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    val bg by animateColorAsState(
+        if (pressed) color else Color.Transparent,
+        tween(130, easing = Motion.InOut),
+        label = "press"
+    )
     return this
-        .background(if (pressed) color else Color.Transparent)
+        .background(bg)
         .clickable(interactionSource = source, indication = null, onClick = onClick)
 }
 
@@ -183,10 +192,19 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "fab")
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appear.animateTo(1f, tween(360, delayMillis = 90, easing = Motion.Out))
+    }
     Box(
         modifier = modifier
             .size(rpx(108))
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .graphicsLayer {
+                val s = scale * (0.72f + 0.28f * appear.value)
+                scaleX = s
+                scaleY = s
+                alpha = appear.value
+            }
             .shadow(
                 14.dp, CircleShape, clip = false,
                 ambientColor = p.primary.copy(alpha = 0.35f),
@@ -202,15 +220,25 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun WotSwitch(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
+fun AppSwitch(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val p = LocalPalette.current
     val source = remember { MutableInteractionSource() }
+    val knob by animateDpAsState(
+        if (checked) rpx(40) else 0.dp,
+        tween(230, easing = Motion.Out),
+        label = "switch-knob"
+    )
+    val track by animateColorAsState(
+        if (checked) p.primary else p.fill,
+        tween(200, easing = Motion.InOut),
+        label = "switch-track"
+    )
     Box(
         modifier = Modifier
             .width(rpx(88))
             .height(rpx(48))
             .clip(CircleShape)
-            .background(if (checked) p.primary else p.fill)
+            .background(track)
             .clickable(
                 interactionSource = source,
                 indication = null,
@@ -221,7 +249,7 @@ fun WotSwitch(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> 
         Box(
             Modifier
                 .padding(horizontal = rpx(4))
-                .offset(x = if (checked) rpx(40) else 0.dp)
+                .offset(x = knob)
                 .size(rpx(40))
                 .shadow(2.dp, CircleShape, clip = false)
                 .clip(CircleShape)
@@ -247,14 +275,24 @@ fun MiniToggle(
     ) {
         for (option in options) {
             val active = option == selected
+            val bg by animateColorAsState(
+                if (active) p.raised else Color.Transparent,
+                tween(180, easing = Motion.InOut),
+                label = "mini-bg"
+            )
+            val fg by animateColorAsState(
+                if (active) p.primaryDeep else p.sub,
+                tween(180, easing = Motion.InOut),
+                label = "mini-fg"
+            )
             Text(
                 option,
-                color = if (active) p.primaryDeep else p.sub,
+                color = fg,
                 fontSize = rsp(21),
                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier
                     .clip(RoundedCornerShape(rpx(11)))
-                    .background(if (active) p.raised else Color.Transparent)
+                    .background(bg)
                     .clickable { onSelect(option) }
                     .padding(horizontal = rpx(20), vertical = rpx(6))
             )

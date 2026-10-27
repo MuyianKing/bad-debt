@@ -4,14 +4,14 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 
 /**
- * 本地设置存储。旧 uni-app 版本把分类/主题/角色选择存在 databases/DCStorage 里，
+ * 本地设置存储。旧版本把分类/主题/角色选择存在 databases/DCStorage 里，
  * 同包名升级时这里会做一次只读迁移；新装用户直接用默认值。
  */
 class Prefs(context: Context) {
     val sp = context.getSharedPreferences("muyian_native", Context.MODE_PRIVATE)
 
     init {
-        migrateUniStorage(context)
+        migrateLegacyStorage(context)
     }
 
     fun str(key: String, def: String = ""): String = sp.getString(key, def) ?: def
@@ -21,8 +21,11 @@ class Prefs(context: Context) {
     }
 
     fun bool(key: String, def: Boolean): Boolean {
-        val raw = sp.getString(key, null) ?: return sp.getBoolean(key, def)
-        // uni-app 的布尔值可能被包成 {"type":"boolean","data":true}
+        val raw = sp.all[key] ?: return def
+        // 原生写入是 Boolean，旧版本迁移过来的是字符串（甚至包了一层 JSON）
+        if (raw is Boolean) return raw
+        if (raw is Number) return raw.toInt() != 0
+        if (raw !is String) return def
         if (raw.startsWith("{")) {
             return try {
                 org.json.JSONObject(raw).optBoolean("data", def)
@@ -41,8 +44,8 @@ class Prefs(context: Context) {
         sp.edit().putBoolean(key, value).apply()
     }
 
-    private fun migrateUniStorage(context: Context) {
-        if (sp.getBoolean("uni_migrated_v1", false)) return
+    private fun migrateLegacyStorage(context: Context) {
+        if (sp.getBoolean("legacy_migrated_v1", false)) return
         try {
             val dbFile = context.getDatabasePath("DCStorage")
             if (dbFile.exists()) {
@@ -73,12 +76,12 @@ class Prefs(context: Context) {
                             // 单表读取失败不影响其它键
                         }
                     }
-                    editor.putBoolean("uni_migrated_v1", true).apply()
+                    editor.putBoolean("legacy_migrated_v1", true).apply()
                 } finally {
                     db.close()
                 }
             } else {
-                sp.edit().putBoolean("uni_migrated_v1", true).apply()
+                sp.edit().putBoolean("legacy_migrated_v1", true).apply()
             }
         } catch (_: Exception) {
             // 迁移失败不阻断启动，下次启动继续尝试

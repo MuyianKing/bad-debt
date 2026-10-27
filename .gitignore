@@ -1,5 +1,3 @@
-unpackage/
-node_modules/
-.hbuilderx/
 *.log
 .DS_Store
+.idea/

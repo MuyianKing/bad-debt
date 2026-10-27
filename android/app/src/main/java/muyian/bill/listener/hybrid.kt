@@ -124,6 +124,10 @@ class MuyianBillAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) return
+        // 记路线只认窗口切换：宿主 App → 支付 App → 宿主 App 是判定"同一笔支付"的关键
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            MuyianBillCore.noteForeground(applicationContext, pkg)
+        }
         // 白名单三层匹配（应用名关键词查询带缓存），非候选 App 直接放行
         if (!MuyianBillCore.isCandidateApp(applicationContext, pkg)) return
 
@@ -145,6 +149,10 @@ class MuyianBillAccessibilityService : AccessibilityService() {
 
     private fun processWindow(pkg: String) {
         val root = rootInActiveWindow ?: return
+        // 事件包名与当前窗口不一定一致：切回宿主 App 的一瞬间 root 可能还停在支付 App，
+        // 直接采信会把支付宝结果页算成美团的结果页，进而重复弹层
+        val rootPkg = root.packageName?.toString() ?: ""
+        if (rootPkg != pkg) return
         val lines = ArrayList<String>()
         collectTexts(root, lines, 0, intArrayOf(MAX_NODES))
         if (Build.VERSION.SDK_INT < 33) {
@@ -315,6 +323,40 @@ class MuyianBillCore private constructor() {
         private val recentBills = ArrayList<JSONObject>()
         private val sheetHandler = Handler(Looper.getMainLooper())
         private var sheetShowing = false
+
+        // ---------- 支付路线：宿主 App → 支付 App → 宿主 App ----------
+
+        /** 只记录 App 切换（不记录页面文本），用于判断一笔支付是从哪个宿主 App 发起的 */
+        private class RouteEntry(val pkg: String, val at: Long, val from: String)
+
+        /** 一笔已捕获的支付在路线上的归属 */
+        private class CaptureFlow(
+            val amount: Double,
+            val income: Boolean,
+            val createdAt: Long,
+            val sourcePkg: String,
+            val hostPkg: String,
+            val payPkg: String,
+            var orderNo: String,
+            var merchant: String
+        ) {
+            /** 仍在弹层队列/当前弹层里的那笔账单：跨 App 重复捕获时用来补全字段 */
+            var bill: JSONObject? = null
+        }
+
+        private class CaptureRoute(val hostPkg: String, val payPkg: String)
+
+        private val routeLock = Any()
+        private val routeEntries = ArrayList<RouteEntry>()
+        /** 宿主 App 里出现过"去支付/提交订单"的时间 */
+        private val pendingPayAt = HashMap<String, Long>()
+        /** 从支付 App 回到宿主 App 的时间（且该次访问确实有支付动作） */
+        private val returnedFromPayAt = HashMap<String, Long>()
+        /** 支付 App 里出现过结果页/收银台的时间，用来确认"这次进支付 App 是真支付" */
+        private val paymentEvidenceAt = HashMap<String, Long>()
+        /** 已捕获支付流水的路线记录，跨宿主/支付 App 去重 */
+        private val flows = ArrayList<CaptureFlow>()
+        private var flowsLoaded = false
         /** 通知 ID 自增序号：同一时刻可能有多笔兜底通知，不能互相覆盖 */
         private var pendingNoticeSeq = 0
         /** 建表/补列只在本进程首次开库时执行一次，避免每次查询都抛 3 次 ALTER 异常 */
@@ -326,6 +368,19 @@ class MuyianBillCore private constructor() {
         /** 单号是交易唯一凭证：同单号 24 小时内不再弹层 */
         private const val ORDER_DEDUP_WINDOW_MS = 24 * 3600 * 1000L
         private const val BILL_DEDUP_WINDOW_MS = 2 * 60 * 1000L
+        /** 支付路线只保留最近 15 分钟：宿主 App → 支付 App → 宿主 App 的切换记录 */
+        private const val ROUTE_TTL_MS = 15 * 60 * 1000L
+        private const val ROUTE_MAX = 24
+        /** 从支付 App 回到宿主 App 后，只在这段时间内接受宿主的结果页 */
+        private const val HOST_RETURN_WINDOW_MS = 3 * 60 * 1000L
+        /** 宿主 App 内点过"去支付/提交订单"后，结果页在这段时间内可被接受（App 内支付） */
+        private const val HOST_PAY_TRIGGER_WINDOW_MS = 10 * 60 * 1000L
+        /** 同一笔支付在宿主 App 与支付 App 两处被捕获时，这段时间内合并成一笔 */
+        private const val FLOW_MATCH_WINDOW_MS = 15 * 60 * 1000L
+        /** 宿主 App 结果页指纹：同一页面 24 小时内不再弹（离开后再进来也不会重复） */
+        private const val HOST_PAGE_DEDUP_WINDOW_MS = 24 * 3600 * 1000L
+        private const val KEY_FLOWS = "capture_flows"
+        private const val KEY_HOST_PAGE_DEDUP = "host_page_dedup"
         /** 弹层同时最多排队的笔数（超出丢弃最旧的，避免误捕获堆积） */
         private const val MAX_SHEETS = 5
         /** 弹层拉起后等待 Activity onCreate 的兜底时长：超时仍没起来就放行队列 */
@@ -342,11 +397,19 @@ class MuyianBillCore private constructor() {
         private val SCREEN_LIST_PATTERN = Pattern.compile(
             "账单明细|全部账单|收支统计|交易记录|账单列表|本月支出|本月收入"
         )
+        /** 宿主 App 的订单管理页：有"支付成功"字样也不认，避免翻历史订单时误弹 */
+        private val SCREEN_ORDER_MGMT_PATTERN = Pattern.compile(
+            "申请退款|查看物流|确认收货|待评价|去评价|再来一单|订单已完成|已送达|下单时间|我的订单|全部订单|订单列表|订单管理|退款/售后"
+        )
         private val SCREEN_EXPENSE_MARK = Pattern.compile(
             "支付成功|付款成功|转账成功|转出成功|扣款成功|还款成功|付款完成|交易成功"
         )
         private val SCREEN_INCOME_MARK = Pattern.compile(
             "收款成功|收款到账|已到账|退款成功|退回成功|转入成功|存入零钱|存入余额|已收款"
+        )
+        /** 收银台/确认支付页：出现后短时间内才允许宿主 App 的结果页入账，防平时浏览订单页误弹 */
+        private val SCREEN_PAY_TRIGGER = Pattern.compile(
+            "确认支付|立即支付|去支付|确认付款|立即付款|去付款|提交订单|收银台|选择支付方式|输入支付密码|指纹支付|面容支付|免密支付|同意协议并支付"
         )
         // 通知文本的关键词（通知里没有"支付成功"这类页面级完成标记）
         private val EXPENSE_PATTERN = Pattern.compile("支出|付款|支付|消费|扣款|转出|提现|买单|代扣")
@@ -874,6 +937,318 @@ class MuyianBillCore private constructor() {
             return pkg + "#" + WHITESPACE.matcher(lines.joinToString("|")).replaceAll("")
         }
 
+        // ---------- 支付路线（宿主 App / 支付 App） ----------
+
+        /** 支付 App：微信、支付宝、云闪付与银行 App；其余候选 App 视为宿主 App */
+        @JvmStatic
+        fun isPaymentApp(pkg: String): Boolean {
+            if (pkg == "com.tencent.mm") return true
+            if (pkg == "com.eg.android.AlipayGphone" || pkg.startsWith("com.alipay.")) return true
+            if (pkg.startsWith("com.unionpay")) return true
+            for (prefix in BANK_AMOUNT_PREFIXES) {
+                if (pkg.startsWith(prefix)) return true
+            }
+            return false
+        }
+
+        /** 系统弹窗/权限页不参与支付路线，避免把 from 记成 systemui 导致宿主判断丢失 */
+        private fun isSystemUi(pkg: String): Boolean {
+            if (pkg == "android") return true
+            if (pkg == "com.android.systemui") return true
+            if (pkg.contains("systemui")) return true
+            if (pkg == "com.android.permissioncontroller") return true
+            if (pkg == "com.google.android.permissioncontroller") return true
+            if (pkg == "com.android.packageinstaller") return true
+            if (pkg == "com.google.android.packageinstaller") return true
+            if (pkg == "com.miui.securitycenter") return true
+            if (pkg == "com.lbe.security.miui") return true
+            return false
+        }
+
+        /**
+         * 无障碍窗口切换时调用：维护最近 15 分钟的 App 路线。
+         * 只在"支付 App → 宿主 App"且那次支付 App 访问确实有支付动作时，
+         * 才给宿主打上"刚支付完"标记，避免只是去支付宝看一眼也当成支付。
+         */
+        @JvmStatic
+        fun noteForeground(context: Context, pkg: String) {
+            if (pkg.isEmpty() || pkg == context.packageName || isSystemUi(pkg)) return
+            val now = System.currentTimeMillis()
+            synchronized(routeLock) {
+                val last = if (routeEntries.isEmpty()) null else routeEntries[routeEntries.size - 1]
+                if (last != null && last.pkg == pkg) return
+                val from = if (last == null) "" else last.pkg
+                if (last != null && isPaymentApp(last.pkg) && !isPaymentApp(pkg) && last.from == pkg) {
+                    val evidence = paymentEvidenceAt[last.pkg] ?: 0L
+                    if (evidence >= last.at) {
+                        returnedFromPayAt[pkg] = now
+                    }
+                }
+                routeEntries.add(RouteEntry(pkg, now, from))
+                while (routeEntries.size > ROUTE_MAX) {
+                    routeEntries.removeAt(0)
+                }
+                while (routeEntries.isNotEmpty() && now - routeEntries[0].at > ROUTE_TTL_MS) {
+                    routeEntries.removeAt(0)
+                }
+            }
+        }
+
+        /** 支付 App 出现结果页/收银台：作为"这次访问确实在支付"的证据 */
+        private fun markPaymentEvidence(pkg: String, at: Long) {
+            synchronized(routeLock) {
+                val prev = paymentEvidenceAt[pkg] ?: 0L
+                if (at > prev) paymentEvidenceAt[pkg] = at
+            }
+        }
+
+        /** 记录收银台/提交订单页；宿主 App 的结果页靠它判断"刚刚确实在支付" */
+        private fun notePaymentTrigger(pkg: String, lines: List<String>, now: Long) {
+            val text = WHITESPACE.matcher(lines.joinToString("")).replaceAll("")
+            if (!SCREEN_PAY_TRIGGER.matcher(text).find()) return
+            synchronized(routeLock) {
+                pendingPayAt[pkg] = now
+                val prev = paymentEvidenceAt[pkg] ?: 0L
+                if (now > prev) paymentEvidenceAt[pkg] = now
+            }
+        }
+
+        /** 宿主 App 当前是否处在可接受结果页的支付上下文里 */
+        private fun hasHostPaymentContext(context: Context, hostPkg: String, now: Long): Boolean {
+            synchronized(routeLock) {
+                val returned = returnedFromPayAt[hostPkg] ?: 0L
+                if (returned > 0 && now - returned <= HOST_RETURN_WINDOW_MS) return true
+                val triggered = pendingPayAt[hostPkg] ?: 0L
+                if (triggered > 0 && now - triggered <= HOST_PAY_TRIGGER_WINDOW_MS) return true
+            }
+            synchronized(sheetLock) {
+                ensureFlowsLoaded(context)
+                for (i in flows.indices.reversed()) {
+                    val f = flows[i]
+                    if (now - f.createdAt > FLOW_MATCH_WINDOW_MS) break
+                    if (f.hostPkg == hostPkg) return true
+                }
+            }
+            return false
+        }
+
+        /** 支付 App 这次访问是从哪个宿主 App 进来的；不是从候选宿主进来的返回空串 */
+        private fun originHostOfPayment(context: Context, payPkg: String, now: Long): String {
+            var from = ""
+            synchronized(routeLock) {
+                for (i in routeEntries.indices.reversed()) {
+                    val e = routeEntries[i]
+                    if (now - e.at > ROUTE_TTL_MS) break
+                    if (e.pkg != payPkg) continue
+                    from = e.from
+                    break
+                }
+            }
+            if (from.isEmpty() || from == payPkg || isPaymentApp(from)) return ""
+            return if (isCandidateApp(context, from)) from else ""
+        }
+
+        /** 宿主 App 最近一次跳去的支付 App（要求是从该宿主出发），供路线记录使用 */
+        private fun lastPayPkgForHost(hostPkg: String, now: Long): String {
+            var pay = ""
+            synchronized(routeLock) {
+                for (i in routeEntries.indices.reversed()) {
+                    val e = routeEntries[i]
+                    if (now - e.at > FLOW_MATCH_WINDOW_MS) break
+                    if (!isPaymentApp(e.pkg)) continue
+                    if (e.from == hostPkg) {
+                        pay = e.pkg
+                        break
+                    }
+                }
+            }
+            return pay
+        }
+
+        private fun resolveCaptureRoute(context: Context, pkg: String, now: Long): CaptureRoute {
+            if (isPaymentApp(pkg)) {
+                return CaptureRoute(originHostOfPayment(context, pkg, now), pkg)
+            }
+            return CaptureRoute(pkg, lastPayPkgForHost(pkg, now))
+        }
+
+        /** flows 只在 sheetLock 内访问；进程被杀后从 prefs 恢复，跨 App 去重才不会断 */
+        private fun ensureFlowsLoaded(context: Context) {
+            if (flowsLoaded) return
+            flowsLoaded = true
+            val now = System.currentTimeMillis()
+            try {
+                val raw = prefs(context).getString(KEY_FLOWS, "[]") ?: "[]"
+                val arr = JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i)
+                    if (o == null) continue
+                    val createdAt = o.optLong("createdAt", 0L)
+                    if (now - createdAt > FLOW_MATCH_WINDOW_MS) continue
+                    flows.add(CaptureFlow(
+                        o.optDouble("amount", 0.0),
+                        o.optBoolean("income", false),
+                        createdAt,
+                        o.optString("sourcePkg", ""),
+                        o.optString("hostPkg", ""),
+                        o.optString("payPkg", ""),
+                        o.optString("orderNo", ""),
+                        o.optString("merchant", "")
+                    ))
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "load capture flows failed", e)
+            }
+        }
+
+        private fun saveFlowsLocked(context: Context) {
+            val now = System.currentTimeMillis()
+            val arr = JSONArray()
+            var i = 0
+            while (i < flows.size) {
+                val f = flows[i]
+                if (now - f.createdAt > FLOW_MATCH_WINDOW_MS) {
+                    flows.removeAt(i)
+                    continue
+                }
+                val o = JSONObject()
+                o.put("amount", f.amount)
+                o.put("income", f.income)
+                o.put("createdAt", f.createdAt)
+                o.put("sourcePkg", f.sourcePkg)
+                o.put("hostPkg", f.hostPkg)
+                o.put("payPkg", f.payPkg)
+                o.put("orderNo", f.orderNo)
+                o.put("merchant", f.merchant)
+                arr.put(o)
+                i++
+            }
+            try {
+                prefs(context).edit().putString(KEY_FLOWS, arr.toString()).apply()
+            } catch (e: Exception) {
+                Log.w(TAG, "save capture flows failed", e)
+            }
+        }
+
+        private fun recordFlowLocked(context: Context, bill: JSONObject, route: CaptureRoute) {
+            ensureFlowsLoaded(context)
+            val money = bill.optDouble("money", 0.0)
+            val flow = CaptureFlow(
+                Math.abs(money),
+                money >= 0,
+                bill.optLong("createdAt", System.currentTimeMillis()),
+                bill.optString("sourcePkg"),
+                route.hostPkg,
+                route.payPkg,
+                bill.optString("orderNo"),
+                bill.optString("merchant")
+            )
+            flow.bill = bill
+            flows.add(flow)
+            while (flows.size > 30) {
+                flows.removeAt(0)
+            }
+            saveFlowsLocked(context)
+        }
+
+        /**
+         * 跨 App 同一笔支付：宿主 App 与支付 App 的 bankName、订单号都不一样，
+         * 不能按"同渠道+金额"或"同单号"判断，只能靠支付路线把它们合并。
+         * 同 App 的重复仍交给原去重规则，避免把同金额的两笔真实消费误合并。
+         */
+        private fun findMatchingFlowLocked(
+            context: Context, pkg: String, money: Double, income: Boolean,
+            route: CaptureRoute, now: Long
+        ): CaptureFlow? {
+            ensureFlowsLoaded(context)
+            val amount = Math.abs(money)
+            for (i in flows.indices.reversed()) {
+                val f = flows[i]
+                if (now - f.createdAt > FLOW_MATCH_WINDOW_MS) continue
+                if (f.income != income) continue
+                if (Math.abs(f.amount - amount) >= 0.01) continue
+                if (f.sourcePkg == pkg) continue
+                val sourceIsPay = isPaymentApp(f.sourcePkg)
+                val newIsPay = isPaymentApp(pkg)
+                if (sourceIsPay && !newIsPay) {
+                    if (f.hostPkg.isNotEmpty() && f.hostPkg == pkg) return f
+                } else if (!sourceIsPay && newIsPay) {
+                    if (f.hostPkg == f.sourcePkg && route.hostPkg == f.hostPkg &&
+                        (f.payPkg.isEmpty() || f.payPkg == pkg)) return f
+                } else if (sourceIsPay && newIsPay) {
+                    if (f.hostPkg.isNotEmpty() && f.hostPkg == route.hostPkg) return f
+                }
+            }
+            return null
+        }
+
+        /** 把后到的重复捕获并进已排队/已展示的那笔：支付 App 的金额与渠道更权威 */
+        private fun mergeBill(target: JSONObject, incoming: JSONObject, incomingPkg: String, flow: CaptureFlow) {
+            if (isPaymentApp(incomingPkg)) {
+                target.put("money", incoming.optDouble("money", target.optDouble("money", 0.0)))
+                target.put("bankName", incoming.optString("bankName", target.optString("bankName")))
+            }
+            if (target.optString("merchant").isEmpty()) {
+                target.put("merchant", incoming.optString("merchant", ""))
+            }
+            if (target.optString("orderNo").isEmpty()) {
+                target.put("orderNo", incoming.optString("orderNo", ""))
+            }
+            if (flow.orderNo.isEmpty()) flow.orderNo = incoming.optString("orderNo", "")
+            if (flow.merchant.isEmpty()) flow.merchant = incoming.optString("merchant", "")
+        }
+
+        /**
+         * 宿主 App 结果页指纹：同一页面 24 小时内只认一次。
+         * 只有期间出现了新的支付动作（刚从支付 App 回来/点过去支付/有新的支付流水）才放行，
+         * 这样"付款后再进美团"不会重复弹，"隔天同一笔订单"也不会再弹。
+         */
+        private fun isDuplicateHostPage(
+            context: Context, pkg: String, money: Double, income: Boolean,
+            orderNo: String, merchant: String, now: Long
+        ): Boolean {
+            val merchantKey = WHITESPACE.matcher(merchant).replaceAll("")
+            val fp = pkg + "|" + String.format(Locale.US, "%.2f", Math.abs(money)) + "|" +
+                (if (income) "in" else "out") + "|" + orderNo + "|" + merchantKey
+            val preferences = prefs(context)
+            val map = try {
+                JSONObject(preferences.getString(KEY_HOST_PAGE_DEDUP, "{}") ?: "{}")
+            } catch (e: Exception) {
+                JSONObject()
+            }
+            val stale = ArrayList<String>()
+            val keys = map.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                if (now - map.optLong(k, 0L) >= HOST_PAGE_DEDUP_WINDOW_MS) stale.add(k)
+            }
+            for (k in stale) map.remove(k)
+            val last = map.optLong(fp, 0L)
+            val duplicate = last > 0 && now - last < HOST_PAGE_DEDUP_WINDOW_MS
+            val fresh = duplicate && hasFreshPaymentAction(context, pkg, last)
+            map.put(fp, now)
+            preferences.edit().putString(KEY_HOST_PAGE_DEDUP, map.toString()).apply()
+            return duplicate && !fresh
+        }
+
+        private fun hasFreshPaymentAction(context: Context, hostPkg: String, since: Long): Boolean {
+            synchronized(routeLock) {
+                val returned = returnedFromPayAt[hostPkg] ?: 0L
+                if (returned > since) return true
+                val triggered = pendingPayAt[hostPkg] ?: 0L
+                if (triggered > since) return true
+            }
+            synchronized(sheetLock) {
+                ensureFlowsLoaded(context)
+                for (i in flows.indices.reversed()) {
+                    val f = flows[i]
+                    if (f.createdAt <= since) break
+                    if (f.hostPkg == hostPkg) return true
+                }
+            }
+            return false
+        }
+
         /**
          * 支付结果页处理流水线（后台线程执行）。
          * @param force true 时跳过白名单与去重（测试注入用）
@@ -890,6 +1265,26 @@ class MuyianBillCore private constructor() {
                 result.put("accepted", false).put("reason", "not candidate app")
                 return result.toString()
             }
+            val now = System.currentTimeMillis()
+            val isPay = isPaymentApp(pkg)
+            if (!force) {
+                // 宿主 App 的结果页只有在"刚支付完"的路线上下文里才接受；
+                // 先判断再记录本页触发词，避免结果页自己给自己背书
+                val orderPage = !isPay && SCREEN_ORDER_MGMT_PATTERN.matcher(
+                    WHITESPACE.matcher(lines.joinToString("")).replaceAll("")
+                ).find()
+                val hadContext = if (isPay) true else hasHostPaymentContext(context, pkg, now)
+                notePaymentTrigger(pkg, lines, now)
+                if (orderPage) {
+                    result.put("accepted", false).put("reason", "order page")
+                    return result.toString()
+                }
+                if (!hadContext) {
+                    result.put("accepted", false).put("reason", "no payment route")
+                    return result.toString()
+                }
+            }
+
             val parsed = parseScreenBill(pkg, lines) ?: run {
                 result.put("accepted", false).put("reason", "not a payment page")
                 return result.toString()
@@ -898,12 +1293,19 @@ class MuyianBillCore private constructor() {
             val money = parsed.getDouble("money")
             val bankName = parsed.getString("bankName")
             val orderNo = parsed.optString("orderNo")
-            val now = System.currentTimeMillis()
+            val merchant = extractScreenMerchant(lines)
 
             if (!force) {
+                // 支付 App 出现结果页本身就是"这次访问在支付"的证据，供宿主结果页判断路线
+                if (isPay) markPaymentEvidence(pkg, now)
                 // 单号去重：同订单号 24 小时内只弹一次（页面重复渲染、结果页回看都靠它）
                 if (orderNo.isNotEmpty() && isDuplicateOrder(context, orderNo)) {
                     result.put("accepted", false).put("reason", "duplicate order")
+                    return result.toString()
+                }
+                // 宿主 App 结果页指纹：同一页面 24 小时内不再弹，避免离开后再进入又弹一次
+                if (!isPay && isDuplicateHostPage(context, pkg, money, money >= 0, orderNo, merchant, now)) {
+                    result.put("accepted", false).put("reason", "duplicate host page")
                     return result.toString()
                 }
                 // 无单号时退回捕获级指纹：同 App+金额+页面文本头 5 分钟内只处理一次
@@ -925,7 +1327,6 @@ class MuyianBillCore private constructor() {
                 }
             }
 
-            val merchant = extractScreenMerchant(lines)
             val calendar = Calendar.getInstance()
             calendar.timeInMillis = now
             val bill = JSONObject()
@@ -943,9 +1344,12 @@ class MuyianBillCore private constructor() {
             bill.put("capture", "screen")
             bill.put("createdAt", now)
 
-            presentBill(context, bill)
-
-            result.put("accepted", true).put("bill", bill)
+            val presented = presentBill(context, bill, !force)
+            if (presented) {
+                result.put("accepted", true).put("bill", bill)
+            } else {
+                result.put("accepted", false).put("reason", "duplicate flow")
+            }
             return result.toString()
         }
 
@@ -978,11 +1382,26 @@ class MuyianBillCore private constructor() {
             val bankName = parsed.getString("bankName")
             val orderNo = parsed.optString("orderNo")
             val now = System.currentTimeMillis()
+            val isPay = isPaymentApp(pkg)
+
+            // 宿主 App 的通知同样要处在"刚支付完"的路线里才接受，
+            // 否则美团等 App 的历史订单通知也会被当成新支付
+            if (!force && !isPay && !hasHostPaymentContext(context, pkg, now)) {
+                result.put("accepted", false).put("reason", "no payment route")
+                return result.toString()
+            }
+            if (!force && isPay) markPaymentEvidence(pkg, now)
+            val merchant = extractNotificationMerchant(text, subText, bigText, lines)
 
             if (!force) {
                 // 单号去重：同订单号 24 小时内只弹一次（通知更新、screen/notify 双路都靠它）
                 if (orderNo.isNotEmpty() && isDuplicateOrder(context, orderNo)) {
                     result.put("accepted", false).put("reason", "duplicate order")
+                    return result.toString()
+                }
+                // 宿主 App 结果页指纹：同一笔通知/页面 24 小时内不再弹
+                if (!isPay && isDuplicateHostPage(context, pkg, money, money >= 0, orderNo, merchant, now)) {
+                    result.put("accepted", false).put("reason", "duplicate host page")
                     return result.toString()
                 }
                 // 无单号时退回捕获级指纹：同 内容+首金额 5 分钟内只处理一次（微信服务通知会反复 update）
@@ -1003,7 +1422,6 @@ class MuyianBillCore private constructor() {
                 }
             }
 
-            val merchant = extractNotificationMerchant(text, subText, bigText, lines)
             val calendar = Calendar.getInstance()
             calendar.timeInMillis = postTime
             val bill = JSONObject()
@@ -1021,9 +1439,12 @@ class MuyianBillCore private constructor() {
             bill.put("capture", "notify")
             bill.put("createdAt", now)
 
-            presentBill(context, bill)
-
-            result.put("accepted", true).put("bill", bill)
+            val presented = presentBill(context, bill, !force)
+            if (presented) {
+                result.put("accepted", true).put("bill", bill)
+            } else {
+                result.put("accepted", false).put("reason", "duplicate flow")
+            }
             return result.toString()
         }
 
@@ -1473,15 +1894,47 @@ class MuyianBillCore private constructor() {
             return try {
                 val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
                 val km = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-                // 结尾用二元表达式而不是 !km.isKeyguardLocked：UTS 的 Kotlin 语法检查会在"以 ! 开头的表达式"上报错
+                // 键锁状态用显式比较，保持条件可读
                 pm.isInteractive && km.isKeyguardLocked == false
             } catch (e: Exception) {
                 true
             }
         }
 
-        /** 把一笔解析结果交给底部确认弹层；弹层已经开着时先进内存队列 */
-        private fun presentBill(context: Context, bill: JSONObject) {
+        /**
+         * 把一笔解析结果交给底部确认弹层；弹层已经开着时先进内存队列。
+         * 跨 App 的同一笔支付在这里合并：宿主 App 与支付 App 的结果页都解析成功后，
+         * 只保留先到的那一笔，后到的只用来补全金额/渠道/商户/单号。
+         * @return false 表示判定为同一笔支付，没有新增弹层
+         */
+        private fun presentBill(context: Context, bill: JSONObject, registerFlow: Boolean): Boolean {
+            if (registerFlow) {
+                val pkg = bill.optString("sourcePkg")
+                val money = bill.optDouble("money", 0.0)
+                val income = money >= 0
+                val now = bill.optLong("createdAt", System.currentTimeMillis())
+                val route = resolveCaptureRoute(context, pkg, now)
+                synchronized(sheetLock) {
+                    val flow = findMatchingFlowLocked(context, pkg, money, income, route, now)
+                    if (flow != null) {
+                        val target = flow.bill
+                        if (target != null) {
+                            mergeBill(target, bill, pkg, flow)
+                        }
+                        if (flow.orderNo.isEmpty()) flow.orderNo = bill.optString("orderNo", "")
+                        if (flow.merchant.isEmpty()) flow.merchant = bill.optString("merchant", "")
+                        saveFlowsLocked(context)
+                        return false
+                    }
+                    recentBills.add(bill)
+                    while (recentBills.size > 20) recentBills.removeAt(0)
+                    while (sheetQueue.size >= MAX_SHEETS) sheetQueue.removeAt(0)
+                    sheetQueue.add(bill)
+                    recordFlowLocked(context, bill, route)
+                }
+                sheetHandler.post { showNextSheet(context.applicationContext) }
+                return true
+            }
             synchronized(sheetLock) {
                 recentBills.add(bill)
                 while (recentBills.size > 20) recentBills.removeAt(0)
@@ -1489,6 +1942,7 @@ class MuyianBillCore private constructor() {
                 sheetQueue.add(bill)
             }
             sheetHandler.post { showNextSheet(context.applicationContext) }
+            return true
         }
 
         /** 弹层已经开着时，把通知点击带来的新账单放回队列，等当前弹层关闭后再弹 */
@@ -1499,7 +1953,8 @@ class MuyianBillCore private constructor() {
             } catch (e: Exception) {
                 return false
             }
-            presentBill(context.applicationContext, bill)
+            // 通知点击只是把已经捕获过的那笔重新排进弹层，不能再登记一次支付路线
+            presentBill(context.applicationContext, bill, false)
             return true
         }
 
@@ -1830,7 +2285,7 @@ class MuyianBillCore private constructor() {
         // 选文件由 ImportPickActivity 中转（SAF，无需存储权限）：选中的文件拷到应用私有目录
         // qianji_import.xlsx，路径与状态放在静态字段，页面侧用同步 API 轮询读取。
         // 原生只做「xlsx 解压成表头 + 原始单元格行」和「批量写库」；时间/类型/金额校验、
-        // 统计、分类计数与映射、入库字段拼装都在 common/qianji-import.js。
+        // 统计、分类计数与映射、入库字段拼装都在 com.muyian.debt.data 的 Qianji.kt。
 
         private const val IMPORT_CACHE_NAME = "qianji_import.xlsx"
         private const val IMPORT_MAX_ROWS = 20000
@@ -1856,8 +2311,7 @@ class MuyianBillCore private constructor() {
         }
 
         private fun startFilePicker(context: Context, kind: String): String {
-            // 不在 synchronized 块内提前 return：HBuilderX 的 Kotlin 检查器会把这种写法误判成
-            // Java synchronized 块，后随 return 报 "no viable alternative"
+            // 先在锁内只标记 busy，锁外统一返回，避免多分支散落 return 导致状态不一致
             var busy = false
             synchronized(importLock) {
                 if (importPickState == "picking" && ImportPickActivity.isAlive()) {
@@ -2004,7 +2458,7 @@ class MuyianBillCore private constructor() {
             }
         }
 
-        /** 分块读取原始数据行：{"total":n,"rows":[[…],…]}，offset/limit 走字符串规避 UTS number 映射坑 */
+        /** 分块读取原始数据行：{"total":n,"rows":[[…],…]}，offset/limit 用字符串传参，解析失败时回退默认值 */
         @JvmStatic
         fun getImportSheetRows(offset: String, limit: String): String {
             val start = offset.trim().toIntOrNull() ?: 0

@@ -13,6 +13,10 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -42,6 +46,7 @@ import com.muyian.debt.ui.components.AppToastHost
 import com.muyian.debt.ui.components.ConfirmDialogHost
 import com.muyian.debt.ui.components.DatePickerHost
 import com.muyian.debt.ui.components.ImagePreviewHost
+import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.PickerSheetHost
 import com.muyian.debt.ui.screens.AddScreen
 import com.muyian.debt.ui.screens.BackupScreen
@@ -146,7 +151,34 @@ private fun MuyianRoot(app: AppState) {
         Box(Modifier.fillMaxSize().background(p.bg)) {
             AnimatedContent(
                 targetState = app.current,
-                transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(110)) },
+                transitionSpec = {
+                    // 进栈：新页面从底部上浮，旧页面轻微缩小后退；出栈反向。
+                    // 记一笔是“大面板”语义，位移比普通列表页更大。
+                    val forward = app.navForward
+                    if (forward) {
+                        val enterOffset = if (targetState == Screen.Add) 0.18f else 0.07f
+                        (fadeIn(tween(150, easing = Motion.Out)) +
+                            scaleIn(tween(260, easing = Motion.Out), initialScale = 0.985f) +
+                            slideInVertically(
+                                tween(300, easing = Motion.Out),
+                                initialOffsetY = { (it * enterOffset).toInt() }
+                            )).togetherWith(
+                            fadeOut(tween(130)) +
+                                scaleOut(tween(250, easing = Motion.InOut), targetScale = 1.005f)
+                        )
+                    } else {
+                        val exitOffset = if (initialState == Screen.Add) 0.18f else 0.07f
+                        (fadeIn(tween(180, easing = Motion.Out)) +
+                            scaleIn(tween(280, easing = Motion.Out), initialScale = 1.01f)).togetherWith(
+                            fadeOut(tween(170, easing = Motion.InOut)) +
+                                scaleOut(tween(260, easing = Motion.Out), targetScale = 0.97f) +
+                                slideOutVertically(
+                                    tween(280, easing = Motion.Out),
+                                    targetOffsetY = { (it * exitOffset).toInt() }
+                                )
+                        )
+                    }
+                },
                 label = "screen"
             ) { screen ->
                 when (screen) {
@@ -160,12 +192,12 @@ private fun MuyianRoot(app: AppState) {
                     Screen.Backup -> BackupScreen(app)
                 }
             }
-            AppToastHost(app)
-            ConfirmDialogHost(app)
             ActionSheetHost(app)
             PickerSheetHost(app)
             DatePickerHost(app)
+            ConfirmDialogHost(app)
             ImagePreviewHost(app)
+            AppToastHost(app)
             if (splashFading) {
                 Box(
                     Modifier

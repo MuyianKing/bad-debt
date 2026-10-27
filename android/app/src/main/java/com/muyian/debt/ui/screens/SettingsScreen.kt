@@ -9,6 +9,12 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -58,8 +64,10 @@ import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.GroupTitle
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.MascotImage
+import com.muyian.debt.ui.components.Motion
+import com.muyian.debt.ui.components.RiseIn
 import com.muyian.debt.ui.components.StateChip
-import com.muyian.debt.ui.components.WotSwitch
+import com.muyian.debt.ui.components.AppSwitch
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.theme.AllPalettes
@@ -223,6 +231,7 @@ fun SettingsScreen(app: AppState) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = rpx(60) + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
         ) {
+            RiseIn(0, key = "look") {
             GroupTitle("外观")
             Column(
                 Modifier
@@ -243,12 +252,17 @@ fun SettingsScreen(app: AppState) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(rpx(16))) {
                     for (tp in AllPalettes) {
                         val active = p.id == tp.id
+                        val borderColor by animateColorAsState(
+                            if (active) p.primary else Color.Transparent,
+                            tween(200, easing = Motion.InOut),
+                            label = "theme-border"
+                        )
                         Column(
                             Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(rpx(18)))
                                 .background(p.card.copy(alpha = if (p.dark) 0.5f else 0.55f))
-                                .then(if (active) Modifier.border(2.dp, p.primary, RoundedCornerShape(rpx(18))) else Modifier)
+                                .border(2.dp, borderColor, RoundedCornerShape(rpx(18)))
                                 .clickable {
                                     if (!active) {
                                         app.setTheme(tp.id)
@@ -276,10 +290,16 @@ fun SettingsScreen(app: AppState) {
                                     Box(Modifier.width(rpx(42)).height(rpx(6)).clip(RoundedCornerShape(rpx(3))).background(p.dim))
                                     Box(Modifier.padding(top = rpx(6)).width(rpx(26)).height(rpx(6)).clip(RoundedCornerShape(rpx(3))).background(p.dim.copy(alpha = 0.7f)))
                                 }
-                                if (active) {
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = active,
+                                    enter = fadeIn(tween(150)) +
+                                        scaleIn(tween(200, easing = Motion.Out), initialScale = 0.5f),
+                                    exit = fadeOut(tween(120)) +
+                                        scaleOut(tween(150, easing = Motion.InOut), targetScale = 0.7f),
+                                    modifier = Modifier.align(Alignment.TopEnd)
+                                ) {
                                     Box(
                                         Modifier
-                                            .align(Alignment.TopEnd)
                                             .size(rpx(32))
                                             .clip(CircleShape)
                                             .background(p.card),
@@ -293,7 +313,9 @@ fun SettingsScreen(app: AppState) {
                     }
                 }
             }
+            }
 
+            RiseIn(1, key = "mascot") {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -325,7 +347,7 @@ fun SettingsScreen(app: AppState) {
                         Text("跟随场景", color = p.text, fontSize = rsp(27), fontWeight = FontWeight.SemiBold)
                         Text(moodHint, color = p.sub, fontSize = rsp(21), modifier = Modifier.padding(top = rpx(4)))
                     }
-                    WotSwitch(app.autoMood) {
+                    AppSwitch(app.autoMood) {
                         app.updateAutoMood(it)
                         app.showToast(if (it) "已开启跟随场景" else "已固定当前表情")
                     }
@@ -334,12 +356,17 @@ fun SettingsScreen(app: AppState) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(rpx(16))) {
                     for (style in app.activeMascot.styles) {
                         val active = app.baseMascotStyle.id == style.id
+                        val borderColor by animateColorAsState(
+                            if (active) p.primary else Color.Transparent,
+                            tween(200, easing = Motion.InOut),
+                            label = "mascot-border"
+                        )
                         Column(
                             Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(rpx(18)))
                                 .background(p.card.copy(alpha = if (p.dark) 0.5f else 0.55f))
-                                .then(if (active) Modifier.border(2.dp, p.primary, RoundedCornerShape(rpx(18))) else Modifier)
+                                .border(2.dp, borderColor, RoundedCornerShape(rpx(18)))
                                 .clickable {
                                     if (!active) {
                                         val n = app.setMascotStyle(style.id)
@@ -357,11 +384,16 @@ fun SettingsScreen(app: AppState) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 MascotImage(style.headAsset, Modifier.fillMaxSize(), ContentScale.Fit)
-                                if (active) {
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = active,
+                                    enter = fadeIn(tween(150)) +
+                                        scaleIn(tween(200, easing = Motion.Out), initialScale = 0.5f),
+                                    exit = fadeOut(tween(120)) +
+                                        scaleOut(tween(150, easing = Motion.InOut), targetScale = 0.7f),
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(rpx(8))
+                                ) {
                                     Box(
                                         Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(rpx(8))
                                             .size(rpx(32))
                                             .clip(CircleShape)
                                             .background(p.card),
@@ -375,7 +407,9 @@ fun SettingsScreen(app: AppState) {
                     }
                 }
             }
+            }
 
+            RiseIn(2, key = "hero") {
             SettingGroup {
                 SettingCell(
                     icon = "image",
@@ -399,7 +433,9 @@ fun SettingsScreen(app: AppState) {
                     }
                 )
             }
+            }
 
+            RiseIn(3, key = "auto") {
             GroupTitle("自动记账")
             SettingGroup {
                 SettingCell(
@@ -505,7 +541,9 @@ fun SettingsScreen(app: AppState) {
                     }
                 )
             }
+            }
 
+            RiseIn(4, key = "background") {
             GroupTitle("后台运行")
             SettingGroup {
                 SettingCell(
@@ -573,7 +611,9 @@ fun SettingsScreen(app: AppState) {
                     }
                 )
             }
+            }
 
+            RiseIn(5, key = "privacy") {
             GroupTitle("隐私说明")
             Column(
                 Modifier
@@ -595,6 +635,7 @@ fun SettingsScreen(app: AppState) {
                 )) {
                     Text(line, color = p.sub, fontSize = rsp(24), lineHeight = rsp(46))
                 }
+            }
             }
         }
     }
@@ -657,7 +698,7 @@ private fun SettingCell(
             }
             if (switch != null && onSwitch != null) {
                 Spacer(Modifier.width(rpx(12)))
-                WotSwitch(switch, onChange = onSwitch)
+                AppSwitch(switch, onChange = onSwitch)
             } else if (trailing != null) {
                 Spacer(Modifier.width(rpx(12)))
                 trailing()

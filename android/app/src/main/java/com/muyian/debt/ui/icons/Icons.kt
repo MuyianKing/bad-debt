@@ -25,8 +25,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * 线性/实体图标。路径数据来自 common/icons.js（24x24 viewBox），
- * 这里只做 SVG 子集解析 + Compose Canvas 绘制，保证与旧版图标逐点一致。
+ * 线性/实体图标。路径数据是 24x24 viewBox 的 SVG 子集，
+ * 这里负责解析 + Compose Canvas 绘制。
  */
 object IconParser {
     private val strokeCache = HashMap<String, Path>()
