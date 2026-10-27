@@ -11,7 +11,7 @@
 - `common/merchants.js` — 商户分类建议：内置词典（商户关键词→分类叶子名，有序数组、具体词优先）+ 用户修正回流（storage key `muyian_merchant_cats_v1`，上限 500 条）。`suggestCategory(merchant, isIncome)` / `learnCategory(merchant, leafName)`。词典不定义分类体系，叶子名必须与 cats.js 一致；原生只负责提取商户名（解析结果 `merchant` 字段），建议与回流都在页面侧。**当前未接入任何页面（草稿模式已移除），保留待后续在原生弹层/记一笔页复用。**
 - `common/theme.js` — 主题唯一来源：主题清单（含 SVG/canvas 字面色 `primary/primaryDeep/primaryFill`、中性图标墨色 `ink/inkSub`、原生弹层强调色 `cardColor`、深色标记 `dark`）、当前主题的响应式状态与持久化。页面禁止自建主题常量。
 - `common/recents.js` — 最近任务可见性唯一来源：`isHideRecentsEnabled` / `setHideRecentsEnabled` / `applyRecentsVisibility`（runtime `AppTask.setExcludeFromRecents`，兼容忽略清单标记的 ROM）。设置页开关与 `App.onLaunch/onShow` 都走这里，不要在页面里重复写 plus.android 反射。
-- `common/mascots.js` — 角色（吉祥物）唯一来源：`MASCOTS`（角色 → 表情列表，每项含 `src` / `headSrc` / `mood` / `widthRpx` / `bottomRpx`，可用 `moodAliases` 把一个 mood 复用已有表情，如 `warn: 'grumpy'`）、`THEME_MASCOT`（主题 → 角色）、`activeMascot` / `activeMascotBaseStyle`、`autoMood`、`setMascotStyle` / `setAutoMood` / `refreshMascots`。角色可带 `ready: false` 表示素材未齐，`activeMascot` 会回退到 `FALLBACK_MASCOT_ID`（当前哪吒）。storage：`muyian_mascot_style_v1:<角色id>`、`muyian_mascot_auto_mood_v1`；旧 `muyian_nezha_v1` 自动迁移。素材在 `static/<角色>/`。新增角色只改这个模块 + 放图 + 改主题映射，页面不要写死角色名或路径。
+- `common/mascots.js` — 角色（吉祥物）唯一来源：`MASCOTS`（角色 → 表情列表，每项含 `src` / `headSrc` / `mood` / `widthRpx`，可用 `moodAliases` 把一个 mood 复用已有表情，如 `warn: 'grumpy'`）、`THEME_MASCOT`（主题 → 角色）、`activeMascot` / `activeMascotBaseStyle`、`autoMood`、`setMascotStyle` / `setAutoMood` / `refreshMascots`。角色可带 `ready: false` 表示素材未齐，`activeMascot` 会回退到 `FALLBACK_MASCOT_ID`（当前哪吒）。storage：`muyian_mascot_style_v1:<角色id>`、`muyian_mascot_auto_mood_v1`；旧 `muyian_nezha_v1` 自动迁移。素材在 `static/<角色>/`。新增角色只改这个模块 + 放图 + 改主题映射，页面不要写死角色名或路径。
 
 ## components/
 

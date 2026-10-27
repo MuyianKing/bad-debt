@@ -697,7 +697,7 @@ function goCategories() {
   font-weight: 600;
   box-shadow: var(--shadow-card-soft);
 }
-/* 分类区右下角角色：固定贴在键盘上沿，只做展示，不拦截分类点击 */
+/* 分类区右下角角色：固定贴在键盘上沿（不留间隙），只做展示，不拦截分类点击 */
 .cat-mascot {
   position: absolute;
   right: 40rpx;
@@ -706,7 +706,6 @@ function goCategories() {
   display: flex;
   flex-direction: row;
   align-items: flex-end;
-  padding-bottom: 4rpx;
   pointer-events: none;
 }
 .cat-mascot-say {

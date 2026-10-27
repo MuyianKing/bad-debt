@@ -39,7 +39,7 @@
             v-if="activeMascotBaseStyle"
             class="hero-mascot"
             :src="activeMascotBaseStyle.src"
-            :style="{ width: (activeMascotBaseStyle.widthRpx || 236) + 'rpx', bottom: (activeMascotBaseStyle.bottomRpx || 0) + 'rpx' }"
+            :style="{ width: (activeMascotBaseStyle.widthRpx || 236) + 'rpx' }"
             mode="widthFix"
           ></image>
           <view class="deco-scrim"></view>
@@ -754,10 +754,11 @@ onHide(() => {
   height: 130%;
   background: radial-gradient(circle, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0) 70%);
 }
-/* 首页角色：透明 WebP，靠右但留出间距；宽度与上提量由 common/mascots.js 决定 */
+/* 首页角色：透明 WebP，靠右留 20rpx 间距，底边贴紧头图；宽度由 common/mascots.js 决定 */
 .hero-mascot {
   position: absolute;
   right: 20rpx;
+  bottom: 0;
   display: block;
   filter: drop-shadow(0 5rpx 12rpx rgba(90, 40, 0, 0.22));
 }

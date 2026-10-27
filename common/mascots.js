@@ -44,9 +44,8 @@ export const MASCOTS = {
         desc: '牙尖嘴利',
         src: '/static/nezha/grin.webp',
         headSrc: '/static/nezha/head-grin.webp',
-        // 头图里的显示宽度与上提量（rpx）：坏笑这张头更大，上提让嘴露出概览卡
-        widthRpx: 236,
-        bottomRpx: 34
+        // 头图里的显示宽度（rpx）；底边固定贴紧头图，不再按表情上提
+        widthRpx: 236
       },
       {
         id: 'cheer',
@@ -55,8 +54,7 @@ export const MASCOTS = {
         desc: '举拳大笑',
         src: '/static/nezha/cheer.webp',
         headSrc: '/static/nezha/head-cheer.webp',
-        widthRpx: 236,
-        bottomRpx: 0
+        widthRpx: 236
       },
       {
         id: 'grumpy',
@@ -65,8 +63,7 @@ export const MASCOTS = {
         desc: '撇嘴斜眼',
         src: '/static/nezha/grumpy.webp',
         headSrc: '/static/nezha/head-grumpy.webp',
-        widthRpx: 236,
-        bottomRpx: 20
+        widthRpx: 236
       }
     ]
   },
@@ -88,8 +85,7 @@ export const MASCOTS = {
         desc: '扛棒挑眉',
         src: '/static/wukong/grin.webp',
         headSrc: '/static/wukong/head-grin.webp',
-        widthRpx: 236,
-        bottomRpx: 34
+        widthRpx: 236
       },
       {
         id: 'cheer',
@@ -98,8 +94,7 @@ export const MASCOTS = {
         desc: '举棒大笑',
         src: '/static/wukong/cheer.webp',
         headSrc: '/static/wukong/head-cheer.webp',
-        widthRpx: 236,
-        bottomRpx: 0
+        widthRpx: 236
       },
       {
         id: 'grumpy',
@@ -108,8 +103,7 @@ export const MASCOTS = {
         desc: '抱臂撇嘴',
         src: '/static/wukong/grumpy.webp',
         headSrc: '/static/wukong/head-grumpy.webp',
-        widthRpx: 236,
-        bottomRpx: 20
+        widthRpx: 236
       }
     ]
   }
