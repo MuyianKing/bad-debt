@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
@@ -66,9 +67,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.drawBackdrop
@@ -82,11 +88,15 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.material3.Text
 import com.muyian.debt.state.AppState
 import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.LocalRpx
+import com.muyian.debt.ui.theme.accentOnLight
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
 
@@ -102,7 +112,7 @@ private fun mascotBitmap(context: Context, asset: String): Bitmap? = synchronize
     }
 }
 
-/** 本地图片（玻璃背景图/账单图）的解码缓存，多处页面共用。 */
+/** 本地图片（背景图/账单图）的解码缓存，多处页面共用。 */
 @Composable
 fun rememberFileBitmap(path: String?): Bitmap? {
     val clean = path?.removePrefix("file://").orEmpty()
@@ -199,7 +209,7 @@ fun Modifier.liquidGlass(
     val p = LocalPalette.current
     val actual = shape ?: RoundedCornerShape(rpx(30))
     val k = (alpha ?: 1f).coerceIn(0.15f, 1f)
-    // 有整屏底图（玻璃背景图/主题渐变）且系统支持 RenderEffect 时，走真采样 + 模糊 + 折射
+    // 有整屏底图（背景图/主题渐变）且系统支持 RenderEffect 时，走真采样 + 模糊 + 折射
     val art = LocalGlassArt.current
     if (art != null && isRenderEffectSupported()) {
         val density = LocalDensity.current
@@ -557,7 +567,7 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .clickable(interactionSource = source, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        AppIcon("plus", if (liquid) p.text else Color.White, 26.dp, 2.6f)
+        AppIcon("plus", if (liquid) p.text else p.inkOnPrimary, 26.dp, 2.6f)
     }
 }
 
@@ -571,7 +581,7 @@ fun AppSwitch(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> 
         label = "switch-knob"
     )
     val track by animateColorAsState(
-        if (checked) p.primary else p.fill,
+        if (checked) p.accentOnLight else p.fill,
         tween(200, easing = Motion.InOut),
         label = "switch-track"
     )
@@ -609,39 +619,67 @@ fun MiniToggle(
     onSelect: (String) -> Unit
 ) {
     val p = LocalPalette.current
+    val shape = RoundedCornerShape(rpx(14))
+    val innerShape = RoundedCornerShape(rpx(11))
+    val density = LocalDensity.current
+    val selIndex = options.indexOf(selected).coerceAtLeast(0)
+
+    // 槽位统一等宽（按最宽字重预留）：滑块平移时整体几何不随选中项跳变
+    val measurer = rememberTextMeasurer()
+    val rpxScale = LocalRpx.current
+    val labelSize = rsp(21)
+    val layout = remember(options, density, rpxScale, labelSize) {
+        val style = TextStyle(fontSize = labelSize, fontWeight = FontWeight.SemiBold)
+        val layouts = options.map { measurer.measure(AnnotatedString(it), style) }
+        IntSize(layouts.maxOf { it.size.width }, layouts.maxOf { it.size.height })
+    }
+    val slotW = with(density) { layout.width.toDp() } + rpx(40)
+    val slotH = with(density) { layout.height.toDp() } + rpx(12)
+
+    // 一条动画同时驱动滑块位移、文字颜色与字重；静止态与逐项变色完全一致
+    val slide by animateFloatAsState(
+        targetValue = selIndex.toFloat(),
+        animationSpec = tween(220, easing = Motion.Out),
+        label = "mini-slide"
+    )
+
     Row(
         modifier
-            .clip(RoundedCornerShape(rpx(14)))
+            .clip(shape)
             .then(
-                if (glassStyle == GlassStyle.Liquid) Modifier.liquidGlass(shape = RoundedCornerShape(rpx(14)))
+                if (glassStyle == GlassStyle.Liquid) Modifier.liquidGlass(shape = shape)
                 else Modifier.background(p.fill)
             )
-            .padding(rpx(4)),
-        horizontalArrangement = Arrangement.spacedBy(rpx(2))
+            .padding(rpx(4))
     ) {
-        for (option in options) {
-            val active = option == selected
-            val bg by animateColorAsState(
-                if (active) p.raised else Color.Transparent,
-                tween(180, easing = Motion.InOut),
-                label = "mini-bg"
+        Box {
+            Box(
+                Modifier
+                    .offset(x = slotW * slide)
+                    .width(slotW)
+                    .height(slotH)
+                    .clip(innerShape)
+                    .background(p.raised)
             )
-            val fg by animateColorAsState(
-                if (active) p.primaryDeep else p.sub,
-                tween(180, easing = Motion.InOut),
-                label = "mini-fg"
-            )
-            Text(
-                option,
-                color = fg,
-                fontSize = rsp(21),
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(rpx(11)))
-                    .background(bg)
-                    .clickable { onSelect(option) }
-                    .padding(horizontal = rpx(20), vertical = rpx(6))
-            )
+            Row {
+                options.forEachIndexed { i, option ->
+                    val away = abs(slide - i).coerceIn(0f, 1f)
+                    Text(
+                        option,
+                        color = lerp(p.primaryDeep, p.sub, away),
+                        fontSize = rsp(21),
+                        fontWeight = FontWeight((400f + 200f * (1f - away)).roundToInt()),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .width(slotW)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onSelect(option) }
+                            .padding(horizontal = rpx(20), vertical = rpx(6))
+                    )
+                }
+            }
         }
     }
 }
@@ -668,7 +706,8 @@ fun IconBlock(
     size: Int = 48,
     iconSize: Int = 16,
     modifier: Modifier = Modifier,
-    solid: Boolean = true
+    solid: Boolean = true,
+    tint: Color = Color.White
 ) {
     Box(
         modifier = modifier
@@ -677,7 +716,7 @@ fun IconBlock(
             .background(bg),
         contentAlignment = Alignment.Center
     ) {
-        AppIcon(icon, Color.White, iconSize.dp, solid = solid)
+        AppIcon(icon, tint, iconSize.dp, solid = solid)
     }
 }
 
@@ -688,7 +727,8 @@ fun IconBlock(
     size: Int = 48,
     iconSize: Int = 16,
     modifier: Modifier = Modifier,
-    solid: Boolean = true
+    solid: Boolean = true,
+    tint: Color = Color.White
 ) {
     Box(
         modifier = modifier
@@ -697,7 +737,7 @@ fun IconBlock(
             .background(bg),
         contentAlignment = Alignment.Center
     ) {
-        AppIcon(icon, Color.White, iconSize.dp, solid = solid)
+        AppIcon(icon, tint, iconSize.dp, solid = solid)
     }
 }
 
@@ -735,24 +775,20 @@ fun TopBar(
     actions: (@Composable RowScope.() -> Unit)? = null
 ) {
     val p = LocalPalette.current
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .navBarBackground(solid)
             .statusBarsPadding()
-            .padding(horizontal = rpx(20), vertical = rpx(12)),
-        verticalAlignment = Alignment.CenterVertically
     ) {
+        // 标题按整屏中线居中：右侧操作区比返回键宽时也不会把标题挤偏
         Box(
             Modifier
-                .size(rpx(72))
-                .clip(CircleShape)
-                .pressable(p.fill, onBack),
+                .fillMaxWidth()
+                .align(Alignment.Center)
+                .padding(horizontal = rpx(120), vertical = rpx(12)),
             contentAlignment = Alignment.Center
         ) {
-            AppIcon("chevron-left", p.text, 22.dp)
-        }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             if (titleContent != null) titleContent() else Text(
                 title,
                 color = p.text,
@@ -762,10 +798,27 @@ fun TopBar(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        if (actions != null) {
-            Row(verticalAlignment = Alignment.CenterVertically, content = actions)
-        } else {
-            Spacer(Modifier.width(rpx(72)))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = rpx(20), vertical = rpx(12)),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(rpx(72))
+                    .clip(CircleShape)
+                    .pressable(p.fill, onBack),
+                contentAlignment = Alignment.Center
+            ) {
+                AppIcon("chevron-left", p.text, 22.dp)
+            }
+            Spacer(Modifier.weight(1f))
+            if (actions != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, content = actions)
+            } else {
+                Spacer(Modifier.width(rpx(72)))
+            }
         }
     }
 }

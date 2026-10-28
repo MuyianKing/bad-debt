@@ -128,6 +128,7 @@ class BillSheetActivity : Activity() {
     private var inChip: TextView? = null
     private val categoryChips = ArrayList<Pair<TextView, String>>()
     private var closing = false
+    private var savedOk = false
     private var noticeId = 0
     private var screenReceiver: BroadcastReceiver? = null
     private val timeoutTask = Runnable { closeSheet() }
@@ -211,7 +212,15 @@ class BillSheetActivity : Activity() {
         uiHandler.removeCallbacks(timeoutTask)
         uiHandler.removeCallbacks(finishTask)
         unregisterScreenOff()
-        // 取消/超时/熄屏/保存都撤掉对应的兜底通知；取消即丢弃这一笔
+        // 取消/超时/熄屏/保存都撤掉对应的兜底通知；
+        // 未保存就销毁时丢弃这一笔（账本标记 discarded），保存过则只关队列
+        if (!savedOk && billJson.isNotEmpty()) {
+            try {
+                MuyianBillCore.discardSheetBill(applicationContext, billJson)
+            } catch (e: Exception) {
+                Log.w("MuyianBill", "discard sheet bill failed", e)
+            }
+        }
         MuyianBillCore.cancelPendingNotice(applicationContext, noticeId)
         super.onDestroy()
         try {
@@ -295,6 +304,17 @@ class BillSheetActivity : Activity() {
         meta.setTextColor(0xFF8A90A0.toInt())
         meta.setPadding(0, dp(2), 0, dp(10))
         box.addView(meta)
+
+        val needsReview = data.optBoolean("needsReview", false) ||
+            data.optDouble("confidence", 1.0) < 0.60
+        if (needsReview) {
+            val hint = TextView(this)
+            hint.text = "识别可能有误，请核对金额与分类"
+            hint.textSize = 12f
+            hint.setTextColor(0xFFC8791A.toInt())
+            hint.setPadding(0, 0, 0, dp(8))
+            box.addView(hint)
+        }
 
         val amountRow = LinearLayout(this)
         amountRow.orientation = LinearLayout.HORIZONTAL
@@ -419,6 +439,7 @@ class BillSheetActivity : Activity() {
             Toast.makeText(this, "保存失败，请重试", Toast.LENGTH_SHORT).show()
             return
         }
+        savedOk = true
         closeSheet()
     }
 

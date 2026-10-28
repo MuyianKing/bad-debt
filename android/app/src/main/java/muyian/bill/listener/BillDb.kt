@@ -495,6 +495,8 @@ internal fun openDb(context: Context): SQLiteDatabase {
             } catch (e: Exception) {
                 // column already exists
             }
+            // 自动记账账本、待确认队列、诊断记录（新增表，不影响旧库）
+            CaptureLedger.ensureSchema(db)
             schemaReady = true
         }
     }

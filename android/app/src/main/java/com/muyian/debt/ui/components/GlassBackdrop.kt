@@ -41,7 +41,7 @@ import com.muyian.debt.ui.theme.LocalPalette
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** 整屏的玻璃底图：取设置里的玻璃背景图，没设置时保持透明。 */
+/** 整屏背景图：取设置里的背景图，没设置时保持透明。 */
 @Immutable
 class GlassArt(
     val image: ImageBitmap?,
@@ -56,7 +56,7 @@ val LocalGlassArt = staticCompositionLocalOf<GlassArt?> { null }
 
 /**
  * 液态玻璃的采样源。这里不再让卡片自己去采样页面（首页背后只有纯色），
- * 而是把玻璃背景图当成一张整屏壁纸，卡片按自己的窗口位置取其中一块，
+ * 而是把背景图当成一张整屏壁纸，卡片按自己的窗口位置取其中一块，
  * 再交给 Kyant backdrop 做模糊和边缘折射。页面本身仍然是统一的 bg 纯色。
  */
 @Composable

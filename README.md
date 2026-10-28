@@ -26,8 +26,8 @@ muyian/
         │       ├── theme/Theme.kt            # 三主题设计令牌（Palette）
         │       ├── icons/                    # 24x24 图标路径与 Compose 绘制
         │       ├── components/               # 玻璃卡、角色、账单列表、弹层、滚轮、动效
-        │       └── screens/                  # 首页/记一笔/统计/日历/分类/设置/导入/备份
-        └── muyian/bill/listener/              # 原生核心：hybrid.kt + BillDb/SystemPerms/XlsxReader/PendingNotices + Activities/Services
+        │       └── screens/                  # 首页/记一笔/统计/日历/分类/设置/识别记录/导入/备份
+        └── muyian/bill/listener/              # 原生核心：Capture* 引擎 + hybrid.kt 门面 + BillDb/SystemPerms/XlsxReader/PendingNotices + Activities/Services
 ```
 
 ## 数据设计

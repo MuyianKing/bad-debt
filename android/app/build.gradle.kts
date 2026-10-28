@@ -13,7 +13,7 @@ android {
         applicationId = "com.muyian.debt"
         minSdk = 23
         targetSdk = 33
-        versionCode = 100
+        versionCode = 101
         versionName = "0.1.0"
         vectorDrawables.useSupportLibrary = true
     }

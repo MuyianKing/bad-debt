@@ -11,16 +11,18 @@ import com.muyian.debt.data.fmtMoneyInput
 
 sealed class Screen {
     data object Home : Screen()
+    data object Menu : Screen()
     data object Add : Screen()
     data object Stats : Screen()
     data object Calendar : Screen()
     data object Categories : Screen()
     data object Settings : Screen()
+    data object Capture : Screen()
     data object Import : Screen()
     data object Backup : Screen()
 }
 
-/** 页面进入方向：首页按钮等默认纵向；抽屉菜单走横向。 */
+/** 页面进入方向：首页按钮等默认纵向；菜单页与菜单项走横向。 */
 enum class NavMotion { Vertical, Horizontal }
 
 /** 页面栈与记一笔草稿；不持有任何弹层状态。 */

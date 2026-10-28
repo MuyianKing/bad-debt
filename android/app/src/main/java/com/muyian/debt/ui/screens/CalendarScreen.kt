@@ -195,7 +195,7 @@ fun CalendarScreen(app: AppState) {
                                     )
                                     val dayFg by animateColorAsState(
                                         when {
-                                            selected -> Color.White
+                                            selected -> p.inkOnPrimary
                                             isToday -> p.primaryDeep
                                             else -> p.text
                                         },
@@ -289,7 +289,7 @@ fun CalendarScreen(app: AppState) {
                     ) {
                         Text(
                             label,
-                            color = if (active) Color.White else p.sub,
+                            color = if (active) p.inkOnPrimary else p.sub,
                             fontSize = rsp(27),
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
                         )

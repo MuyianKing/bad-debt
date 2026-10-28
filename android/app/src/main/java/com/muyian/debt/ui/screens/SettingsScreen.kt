@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.muyian.debt.state.AppState
+import com.muyian.debt.state.Screen
 import com.muyian.debt.data.Files
 import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.MascotStyle
@@ -70,7 +71,14 @@ import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.components.rememberFileBitmap
 import com.muyian.debt.ui.theme.AllPalettes
+import com.muyian.debt.ui.theme.CUSTOM_INK_DARK
+import com.muyian.debt.ui.theme.CUSTOM_INK_WHITE
+import com.muyian.debt.ui.theme.CUSTOM_THEME_ID
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.accentOnLight
+import com.muyian.debt.ui.theme.customPalette
+import com.muyian.debt.ui.theme.isBrightPrimary
+import com.muyian.debt.ui.theme.normalizeInkMode
 import com.muyian.debt.ui.theme.paletteOf
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
@@ -93,19 +101,19 @@ fun SettingsScreen(app: AppState) {
         refresh()
     }
 
-    val glassBgBitmap = rememberFileBitmap(app.glassBg)
+    val bgImageBitmap = rememberFileBitmap(app.bgImage)
 
-    val glassBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val bgImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val path = Files.copyUriToFiles(ctx, uri, "glassbg")
+        val path = Files.copyUriToFiles(ctx, uri, "bgimage")
         if (path == null) {
             app.showToast("读取图片失败")
             return@rememberLauncherForActivityResult
         }
-        val old = app.glassBg
-        app.updateGlassBg(path)
+        val old = app.bgImage
+        app.updateBgImage(path)
         Files.delete(old)
-        app.showToast("已设置玻璃背景图")
+        app.showToast("已设置背景图")
     }
 
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -113,15 +121,15 @@ fun SettingsScreen(app: AppState) {
         app.showToast(if (it) "通知权限已开启" else "请在系统设置中手动允许通知")
     }
 
-    fun chooseGlassBg() {
+    fun chooseBgImage() {
         app.actionSheet = ActionSheetState(
             listOf("选择图片" to false, "恢复默认" to false)
         ) { index ->
             if (index == 0) {
-                glassBgPicker.launch("image/*")
+                bgImagePicker.launch("image/*")
             } else {
-                val old = app.glassBg
-                app.updateGlassBg("")
+                val old = app.bgImage
+                app.updateBgImage("")
                 Files.delete(old)
                 app.showToast("已恢复默认")
             }
@@ -155,7 +163,7 @@ fun SettingsScreen(app: AppState) {
                     .padding(rpx(26))
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconBlock("droplet", Brush.linearGradient(p.gradPrimary), 48, 16)
+                    IconBlock("droplet", Brush.linearGradient(p.gradPrimary), 48, 16, tint = p.inkOnPrimary)
                     Spacer(Modifier.width(rpx(14)))
                     Column {
                         Text("主题", color = p.text, fontSize = rsp(30))
@@ -167,7 +175,7 @@ fun SettingsScreen(app: AppState) {
                     for (tp in AllPalettes) {
                         val active = p.id == tp.id
                         val borderColor by animateColorAsState(
-                            if (active) p.primary else Color.Transparent,
+                            if (active) p.accentOnLight else Color.Transparent,
                             tween(200, easing = Motion.InOut),
                             label = "theme-border"
                         )
@@ -218,7 +226,7 @@ fun SettingsScreen(app: AppState) {
                                             .clip(CircleShape)
                                             .background(p.card),
                                         contentAlignment = Alignment.Center
-                                    ) { AppIcon("check", p.primary, 12.dp, 3.4f) }
+                                    ) { AppIcon("check", p.accentOnLight, 12.dp, 3.4f) }
                                 }
                             }
                             Text(tp.name, color = p.text, fontSize = rsp(27), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = rpx(12)))
@@ -226,6 +234,8 @@ fun SettingsScreen(app: AppState) {
                         }
                     }
                 }
+                Spacer(Modifier.height(rpx(16)))
+                CustomThemeCell(app)
                 Spacer(Modifier.height(rpx(24)))
                 DividerLine(color = p.lineSoft)
                 Spacer(Modifier.height(rpx(20)))
@@ -250,7 +260,7 @@ fun SettingsScreen(app: AppState) {
                     for (style in GlassStyle.entries) {
                         val active = app.glassStyle == style
                         val borderColor by animateColorAsState(
-                            if (active) p.primary else Color.Transparent,
+                            if (active) p.accentOnLight else Color.Transparent,
                             tween(200, easing = Motion.InOut),
                             label = "glass-border"
                         )
@@ -359,7 +369,7 @@ fun SettingsScreen(app: AppState) {
                     for (style in app.activeMascot.styles) {
                         val active = app.baseMascotStyle.id == style.id
                         val borderColor by animateColorAsState(
-                            if (active) p.primary else Color.Transparent,
+                            if (active) p.accentOnLight else Color.Transparent,
                             tween(200, easing = Motion.InOut),
                             label = "mascot-border"
                         )
@@ -400,7 +410,7 @@ fun SettingsScreen(app: AppState) {
                                             .clip(CircleShape)
                                             .background(p.card),
                                         contentAlignment = Alignment.Center
-                                    ) { AppIcon("check", p.primary, 12.dp, 3.4f) }
+                                    ) { AppIcon("check", p.accentOnLight, 12.dp, 3.4f) }
                                 }
                             }
                             Text(style.name, color = p.text, fontSize = rsp(27), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = rpx(12)))
@@ -411,19 +421,18 @@ fun SettingsScreen(app: AppState) {
             }
             }
 
-            if (app.glassStyle == GlassStyle.Liquid) {
-                RiseIn(2, key = "glassbg") {
+            RiseIn(2, key = "bgimage") {
                 SettingGroup {
                     SettingCell(
                         icon = "image",
                         gradient = Brush.linearGradient(p.gradMint),
-                        title = "玻璃背景图",
-                        desc = "液态玻璃采样的图片；不设置时卡片保持全透明",
-                        onClick = ::chooseGlassBg,
+                        title = "背景图",
+                        desc = "全站页面共用的背景图片；不设置时使用主题底色",
+                        onClick = ::chooseBgImage,
                         trailing = {
-                            if (glassBgBitmap != null) {
+                            if (bgImageBitmap != null) {
                                 Image(
-                                    bitmap = glassBgBitmap.asImageBitmap(),
+                                    bitmap = bgImageBitmap.asImageBitmap(),
                                     contentDescription = null,
                                     modifier = Modifier.size(width = rpx(96), height = rpx(60)).clip(RoundedCornerShape(rpx(12))),
                                     contentScale = ContentScale.Crop
@@ -436,7 +445,6 @@ fun SettingsScreen(app: AppState) {
                         }
                     )
                 }
-                }
             }
 
             RiseIn(3, key = "auto") {
@@ -445,6 +453,7 @@ fun SettingsScreen(app: AppState) {
                 SettingCell(
                     icon = "shield",
                     gradient = Brush.linearGradient(p.gradPrimary),
+                    iconTint = p.inkOnPrimary,
                     title = "无障碍服务",
                     state = if (status.accessibility) "已开启" to true else "未开启" to false,
                     desc = "自动记账的核心开关。开启后，你在支付宝/微信等App里完成支付时，孽账会读取支付结果页的文字，在本地解析出待确认账单。",
@@ -459,6 +468,14 @@ fun SettingsScreen(app: AppState) {
                     desc = "补充无障碍覆盖不到的场景：收款到账提醒只在通知栏、熄屏碰卡支付的交易通知。两路来源自动去重，不会重复入账。",
                     action = if (status.notificationListener) null else "去开启",
                     onClick = { NativeStatus.openNotificationListenerSettings(ctx) }
+                )
+                SettingCell(
+                    icon = "list",
+                    gradient = Brush.linearGradient(p.gradMint),
+                    title = "识别记录与诊断",
+                    desc = "查看最近每笔支付为什么被接受或拒绝、今日拒绝原因，并管理参与识别的 App。全部只在本机。",
+                    action = "查看",
+                    onClick = { app.navigate(Screen.Capture) }
                 )
                 SettingCell(
                     icon = "rotate-ccw",
@@ -539,6 +556,7 @@ fun SettingsScreen(app: AppState) {
                 SettingCell(
                     icon = "battery-charging",
                     gradient = Brush.linearGradient(p.gradPrimary),
+                    iconTint = p.inkOnPrimary,
                     title = "电池优化",
                     state = if (status.batteryUnrestricted) "不限制" to true else "受限制" to false,
                     desc = "系统省电策略可能在锁屏后回收后台进程，导致自动记账失效。请把电池策略设为“不限制”。",
@@ -612,7 +630,7 @@ fun SettingsScreen(app: AppState) {
                     .padding(horizontal = rpx(28), vertical = rpx(24))
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconBlock("lock", Brush.linearGradient(p.gradPrimary), 48, 16)
+                    IconBlock("lock", Brush.linearGradient(p.gradPrimary), 48, 16, tint = p.inkOnPrimary)
                     Spacer(Modifier.width(rpx(14)))
                     Text("数据只在本机", color = p.text, fontSize = rsp(27), fontWeight = FontWeight.Bold)
                 }
@@ -627,6 +645,73 @@ fun SettingsScreen(app: AppState) {
             }
             }
         }
+    }
+}
+
+@Composable
+private fun CustomThemeCell(app: AppState) {
+    val p = LocalPalette.current
+    val customP = remember(app.customColor, app.customInk) {
+        customPalette(app.customColor, app.customInk)
+    }
+    val active = p.id == CUSTOM_THEME_ID
+    val inkLabel = when (normalizeInkMode(app.customInk)) {
+        CUSTOM_INK_WHITE -> "白字"
+        CUSTOM_INK_DARK -> "黑字"
+        else -> if (isBrightPrimary(customP.primary)) "自动·深字" else "自动·浅字"
+    }
+    val borderColor by animateColorAsState(
+        if (active) p.accentOnLight else Color.Transparent,
+        tween(200, easing = Motion.InOut),
+        label = "custom-border"
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(rpx(18)))
+            .background(p.card.copy(alpha = if (p.dark) 0.5f else 0.55f))
+            .border(2.dp, borderColor, RoundedCornerShape(rpx(18)))
+            .clickable {
+                app.showColorPicker(app.customColor, app.customInk) { value, ink ->
+                    app.setCustomColor(value, ink)
+                    app.showToast("已切换为自定义主题色")
+                }
+            }
+            .padding(rpx(12)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(rpx(72))
+                .clip(RoundedCornerShape(rpx(20)))
+                .background(Brush.linearGradient(customP.gradPrimary)),
+            contentAlignment = Alignment.Center
+        ) {
+            AppIcon(
+                if (active) "check" else "droplet",
+                customP.inkOnPrimary,
+                20.dp,
+                3.4f
+            )
+        }
+        Spacer(Modifier.width(rpx(16)))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (active) "自定义（使用中）" else "自定义",
+                color = p.text,
+                fontSize = rsp(27),
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "${app.customColor} · $inkLabel",
+                color = p.sub,
+                fontSize = rsp(21),
+                modifier = Modifier.padding(top = rpx(4))
+            )
+        }
+        Text("取色", color = p.primaryDeep, fontSize = rsp(25), fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(rpx(4)))
+        AppIcon("chevron-right", p.dim, 16.dp)
     }
 }
 
@@ -654,7 +739,8 @@ private fun SettingCell(
     switch: Boolean? = null,
     onSwitch: ((Boolean) -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
-    chevron: Boolean = action != null
+    chevron: Boolean = action != null,
+    iconTint: Color = Color.White
 ) {
     val p = LocalPalette.current
     Column(Modifier.fillMaxWidth()) {
@@ -668,7 +754,7 @@ private fun SettingCell(
             Box(
                 Modifier.size(rpx(48)).clip(RoundedCornerShape(rpx(15))).background(gradient),
                 contentAlignment = Alignment.Center
-            ) { AppIcon(icon, Color.White, 16.dp) }
+            ) { AppIcon(icon, iconTint, 16.dp) }
             Spacer(Modifier.width(rpx(14)))
             Column(Modifier.weight(1f)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

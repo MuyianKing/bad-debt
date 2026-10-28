@@ -1,30 +1,31 @@
 # 布局与交互
 
-> 本文件覆盖首页抽屉、首页头区角色、吸顶导航、分类拖拽与子类展开。色彩与组件基线见 `20-ui-basics.md`。
+> 本文件覆盖首页菜单页、首页头区角色、吸顶导航、分类拖拽与子类展开。色彩与组件基线见 `20-ui-basics.md`。
 
-## 首页侧滑抽屉
+## 首页菜单页（原侧滑抽屉）
 
-- 首页左上角为**侧滑抽屉**（`HomeScreen` 的 `drawerProgress` + `Drawer` 面板）。抽屉宽度 `min(250.dp, 屏宽 × 0.78)`，首页内容与抽屉用 `graphicsLayer { translationX = drawerWidthPx * progress }` 同步平移，遮罩 `alpha = progress`。
-- 手势用 `pointerInput` + `awaitEachGesture` 在整个首页上生效：按下后按水平/垂直位移比判方向，避免抢列表滚动；拖动中实时更新 `drawerProgress`，松手后按是否过半用 280ms `tween` 吸附到 0 或 1。不要改回只在菜单按钮上触发的单向动画。
-- 抽屉菜单跳转用 `app.navigate(screen, NavMotion.Horizontal)`，页面从右往左推入、返回时滑回右侧；首页头区与吸顶栏的按钮仍用默认 `NavMotion.Vertical`（从下往上）。两者只在转场方向上有差别，页面本身不各写动画。
-- 返回键在抽屉打开时先关抽屉（`BackHandler(enabled = drawerProgress > 0.01f)`）；首页按返回键才 `moveTaskToBack(true)`。
-- 悬浮加号 `AppFab` 固定底部、不随抽屉位移，按同一进度淡出（`alpha = 1 - drawerProgress`）。液态玻璃下 `AppFab` 用圆形 `liquidGlass` + 主题色加号，并特殊补一层柔和投影、整圈发丝级高光，以及左上/右下两团较大的软光晕，避免玻璃按钮糊进账单列表；毛玻璃下保持主题渐变 + 白色加号。
+- 菜单是**独立页面** `Screen.Menu`（`ui/screens/MenuScreen.kt`），在 `MainActivity` 的 `AnimatedContent` 中渲染，不再作为首页内嵌组件、遮罩或浮层存在。首页左上角按钮或右滑手势用 `app.navigate(Screen.Menu, NavMotion.Horizontal)` 进入。
+- 转场保留抽屉的方位感：`transitionSpec` 对 `Screen.Menu` 特判——进栈时菜单页从左缘推进、首页向右让位 1/5；出栈原路滑回左缘。菜单项进入其他页面仍走 `NavMotion.Horizontal` 的常规右推。返回键（`MainActivity` 的全局 `BackHandler` → `app.pop()`）逐级回退：其他页面 → 菜单页 → 首页，首页按返回键才 `moveTaskToBack(true)`。
+- 首页只保留「向右滑开菜单」的触发手势：`pointerInput` + `awaitEachGesture` 判水平/垂直位移比（1.2 倍占优且向右），松手触发跳转；不再跟手拖拽，没有遮罩与进度动画。不要恢复跟手位移或「过半才开」的阈值判定。
+- 状态栏图标：菜单页头部与首页头区同用主色渐变，`MainActivity` 对 `Screen.Menu` 沿用 `homeDarkInk` 判定，不要套普通页面的 `!p.dark`。
+- 悬浮加号 `AppFab` 只属于首页，与菜单页无关。液态玻璃下 `AppFab` 用圆形 `liquidGlass` + 主题色加号，并特殊补一层柔和投影、整圈发丝级高光，以及左上/右下两团较大的软光晕，避免玻璃按钮糊进账单列表；毛玻璃下保持主题渐变 + 白色加号。
 
 ## 首页不做权限判断
 
-- 首页与抽屉只展示账单数据与导航入口，不查询无障碍、悬浮窗、通知、电池优化等任何权限状态，也不显示权限提示条或「自动记账运行中/异常」聚合状态。权限检测、授权入口与自恢复统一放在设置页（`AppState.onResume()` 自增 `resumeToken`，页面用 `LaunchedEffect(app.resumeToken)` 重载）。首页不再重复判断。
+- 首页与菜单页只展示账单数据与导航入口，不查询无障碍、悬浮窗、通知、电池优化等任何权限状态，也不显示权限提示条或「自动记账运行中/异常」聚合状态。权限检测、授权入口与自恢复统一放在设置页（`AppState.onResume()` 自增 `resumeToken`，页面用 `LaunchedEffect(app.resumeToken)` 重载）。不要把权限状态卡/行再加回菜单页——它和「设置·关于」进的是同一个页面，重复入口没有意义。
 
 ## 首页头部角色
 
 - 首页头区右侧的角色由 `MascotFace(app, mood, size, head)` 渲染，素材在 `app/src/main/assets/mascots/`，由 `data/Mascots.kt` 统一配置（表情、整身/头像资源、默认表情）。页面里**右侧固定留出间距，不要贴边裁切**。
 - **角色与主题解耦**：`THEME_MASCOT` 决定每套主题用哪个角色；悟空已预置但 `ready = false`，素材到位前回退到哪吒。新增/启用角色只改 `Mascots.kt`，页面不要按 `themeId` 写 if/else，也不要写死角色名或图片路径。
 - 设置页「外观 → {角色}表情」切换基础表情；`autoMood` 开启时，空态/成功态自动换 `mood` 对应的表情，关闭后固定用基础表情。
+- **桌面图标跟随基础表情**：`grin` / `cheer` / `grumpy` 三套图标由 `AndroidManifest.xml` 里的三个 `activity-alias` 提供，`data/LauncherIcon.kt` 在切换表情和 `MainActivity` 启动时按基础表情互斥启用。`autoMood` 只影响页面内角色，不改桌面图标。`MainActivity` 不要自己声明 `MAIN/LAUNCHER`，否则会同时出现两个图标；桌面刷新由系统负责，部分 ROM 有缓存延迟。
 - **主角色一屏最多一处**（记一笔输入行 ≤72 的表情指示不算），分类图标、图表、金额与账单行等数据区不放。角色固定在首页主题渐变头区显示。
 - **月收入 / 本月结余两列直接排在「本月支出」金额下方**，不要再做成压在头区底边的悬浮卡；人物整张脸（含下巴）都要露在外面，角色贴紧头区底边。
 
 ## 角色在各页的落点
 
-- 首页头区 + 抽屉头像；首页空态用 `head` 模式（152）；**日历选中日摘要与账单列表合并为同一张玻璃卡**：摘要区右侧固定整身角色（当前筛选结果里有进账且未倒挂用 `success`，其余用基础表情），左侧保留日期、笔数、收支合计与「角色名：台词」；摘要与列表之间用 1 分隔线，列表用 `flush = true` 去掉内层卡片底，由外层卡统一承载；空日摘要只留日期和台词，卡片下半部分由 128 `head` 空态接手——两种角色不同时出现。
+- 首页头区 + 菜单页头像；首页空态用 `head` 模式（152）；**日历选中日摘要与账单列表合并为同一张玻璃卡**：摘要区右侧固定整身角色（当前筛选结果里有进账且未倒挂用 `success`，其余用基础表情），左侧保留日期、笔数、收支合计与「角色名：台词」；摘要与列表之间用 1 分隔线，列表用 `flush = true` 去掉内层卡片底，由外层卡统一承载；空日摘要只留日期和台词，卡片下半部分由 128 `head` 空态接手——两种角色不同时出现。
 - **记一笔页分类区右下角固定整身角色 + 台词**（绝对定位在分类区，角色底边贴紧键盘上沿，不随分类列表滚动、不占键盘高度；分类滚动内容底部留出足够空间，保证最后一行不被角色压住）；输入行常驻小头像做收支表情指示，保存成功或金额不合法时弹表情反馈（瞬时，不按「一屏一只」算）。
 - 台词按收入/支出分写：空态「进账多少？」/「这笔花在哪？」，输入后「进账啦」/「花哪儿了？」，非法金额提示需大于 0。
 - 统计不在空态放角色，改为总览卡常驻整身角色；结余为负用 `warn`（映射到「不服」），结余为正用 `success`（大笑），持平/无账单用基础表情。
@@ -32,8 +33,8 @@
 
 ## 首页顶部导航吸顶
 
-- 首页顶部导航（菜单 / 月份切换 / 日历 / 统计）是**吸顶栏**：`HomeScreen` 的导航 `Box` 始终固定在 `LazyColumn` 上方，列表滚动后按 `navSolid`（`firstVisibleItemIndex > 0` 或 `firstVisibleItemScrollOffset > 8`）铺上与页面一致的 `glassPageBackground()`（主题底色 + 同一张玻璃背景图），图标从白色换成 `palette.text`。不要用白色半透明实底，也不要让导航跟着头区滚走。
-- 首页 `navSolid` 同时写入 `app.homeNavSolid`，`MainActivity` 据此切换状态栏图标深浅；抽屉打开时强制 `homeNavSolid = false`（保持白色图标）。不要让导航跟着头区滚走。
+- 首页顶部导航（菜单 / 月份切换 / 日历 / 统计）是**吸顶栏**：`HomeScreen` 的导航 `Box` 始终固定在 `LazyColumn` 上方，列表滚动后按 `navSolid`（`firstVisibleItemIndex > 0` 或 `firstVisibleItemScrollOffset > 8`）铺上与页面一致的 `glassPageBackground()`（主题底色 + 同一张背景图），图标从白色换成 `palette.text`。不要用白色半透明实底，也不要让导航跟着头区滚走。
+- 首页 `navSolid` 同时写入 `app.homeNavSolid`，`MainActivity` 据此切换状态栏图标深浅。不要让导航跟着头区滚走。
 
 ## 内页沉浸式顶栏
 

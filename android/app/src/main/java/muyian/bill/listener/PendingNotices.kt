@@ -46,13 +46,14 @@ internal object PendingNotices {
         }
     }
 
+    /** @return false 表示通知没发出去（无权限/系统异常），调用方应保留待确认队列以便下次恢复。 */
     fun post(
         context: Context,
         bill: JSONObject,
         noticeId: Int,
         cats: List<String>,
         accent: Int
-    ) {
+    ): Boolean {
         try {
             createChannel(context)
             val nm = context.getSystemService("notification") as NotificationManager
@@ -69,9 +70,11 @@ internal object PendingNotices {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             nm.notify(noticeId, build(context, bill, pi))
+            return true
         } catch (e: Exception) {
             // Android 13+ 未授予 POST_NOTIFICATIONS 时 notify 会静默失败，只能记日志
             Log.w(TAG, "post pending notice failed", e)
+            return false
         }
     }
 

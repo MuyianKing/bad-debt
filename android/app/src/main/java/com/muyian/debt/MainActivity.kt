@@ -42,6 +42,7 @@ import kotlinx.coroutines.delay
 import com.muyian.debt.data.PrefKeys
 import com.muyian.debt.data.Prefs
 import com.muyian.debt.data.GlassStyle
+import com.muyian.debt.data.LauncherIcon
 import com.muyian.debt.state.AppState
 import com.muyian.debt.state.NavMotion
 import com.muyian.debt.state.Screen
@@ -51,6 +52,7 @@ import com.muyian.debt.ui.components.ConfirmDialogHost
 import com.muyian.debt.ui.components.GlassBackdropHost
 import com.muyian.debt.ui.components.LocalGlassStyle
 import com.muyian.debt.ui.components.DatePickerHost
+import com.muyian.debt.ui.components.ColorPickerSheetHost
 import com.muyian.debt.ui.components.ImagePreviewHost
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.rememberFileBitmap
@@ -58,9 +60,11 @@ import com.muyian.debt.ui.components.PickerSheetHost
 import com.muyian.debt.ui.screens.AddScreen
 import com.muyian.debt.ui.screens.BackupScreen
 import com.muyian.debt.ui.screens.CalendarScreen
+import com.muyian.debt.ui.screens.CaptureScreen
 import com.muyian.debt.ui.screens.CategoriesScreen
 import com.muyian.debt.ui.screens.HomeScreen
 import com.muyian.debt.ui.screens.ImportScreen
+import com.muyian.debt.ui.screens.MenuScreen
 import com.muyian.debt.ui.screens.SettingsScreen
 import com.muyian.debt.ui.screens.StatsScreen
 import com.muyian.debt.ui.theme.LocalPalette
@@ -83,6 +87,7 @@ class MainActivity : ComponentActivity() {
         app = AppState(this)
         app.applyCardTheme()
         app.applyRecentsVisibility()
+        LauncherIcon.sync(this, app.baseMascotStyle.id)
         setContent { MuyianRoot(app) }
     }
 
@@ -108,8 +113,18 @@ private fun MuyianRoot(app: AppState) {
         splashFade.animateTo(0f, tween(100))
         splashFading = false
     }
+    // 首页未吸顶时状态栏压在 Hero 上：自定义亮色主色 / 液态玻璃下 Hero 是浅底，图标要转深色
+    val homeDarkInk = !p.dark &&
+        (app.glassStyle == GlassStyle.Liquid || p.inkOnPrimary != androidx.compose.ui.graphics.Color.White)
     val darkStatusIcons = splashFading ||
-        if (app.current == Screen.Home) app.homeNavSolid && !p.dark else !p.dark
+        if (app.current == Screen.Home) {
+            if (app.homeNavSolid) !p.dark else homeDarkInk
+        } else if (app.current == Screen.Menu) {
+            // 菜单页头部与首页头区同为主色渐变，图标深浅沿用头区判定
+            homeDarkInk
+        } else {
+            !p.dark
+        }
     LaunchedEffect(app.current, darkStatusIcons) {
         delay(60)
         val window = activity.window
@@ -139,6 +154,7 @@ private fun MuyianRoot(app: AppState) {
     BackHandler {
         when {
             app.previewImage != null -> app.previewImage = null
+            app.colorPicker != null -> app.colorPicker = null
             app.datePicker != null -> app.datePicker = null
             app.picker != null -> app.picker = null
             app.actionSheet != null -> app.actionSheet = null
@@ -159,7 +175,7 @@ private fun MuyianRoot(app: AppState) {
         LocalGlassStyle provides app.glassStyle
     ) {
         // 全局壁纸 + 玻璃采样源：所有页面共用同一张背景，玻璃才是“透”而不是贴图
-        GlassBackdropHost(rememberFileBitmap(app.glassBg)) {
+        GlassBackdropHost(rememberFileBitmap(app.bgImage)) {
         Box(Modifier.fillMaxSize()) {
             AnimatedContent(
                 targetState = app.current,
@@ -168,7 +184,32 @@ private fun MuyianRoot(app: AppState) {
                     // 抽屉菜单进来的是横向推进，返回时原路滑回右侧。
                     val forward = app.navForward
                     if (app.navMotion == NavMotion.Horizontal) {
-                        if (forward) {
+                        val menuDirected = (forward && targetState == Screen.Menu) ||
+                            (!forward && initialState == Screen.Menu)
+                        if (menuDirected) {
+                            // 菜单页保留抽屉的方位感：从左缘推进、首页向右让位；返回时原路滑回左缘
+                            if (forward) {
+                                (slideInHorizontally(
+                                    tween(320, easing = Motion.Out),
+                                    initialOffsetX = { -it }
+                                ) + fadeIn(tween(140))).togetherWith(
+                                    slideOutHorizontally(
+                                        tween(320, easing = Motion.Out),
+                                        targetOffsetX = { it / 5 }
+                                    ) + fadeOut(tween(200))
+                                )
+                            } else {
+                                (slideInHorizontally(
+                                    tween(300, easing = Motion.Out),
+                                    initialOffsetX = { it / 5 }
+                                ) + fadeIn(tween(160))).togetherWith(
+                                    slideOutHorizontally(
+                                        tween(300, easing = Motion.Out),
+                                        targetOffsetX = { -it }
+                                    ) + fadeOut(tween(180))
+                                )
+                            }
+                        } else if (forward) {
                             (slideInHorizontally(
                                 tween(320, easing = Motion.Out),
                                 initialOffsetX = { it }
@@ -202,13 +243,18 @@ private fun MuyianRoot(app: AppState) {
                                 scaleOut(tween(250, easing = Motion.InOut), targetScale = 1.005f)
                         )
                     } else {
-                        val exitOffset = if (initialState == Screen.Add) 0.18f else 0.07f
-                        (fadeIn(tween(180, easing = Motion.Out)) +
-                            scaleIn(tween(280, easing = Motion.Out), initialScale = 1.01f)).togetherWith(
-                            fadeOut(tween(170, easing = Motion.InOut)) +
-                                scaleOut(tween(260, easing = Motion.Out), targetScale = 0.97f) +
+                        // 出栈必须是“可见的下落”：两侧页面底色相同，只做淡入淡出会被看成瞬间切换。
+                        val exitOffset = if (initialState == Screen.Add) 0.22f else 0.16f
+                        (fadeIn(tween(200, easing = Motion.Out)) +
+                            scaleIn(tween(300, easing = Motion.Out), initialScale = 0.99f) +
+                            slideInVertically(
+                                tween(300, easing = Motion.Out),
+                                initialOffsetY = { -(it * 0.04f).toInt() }
+                            )).togetherWith(
+                            fadeOut(tween(240, easing = Motion.InOut)) +
+                                scaleOut(tween(280, easing = Motion.Out), targetScale = 0.96f) +
                                 slideOutVertically(
-                                    tween(280, easing = Motion.Out),
+                                    tween(300, easing = Motion.Out),
                                     targetOffsetY = { (it * exitOffset).toInt() }
                                 )
                         )
@@ -218,11 +264,13 @@ private fun MuyianRoot(app: AppState) {
             ) { screen ->
                 when (screen) {
                     Screen.Home -> HomeScreen(app, activity)
+                    Screen.Menu -> MenuScreen(app)
                     Screen.Add -> AddScreen(app)
                     Screen.Stats -> StatsScreen(app)
                     Screen.Calendar -> CalendarScreen(app)
                     Screen.Categories -> CategoriesScreen(app)
                     Screen.Settings -> SettingsScreen(app)
+                    Screen.Capture -> CaptureScreen(app)
                     Screen.Import -> ImportScreen(app)
                     Screen.Backup -> BackupScreen(app)
                 }
@@ -230,6 +278,7 @@ private fun MuyianRoot(app: AppState) {
             ActionSheetHost(app)
             PickerSheetHost(app)
             DatePickerHost(app)
+            ColorPickerSheetHost(app)
             ConfirmDialogHost(app)
             ImagePreviewHost(app)
             AppToastHost(app)

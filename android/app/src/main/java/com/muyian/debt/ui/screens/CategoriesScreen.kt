@@ -95,6 +95,7 @@ import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.accentOnLight
 import com.muyian.debt.ui.theme.hex
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
@@ -468,7 +469,7 @@ fun CategoriesScreen(app: AppState) {
                                     .height(rpx(6))
                                     .graphicsLayer { alpha = underline }
                                     .clip(RoundedCornerShape(rpx(4)))
-                                    .background(p.primary)
+                                    .background(p.accentOnLight)
                             )
                         }
                     }
@@ -654,7 +655,7 @@ fun CategoriesScreen(app: AppState) {
                     .widthIn(max = rpx(640))
                     .fillMaxWidth(0.9f)
                     .clip(RoundedCornerShape(rpx(32)))
-                    .background(if (p.dark) p.raised else Color.White.copy(alpha = 0.97f))
+                    .glass(RoundedCornerShape(rpx(32)))
                     .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {}
                     .padding(start = rpx(32), end = rpx(32), top = rpx(40), bottom = rpx(32))
             ) {
@@ -673,7 +674,7 @@ fun CategoriesScreen(app: AppState) {
                                     .size(rpx(74))
                                     .clip(RoundedCornerShape(rpx(20)))
                                     .background(tintColor(color, p.dark, 0.88f))
-                                    .then(if (active) Modifier.border(3.dp, p.primary, RoundedCornerShape(rpx(20))) else Modifier)
+                                    .then(if (active) Modifier.border(3.dp, p.accentOnLight, RoundedCornerShape(rpx(20))) else Modifier)
                                     .clickable { dlgIcon = ic },
                                 contentAlignment = Alignment.Center
                             ) { AppIcon(ic, color, 19.dp, solid = true) }
@@ -694,21 +695,21 @@ fun CategoriesScreen(app: AppState) {
                         .height(rpx(96))
                         .clip(RoundedCornerShape(rpx(24)))
                         .background(if (inputFocused) p.card else p.primaryWeak)
-                        .border(2.dp, if (inputFocused) p.primary else Color.Transparent, RoundedCornerShape(rpx(24)))
+                        .border(2.dp, if (inputFocused) p.accentOnLight else Color.Transparent, RoundedCornerShape(rpx(24)))
                         .padding(horizontal = rpx(18)),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         Modifier.size(rpx(46)).clip(RoundedCornerShape(rpx(14))).background(p.primaryFill),
                         contentAlignment = Alignment.Center
-                    ) { AppIcon("edit-3", Color.White, 15.dp, 2.2f) }
+                    ) { AppIcon("edit-3", p.inkOnPrimary, 15.dp, 2.2f) }
                     Spacer(Modifier.width(rpx(16)))
                     BasicTextField(
                         value = dlgName,
                         onValueChange = { if (it.length <= 8) dlgName = it },
                         singleLine = true,
                         textStyle = TextStyle(color = p.text, fontSize = rsp(30), fontWeight = FontWeight.Medium),
-                        cursorBrush = SolidColor(p.primary),
+                        cursorBrush = SolidColor(p.primaryDeep),
                         modifier = Modifier.weight(1f),
                         decorationBox = { inner ->
                             Box {

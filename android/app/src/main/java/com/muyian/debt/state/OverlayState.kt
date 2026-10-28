@@ -35,6 +35,13 @@ data class DatePickerState(
     val onConfirm: (Int, Int, Int) -> Unit
 )
 
+/** 自定义主题色取色器：初始主色/字色 + 确认回调。 */
+data class ColorPickerState(
+    val initial: String,
+    val initialInk: String,
+    val onConfirm: (color: String, ink: String) -> Unit
+)
+
 /** 全局弹层与 Toast：页面只改状态位，由 MainActivity 的 Host 统一渲染。 */
 class OverlayState {
     var toastText by mutableStateOf("")
@@ -51,6 +58,7 @@ class OverlayState {
     var actionSheet by mutableStateOf<ActionSheetState?>(null)
     var picker by mutableStateOf<PickerState?>(null)
     var datePicker by mutableStateOf<DatePickerState?>(null)
+    var colorPicker by mutableStateOf<ColorPickerState?>(null)
     var previewImage by mutableStateOf<String?>(null)
 
     fun confirm(
@@ -69,6 +77,10 @@ class OverlayState {
 
     fun showDatePicker(mode: String, year: Int, month: Int, day: Int, onConfirm: (Int, Int, Int) -> Unit) {
         datePicker = DatePickerState(mode, year, month, day, onConfirm)
+    }
+
+    fun showColorPicker(initial: String, initialInk: String, onConfirm: (String, String) -> Unit) {
+        colorPicker = ColorPickerState(initial, initialInk, onConfirm)
     }
 
     fun showPicker(title: String, options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {

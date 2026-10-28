@@ -33,15 +33,18 @@ class AppState(val context: Context) {
     val activeMascot: Mascot get() = theme.activeMascot
     val mascotStyles get() = theme.mascotStyles
     val autoMood get() = theme.autoMood
-    val glassBg get() = theme.glassBg
+    val bgImage get() = theme.bgImage
+    val customColor get() = theme.customColor
+    val customInk get() = theme.customInk
     val baseMascotStyle: MascotStyle get() = theme.baseMascotStyle
 
     fun mascotStyle(mood: String, mode: String = "auto"): MascotStyle = theme.mascotStyle(mood, mode)
     fun setTheme(id: String) = theme.setTheme(id)
+    fun setCustomColor(hex: String, ink: String = customInk) = theme.updateCustomColor(hex, ink)
     fun applyCardTheme() = theme.applyCardTheme()
     fun setMascotStyle(styleId: String): MascotStyle = theme.setMascotStyle(styleId)
     fun updateAutoMood(enabled: Boolean) = theme.updateAutoMood(enabled)
-    fun updateGlassBg(path: String) = theme.updateGlassBg(path)
+    fun updateBgImage(path: String) = theme.updateBgImage(path)
 
     /* ---------- 分类 ---------- */
     val categories: CategoryData get() = categoryStore.categories
@@ -85,6 +88,9 @@ class AppState(val context: Context) {
     var datePicker: DatePickerState?
         get() = overlay.datePicker
         set(value) { overlay.datePicker = value }
+    var colorPicker: ColorPickerState?
+        get() = overlay.colorPicker
+        set(value) { overlay.colorPicker = value }
     var previewImage: String?
         get() = overlay.previewImage
         set(value) { overlay.previewImage = value }
@@ -105,6 +111,9 @@ class AppState(val context: Context) {
 
     fun showPicker(title: String, options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) =
         overlay.showPicker(title, options, selected, onSelect)
+
+    fun showColorPicker(initial: String, initialInk: String, onConfirm: (String, String) -> Unit) =
+        overlay.showColorPicker(initial, initialInk, onConfirm)
 
     /* ---------- 设置 / 刷新 ---------- */
     val hideRecents get() = settings.hideRecents

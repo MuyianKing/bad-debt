@@ -22,4 +22,4 @@
   Compose 的 `CornerBasedShape`（本项目只传 `RoundedCornerShape`）。
 
 未使用上游的壁纸/场景录制机制；采样源改由 `ui/components/GlassBackdrop.kt`
-提供（设置里的玻璃背景图，未设置时保持透明）。
+提供（设置里的背景图，未设置时保持透明）。

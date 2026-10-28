@@ -5,7 +5,14 @@
 ## 表结构
 
 - SQLite：`files/muyian.db`（`BillDb` 内部常量 `DB_NAME`），表 `bills(id, year, month, day, clock, money, bankName, costType, orderRemark, source, sourcePkg, createdAt, reimb, starred, orderNo)`；`orderNo` 为订单/交易单号，单号去重用。
-- 建表与旧库补列都在 `BillDb.kt` 的 `openDb()`：`reimb` / `starred` / `orderNo` 用 try-catch `ALTER TABLE ... ADD COLUMN` 兼容旧库；`billJson()` 对缺失列给默认值（0 / 空串）。
+- 建表与旧库补列都在 `BillDb.kt` 的 `openDb()`：`reimb` / `starred` / `orderNo` 用 try-catch `ALTER TABLE ... ADD COLUMN` 兼容旧库；`billJson()` 对缺失列给默认值（0 / 空串）。`openDb()` 同时调用 `CaptureLedger.ensureSchema()` 建自动记账账本表，并补 `idx_bills_created` / `idx_bills_order` 索引。
+
+## 自动记账账本（capture_ledger / pending_captures / capture_trace）
+
+- `capture_ledger`：一笔交易的身份键与状态。字段 `key, kind(order|session|page|capture|bill), txn_id, pkg, amount, direction, channel, order_no, state(queued|saved|discarded|rejected), reason, confidence, needs_review, created_at, expires_at`；`key` 唯一索引，`expires_at`、`order_no`、`txn_id` 有索引。窗口：单号 24h、会话 15min、宿主页面 24h、捕获 5min、渠道+金额 2min。去重由 `CaptureLedger.claim()` 在单事务内原子裁决，**不要再往 SharedPreferences 写去重 map**。
+- `pending_captures`：待确认队列，`txn_id` 主键 + `bill_json`，进程重启后由 `CaptureEngine.restore()` 恢复；保存/取消/超时/熄屏/通知交接时删除。上限 5 笔。
+- `capture_trace`：本机诊断记录，保留最近 500 条、7 天；默认只存 `text_hash`，只有用户开启「记录页面文本（调试）」才存 `text`。`markState()` 会把保存/丢弃结果回写到对应 `txn_id` 的 trace。
+- 三张表都只由 `CaptureLedger` 读写；页面侧通过 `data/Capture.kt` 读取，不直接拼 SQL/JSON。
 
 ## 金额与分类口径
 

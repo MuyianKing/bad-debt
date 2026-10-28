@@ -61,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -79,6 +80,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.AddDraft
 import com.muyian.debt.state.AppState
 import com.muyian.debt.data.BillWriteResult
@@ -93,12 +95,15 @@ import com.muyian.debt.data.pad2
 import com.muyian.debt.data.todayStr
 import com.muyian.debt.state.ActionSheetState
 import com.muyian.debt.ui.components.DividerLine
+import com.muyian.debt.ui.components.LocalGlassArt
+import com.muyian.debt.ui.components.LocalGlassStyle
 import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.accentOnLight
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
 import kotlinx.coroutines.Job
@@ -328,7 +333,7 @@ fun AddScreen(app: AppState) {
                         Row {
                             Box(
                                 Modifier.width(rpx(140)).height(rpx(66)).clickable {
-                                    if (!income) setDraft(
+                                    if (income) setDraft(
                                         draft.copy(
                                             isIncome = false,
                                             selectedTopIndex = 0,
@@ -347,7 +352,7 @@ fun AddScreen(app: AppState) {
                             }
                             Box(
                                 Modifier.width(rpx(140)).height(rpx(66)).clickable {
-                                    if (income) setDraft(
+                                    if (!income) setDraft(
                                         draft.copy(
                                             isIncome = true,
                                             selectedTopIndex = 0,
@@ -372,7 +377,7 @@ fun AddScreen(app: AppState) {
                                 .width(rpx(130))
                                 .height(rpx(6))
                                 .clip(RoundedCornerShape(rpx(4)))
-                                .background(if (income) p.inn else p.primary)
+                                .background(if (income) p.inn else p.accentOnLight)
                         )
                     }
                 }
@@ -485,7 +490,7 @@ fun AddScreen(app: AppState) {
                     onValueChange = { setDraft(draft.copy(remark = it)) },
                     singleLine = true,
                     textStyle = TextStyle(color = p.text, fontSize = rsp(27)),
-                    cursorBrush = SolidColor(p.primary),
+                    cursorBrush = SolidColor(p.primaryDeep),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { keyboard?.hide() }),
                     modifier = Modifier.weight(1f),
@@ -514,17 +519,17 @@ fun AddScreen(app: AppState) {
             Spacer(Modifier.height(rpx(16)))
             Row(horizontalArrangement = Arrangement.spacedBy(rpx(16)), verticalAlignment = Alignment.CenterVertically) {
                 val reimbFg by animateColorAsState(
-                    if (draft.reimb) Color.White else p.text,
+                    if (draft.reimb) p.inkOnPrimary else p.text,
                     tween(170, easing = Motion.InOut),
                     label = "reimb-fg"
                 )
                 val imgFg by animateColorAsState(
-                    if (draft.imgPath.isNotEmpty()) Color.White else p.sub,
+                    if (draft.imgPath.isNotEmpty()) p.inkOnPrimary else p.sub,
                     tween(170, easing = Motion.InOut),
                     label = "img-fg"
                 )
                 val starFg by animateColorAsState(
-                    if (draft.starred) Color.White else p.sub,
+                    if (draft.starred) p.inkOnPrimary else p.sub,
                     tween(170, easing = Motion.InOut),
                     label = "star-fg"
                 )
@@ -714,11 +719,11 @@ private fun SubPanel(
                             .padding(horizontal = rpx(26), vertical = rpx(12)),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        AppIcon(sub.icon.ifEmpty { "grid" }, if (active) Color.White else p.sub, 15.dp, solid = true)
+                        AppIcon(sub.icon.ifEmpty { "grid" }, if (active) p.inkOnPrimary else p.sub, 15.dp, solid = true)
                         Spacer(Modifier.width(rpx(8)))
                         Text(
                             sub.name,
-                            color = if (active) Color.White else p.sub,
+                            color = if (active) p.inkOnPrimary else p.sub,
                             fontSize = rsp(25),
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
                         )
@@ -796,66 +801,93 @@ private fun KeyButton(key: String, modifier: Modifier = Modifier, onKey: () -> U
     val p = LocalPalette.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val isFn = key == "del" || key == "-" || key == "+"
     val isAgain = key == "again"
     val isSave = key == "save"
+    // 液态玻璃下键帽半透、无硬底边，靠柔阴影从玻璃面板上浮起；毛玻璃保留拟物键帽
+    val liquid = LocalGlassStyle.current == GlassStyle.Liquid && LocalGlassArt.current != null
     val bg = when {
         isSave -> p.primaryFill
         isAgain -> p.primaryWeak
-        isFn -> p.keyFnBg
         else -> p.keyBg
     }
     val edge = when {
         isSave -> p.primaryPress
         isAgain -> p.primaryTint
-        isFn -> p.keyFnEdge
         else -> p.keyEdge
     }
     val textColor = when {
         isSave -> p.inkOnPrimary
         isAgain -> p.primaryDeep
-        isFn -> p.keyFnFg
         else -> p.keyFg
     }
     val pressedBg = when {
         isSave -> p.primaryPress
         isAgain -> bg
-        isFn -> p.keyFnEdge
         else -> p.keyPress
+    }
+    // 半透键帽的取值思路与 frostGlass 一致：材质层的白/灰透明度，不另立主题色
+    val liquidBg = when {
+        isSave -> p.primaryFill
+        isAgain -> p.primaryWeak
+        else -> p.keyBg.copy(alpha = if (p.dark) 0.78f else 0.62f)
+    }
+    val liquidPressed = when {
+        isSave -> p.primaryPress
+        isAgain -> p.primaryWeak
+        else -> p.keyPress.copy(alpha = if (p.dark) 0.92f else 0.88f)
     }
     val edgeThickness = if (pressed) rpx(1) else rpx(3)
     val offset by animateDpAsState(if (pressed) rpx(2) else 0.dp, label = "key")
     val shape = RoundedCornerShape(rpx(18))
+    val label: @Composable () -> Unit = {
+        when (key) {
+                "del" -> AppIcon("delete", p.keyFg, 22.dp)
+            "again" -> Text("再记", color = textColor, fontSize = rsp(29), fontWeight = FontWeight.SemiBold)
+            "save" -> Text("保存", color = textColor, fontSize = rsp(31), fontWeight = FontWeight.Bold, letterSpacing = rsp(2))
+            "-" -> Text("−", color = textColor, fontSize = rsp(38), fontWeight = FontWeight.SemiBold)
+            else -> Text(key, color = textColor, fontSize = rsp(38), fontWeight = FontWeight.SemiBold)
+        }
+    }
     Box(
         modifier
             .height(rpx(86))
             .clickable(interactionSource = source, indication = null, onClick = onKey)
     ) {
-        // 底边对应 CSS 的 box-shadow 0 3rpx 0：按下时键帽下移 2rpx、底边只剩 1rpx
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(rpx(86))
-                .offset(y = offset + edgeThickness)
-                .clip(shape)
-                .background(edge)
-        )
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(rpx(86))
-                .offset(y = offset)
-                .clip(shape)
-                .background(if (pressed) pressedBg else bg),
-            contentAlignment = Alignment.Center
-        ) {
-            when (key) {
-                "del" -> AppIcon("delete", p.sub, 22.dp)
-                "again" -> Text("再记", color = textColor, fontSize = rsp(29), fontWeight = FontWeight.SemiBold)
-                "save" -> Text("保存", color = textColor, fontSize = rsp(31), fontWeight = FontWeight.Bold, letterSpacing = rsp(2))
-                "-" -> Text("−", color = textColor, fontSize = rsp(38), fontWeight = FontWeight.SemiBold)
-                else -> Text(key, color = textColor, fontSize = rsp(38), fontWeight = FontWeight.SemiBold)
-            }
+        if (liquid) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(rpx(86))
+                    .offset(y = offset)
+                    .shadow(
+                        6.dp, shape, clip = false,
+                        ambientColor = Color.Black.copy(alpha = 0.10f),
+                        spotColor = Color.Black.copy(alpha = 0.14f)
+                    )
+                    .clip(shape)
+                    .background(if (pressed) liquidPressed else liquidBg)
+                    .border(0.5.dp, if (p.dark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.85f), shape),
+                contentAlignment = Alignment.Center
+            ) { label() }
+        } else {
+            // 底边对应 CSS 的 box-shadow 0 3rpx 0：按下时键帽下移 2rpx、底边只剩 1rpx
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(rpx(86))
+                    .offset(y = offset + edgeThickness)
+                    .clip(shape)
+                    .background(edge)
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(rpx(86))
+                    .offset(y = offset)
+                    .clip(shape)
+                    .background(if (pressed) pressedBg else bg),
+                contentAlignment = Alignment.Center
+            ) { label() }
         }
     }
 }

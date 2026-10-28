@@ -82,6 +82,7 @@ import com.muyian.debt.data.Stats
 import com.muyian.debt.ui.components.TopBar
 import com.muyian.debt.ui.components.navBottomPadding
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.accentOnLight
 import com.muyian.debt.ui.theme.hex
 import com.muyian.debt.ui.theme.tintColor
 import com.muyian.debt.ui.theme.rpx
@@ -235,10 +236,10 @@ fun StatsScreen(app: AppState) {
         ) {
             item {
                 val cardShape = RoundedCornerShape(rpx(32))
-                val ink = if (liquid) p.text else Color.White
-                val inkSub = if (liquid) p.sub else Color.White.copy(alpha = 0.82f)
-                val inkLine = if (liquid) p.line else Color.White.copy(alpha = 0.32f)
-                val badgeBg = if (liquid) p.fill else Color.White.copy(alpha = 0.18f)
+                val ink = if (liquid) p.text else p.inkOnPrimary
+                val inkSub = if (liquid) p.sub else p.onPrimarySub
+                val inkLine = if (liquid) p.line else p.inkOnPrimary.copy(alpha = 0.32f)
+                val badgeBg = if (liquid) p.fill else p.inkOnPrimary.copy(alpha = 0.18f)
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -392,7 +393,7 @@ fun StatsScreen(app: AppState) {
                                     }
                                     if (chartType == "line") {
                                         val tint = p.primaryTint
-                                        val line = p.primary
+                                        val line = p.accentOnLight
                                         val grow = barGrow.value
                                         Canvas(Modifier.fillMaxSize()) {
                                             if (barSums.size < 2) return@Canvas
@@ -440,7 +441,7 @@ fun StatsScreen(app: AppState) {
                                                             .width(rpx(if (range == "year") 18 else 10))
                                                             .height(rpx((h * grow).roundToInt()))
                                                             .clip(RoundedCornerShape(rpx(if (range == "year") 9 else 5)))
-                                                            .background(p.primary)
+                                                            .background(p.accentOnLight)
                                                     )
                                                 }
                                             }
@@ -632,7 +633,7 @@ fun StatsScreen(app: AppState) {
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
-                .background(p.raised)
+                .glass(RoundedCornerShape(topStart = rpx(28), topEnd = rpx(28)))
                 .navigationBarsPadding()
         ) {
                 Box(Modifier.padding(top = rpx(16), bottom = rpx(4)).width(rpx(72)).height(rpx(8)).clip(RoundedCornerShape(rpx(4))).background(p.line).align(Alignment.CenterHorizontally))

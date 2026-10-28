@@ -176,7 +176,7 @@ fun BillRow(
                 if (bill.reimb == 1) {
                     Text(
                         "报销",
-                        color = p.primary,
+                        color = p.primaryDeep,
                         fontSize = rsp(20),
                         modifier = Modifier
                             .padding(start = rpx(12))

@@ -14,8 +14,9 @@
 | [30-modules.md](30-modules.md) | `data/`、`ui/`、原生核心的职责与唯一来源 | 想新增工具函数/组件/常量前 |
 | [40-data.md](40-data.md) | SQLite 表结构、金额符号、分类存储、旧库兼容、导入与备份 | 改数据库、统计口径、账单字段时 |
 | [50-native-core.md](50-native-core.md) | 原生核心 API、确认弹层、去重、金额择取、服务注册 | 动 `muyian/bill/listener/` 时 |
+| [55-capture-engine.md](55-capture-engine.md) | 自动记账引擎：观察模型、页面分类、交易身份与账本、判定门禁、诊断、实施记录 | 改采集/解析/去重链路前 |
 | [70-datetime.md](70-datetime.md) | 日期字段、日期字符串、`clock`、周边界 | 处理日期、分组、统计区间时 |
-| [80-checklist.md](80-checklist.md) | 提交前 9 项自查 | 每次交付/提交前 |
+| [80-checklist.md](80-checklist.md) | 提交前 10 项自查 | 每次交付/提交前 |
 
 ## 维护约定
 

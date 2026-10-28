@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 识别记录页「扫描其它应用」需要枚举已安装应用；仅本机使用，不联网。
+         默认列表只查内置包名，不会在打开页面时触发该权限。 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- 无障碍自恢复：adb 授予后，App 可自行把无障碍服务补回系统启用列表 -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
@@ -18,6 +21,7 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="孽账"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="false"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Muyian">
@@ -30,12 +34,51 @@
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Muyian"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 桌面图标跟随哪吒表情：三个 alias 互斥启用，由 data/LauncherIcon.kt 切换。
+             MainActivity 不再自己声明 LAUNCHER，否则会同时出现两个图标。 -->
+        <activity-alias
+            android:name="com.muyian.debt.LauncherGrin"
+            android:targetActivity="com.muyian.debt.MainActivity"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:label="孽账"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name="com.muyian.debt.LauncherCheer"
+            android:targetActivity="com.muyian.debt.MainActivity"
+            android:icon="@mipmap/ic_launcher_cheer"
+            android:roundIcon="@mipmap/ic_launcher_cheer_round"
+            android:label="孽账"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name="com.muyian.debt.LauncherGrumpy"
+            android:targetActivity="com.muyian.debt.MainActivity"
+            android:icon="@mipmap/ic_launcher_grumpy"
+            android:roundIcon="@mipmap/ic_launcher_grumpy_round"
+            android:label="孽账"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- 无障碍服务：用户授权后由系统 bind，采集支付结果页文本 -->
         <service
@@ -61,13 +104,16 @@
             </intent-filter>
         </service>
 
-        <!-- 支付后的底部确认弹层：透明 Activity，独立任务、不进最近任务 -->
+        <!-- 支付后的底部确认弹层：透明 Activity，独立任务、不进最近任务。
+             configChanges：转屏/折叠时重建会走 onDestroy 的未保存丢弃分支，
+             用户正在编辑的账单会直接丢，所以自己处理配置变化不重建。 -->
         <activity
             android:name="muyian.bill.listener.BillSheetActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:windowSoftInputMode="adjustResize" />
 
