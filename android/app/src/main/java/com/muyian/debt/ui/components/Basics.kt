@@ -62,7 +62,6 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -76,6 +75,8 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.highlight.HighlightStyle
 import com.kyant.backdrop.isRenderEffectSupported
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
@@ -189,7 +190,11 @@ fun Modifier.glass(
 @Composable
 fun Modifier.liquidGlass(
     shape: Shape? = null,
-    alpha: Float? = null
+    alpha: Float? = null,
+    refractionHeight: Dp = 12.dp,
+    refractionAmount: Dp = 24.dp,
+    chromaticAberration: Boolean = false,
+    surfaceStrength: Float = 1f
 ): Modifier {
     val p = LocalPalette.current
     val actual = shape ?: RoundedCornerShape(rpx(30))
@@ -198,13 +203,18 @@ fun Modifier.liquidGlass(
     val art = LocalGlassArt.current
     if (art != null && isRenderEffectSupported()) {
         val density = LocalDensity.current
-        val blurPx = with(density) { 6.dp.toPx() }
-        val lensHeightPx = with(density) { 22.dp.toPx() }
-        val lensAmountPx = with(density) { 38.dp.toPx() }
+        val blurPx = with(density) { 4.dp.toPx() }
+        val lensHeightPx = with(density) { refractionHeight.toPx() }
+        val lensAmountPx = with(density) { refractionAmount.toPx() }
         val origin = remember { mutableStateOf(Offset.Zero) }
         val backdrop = remember(art, origin) { ScreenArtBackdrop(art, origin) }
         return this
-            .onGloballyPositioned { origin.value = it.positionInRoot() }
+            .onGloballyPositioned { coordinates ->
+                val host = art.hostCoordinates.value
+                if (host != null && host.isAttached && coordinates.isAttached) {
+                    origin.value = host.localPositionOf(coordinates, Offset.Zero)
+                }
+            }
             .drawBackdrop(
             backdrop = backdrop,
             shape = { actual },
@@ -213,19 +223,29 @@ fun Modifier.liquidGlass(
                 vibrancy()
                 // 折射 shader 只支持圆角形；其它形状（如整块矩形）跳过，避免直接崩
                 if (actual is androidx.compose.foundation.shape.CornerBasedShape) {
-                    lens(refractionHeight = lensHeightPx, refractionAmount = lensAmountPx)
+                    lens(
+                        refractionHeight = lensHeightPx,
+                        refractionAmount = lensAmountPx,
+                        depthEffect = chromaticAberration,
+                        chromaticAberration = chromaticAberration
+                    )
                 }
             },
-            // 不画描边/高光边：液态玻璃的边界只靠折射和阴影，避免出现白边
-            highlight = null,
-            shadow = null,
-            innerShadow = null,
+            highlight = if (chromaticAberration) {
+                { Highlight(width = 0.8.dp, blurRadius = 1.4.dp, alpha = 0.82f, style = HighlightStyle.Default) }
+            } else null,
+            shadow = if (chromaticAberration) {
+                { Shadow(radius = 18.dp, offset = DpOffset(0.dp, 5.dp), color = Color.Black.copy(alpha = 0.22f)) }
+            } else null,
+            innerShadow = if (chromaticAberration) {
+                { InnerShadow(radius = 10.dp, offset = DpOffset(0.dp, 4.dp), color = Color.Black.copy(alpha = 0.16f)) }
+            } else null,
             onDrawSurface = {
                 if (art.image != null) {
                     // 壁纸已经按半透明压在底色上，卡片直接透它即可；白衬多给一点，保证小字不发虚
                     drawRect(
-                        if (p.dark) Color.White.copy(alpha = 0.07f * k)
-                        else Color.White.copy(alpha = 0.12f * k)
+                        if (p.dark) Color.White.copy(alpha = 0.035f * k * surfaceStrength)
+                        else Color.White.copy(alpha = 0.065f * k * surfaceStrength)
                     )
                 } else {
                     // 纯色底：保持透明，但给一层极淡的白和最上角的反光，避免看着像平色块
@@ -484,7 +504,12 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                         ambientColor = Color.Black.copy(alpha = 0.14f),
                         spotColor = Color.Black.copy(alpha = 0.22f)
                     )
-                    .liquidGlass(shape = CircleShape)
+                    .liquidGlass(
+                        shape = CircleShape,
+                        refractionHeight = 28.dp,
+                        refractionAmount = 60.dp,
+                        chromaticAberration = true
+                    )
                     .drawBehind {
                         // 左上 / 右下两团大光晕：软扩散，像光打在圆玻璃的两侧
                         val disc = Path().apply { addOval(Rect(Offset.Zero, size)) }
@@ -580,13 +605,17 @@ fun MiniToggle(
     options: List<String>,
     selected: String,
     modifier: Modifier = Modifier,
+    glassStyle: GlassStyle = GlassStyle.Frost,
     onSelect: (String) -> Unit
 ) {
     val p = LocalPalette.current
     Row(
         modifier
             .clip(RoundedCornerShape(rpx(14)))
-            .background(p.fill)
+            .then(
+                if (glassStyle == GlassStyle.Liquid) Modifier.liquidGlass(shape = RoundedCornerShape(rpx(14)))
+                else Modifier.background(p.fill)
+            )
             .padding(rpx(4)),
         horizontalArrangement = Arrangement.spacedBy(rpx(2))
     ) {

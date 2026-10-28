@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.muyian.debt.state.AppState
+import com.muyian.debt.state.NavMotion
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Bills
 import com.muyian.debt.data.GlassStyle
@@ -306,12 +307,12 @@ fun HomeScreen(app: AppState, activity: Activity) {
             }
         }
 
-        // 吸顶导航：始终固定在顶部，滚动后转玻璃底
+        // 吸顶导航：始终固定在顶部，滚动后铺与页面一致的底色 + 壁纸，不用白底
         Box(
             Modifier
                 .fillMaxWidth()
                 .graphicsLayer { translationX = drawerWidthPx * drawerProgress }
-                .background(if (navSolid) (if (p.dark) Color.Black.copy(alpha = 0.82f) else Color.White.copy(alpha = 0.72f)) else Color.Transparent)
+                .then(if (navSolid && !drawerOpen) Modifier.glassPageBackground() else Modifier)
         ) {
             // 左右按钮数不同（左 1 右 2），用 Row 等分空白会把日期推向左侧；改用 Box 以屏幕中线定位
             Box(
@@ -407,7 +408,8 @@ fun HomeScreen(app: AppState, activity: Activity) {
             autoBill = autoBill,
             onCloseAndOpen = { screen ->
                 closeDrawer()
-                app.navigate(screen)
+                // 抽屉是侧边入口，横向推进；首页按钮仍走默认纵向
+                app.navigate(screen, NavMotion.Horizontal)
             }
         )
 
@@ -798,7 +800,15 @@ private fun AutoBillStatusCard(state: AutoBillState, glassStyle: GlassStyle, onC
             .padding(horizontal = rpx(20))
             .padding(bottom = rpx(18))
             .clip(shape)
-            .then(if (liquid) Modifier.liquidGlass(shape = shape) else Modifier.glass(shape = shape))
+            .then(
+                if (liquid) Modifier.liquidGlass(
+                    shape = shape,
+                    refractionHeight = 22.dp,
+                    refractionAmount = 38.dp,
+                    chromaticAberration = true,
+                    surfaceStrength = 1.35f
+                ) else Modifier.glass(shape = shape)
+            )
             .then(
                 if (liquid) Modifier.drawBehind {
                     // 左上 / 右下两团柔光，让玻璃卡在壁纸上有边界，不额外描边

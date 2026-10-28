@@ -20,31 +20,44 @@ sealed class Screen {
     data object Backup : Screen()
 }
 
+/** 页面进入方向：首页按钮等默认纵向；抽屉菜单走横向。 */
+enum class NavMotion { Vertical, Horizontal }
+
 /** 页面栈与记一笔草稿；不持有任何弹层状态。 */
 class NavState(private val categoryState: CategoryState) {
-    val stack = mutableStateListOf<Screen>(Screen.Home)
-    val current: Screen get() = stack.last()
+    private data class Entry(val screen: Screen, val motion: NavMotion)
+
+    private val entries = mutableStateListOf(Entry(Screen.Home, NavMotion.Vertical))
+    val stack: List<Screen> get() = entries.map { it.screen }
+    val current: Screen get() = entries.last().screen
 
     /** 最近一次导航方向：true 进栈，false 出栈。 */
     var navForward by mutableStateOf(true)
         private set
 
-    fun navigate(screen: Screen) {
+    /** 本次转场方向；出栈时取被弹出页面的进入方向，保证原路返回。 */
+    var navMotion by mutableStateOf(NavMotion.Vertical)
+        private set
+
+    fun navigate(screen: Screen, motion: NavMotion = NavMotion.Vertical) {
         navForward = true
-        stack.add(screen)
+        navMotion = motion
+        entries.add(Entry(screen, motion))
     }
 
     fun pop() {
-        if (stack.size > 1) {
+        if (entries.size > 1) {
             navForward = false
-            stack.removeAt(stack.lastIndex)
+            navMotion = entries.last().motion
+            entries.removeAt(entries.lastIndex)
         }
     }
 
     fun popToHome() {
-        if (stack.size > 1) {
+        if (entries.size > 1) {
             navForward = false
-            while (stack.size > 1) stack.removeAt(stack.lastIndex)
+            navMotion = entries.last().motion
+            while (entries.size > 1) entries.removeAt(entries.lastIndex)
         }
     }
 

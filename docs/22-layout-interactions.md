@@ -6,6 +6,7 @@
 
 - 首页左上角为**侧滑抽屉**（`HomeScreen` 的 `drawerProgress` + `Drawer` 面板）。抽屉宽度 `min(250.dp, 屏宽 × 0.78)`，首页内容与抽屉用 `graphicsLayer { translationX = drawerWidthPx * progress }` 同步平移，遮罩 `alpha = progress`。
 - 手势用 `pointerInput` + `awaitEachGesture` 在整个首页上生效：按下后按水平/垂直位移比判方向，避免抢列表滚动；拖动中实时更新 `drawerProgress`，松手后按是否过半用 280ms `tween` 吸附到 0 或 1。不要改回只在菜单按钮上触发的单向动画。
+- 抽屉菜单跳转用 `app.navigate(screen, NavMotion.Horizontal)`，页面从右往左推入、返回时滑回右侧；首页头区与吸顶栏的按钮仍用默认 `NavMotion.Vertical`（从下往上）。两者只在转场方向上有差别，页面本身不各写动画。
 - 返回键在抽屉打开时先关抽屉（`BackHandler(enabled = drawerProgress > 0.01f)`）；首页按返回键才 `moveTaskToBack(true)`。
 - 悬浮加号 `AppFab` 固定底部、不随抽屉位移，按同一进度淡出（`alpha = 1 - drawerProgress`）。液态玻璃下 `AppFab` 用圆形 `liquidGlass` + 主题色加号，并特殊补一层柔和投影、整圈发丝级高光，以及左上/右下两团较大的软光晕，避免玻璃按钮糊进账单列表；毛玻璃下保持主题渐变 + 白色加号。
 
@@ -31,7 +32,7 @@
 
 ## 首页顶部导航吸顶
 
-- 首页顶部导航（菜单 / 月份切换 / 日历 / 统计）是**吸顶栏**：`HomeScreen` 的导航 `Box` 始终固定在 `LazyColumn` 上方，列表滚动后按 `navSolid`（`firstVisibleItemIndex > 0` 或 `firstVisibleItemScrollOffset > 8`）把背景切成半透明玻璃底，图标从白色换成 `palette.text`。
+- 首页顶部导航（菜单 / 月份切换 / 日历 / 统计）是**吸顶栏**：`HomeScreen` 的导航 `Box` 始终固定在 `LazyColumn` 上方，列表滚动后按 `navSolid`（`firstVisibleItemIndex > 0` 或 `firstVisibleItemScrollOffset > 8`）铺上与页面一致的 `glassPageBackground()`（主题底色 + 同一张玻璃背景图），图标从白色换成 `palette.text`。不要用白色半透明实底，也不要让导航跟着头区滚走。
 - 首页 `navSolid` 同时写入 `app.homeNavSolid`，`MainActivity` 据此切换状态栏图标深浅；抽屉打开时强制 `homeNavSolid = false`（保持白色图标）。不要让导航跟着头区滚走。
 
 ## 内页沉浸式顶栏

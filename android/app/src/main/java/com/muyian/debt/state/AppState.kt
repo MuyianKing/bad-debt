@@ -52,7 +52,8 @@ class AppState(val context: Context) {
     val stack get() = nav.stack
     val current get() = nav.current
     val navForward get() = nav.navForward
-    fun navigate(screen: Screen) = nav.navigate(screen)
+    val navMotion get() = nav.navMotion
+    fun navigate(screen: Screen, motion: NavMotion = NavMotion.Vertical) = nav.navigate(screen, motion)
     fun pop() = nav.pop()
     fun popToHome() = nav.popToHome()
     val addDraft get() = nav.addDraft

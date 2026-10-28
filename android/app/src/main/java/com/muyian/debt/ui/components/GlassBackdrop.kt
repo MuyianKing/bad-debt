@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.draw.clipToBounds
@@ -28,11 +30,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.isRenderEffectSupported
 import com.muyian.debt.ui.theme.LocalPalette
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -44,7 +48,8 @@ class GlassArt(
     val background: Color,
     val imageAlpha: Float,
     val screenWidth: Float,
-    val screenHeight: Float
+    val screenHeight: Float,
+    val hostCoordinates: State<LayoutCoordinates?>
 )
 
 val LocalGlassArt = staticCompositionLocalOf<GlassArt?> { null }
@@ -63,17 +68,26 @@ fun GlassBackdropHost(
     val image = remember(bgBitmap) { bgBitmap?.asImageBitmap() }
     val imageAlpha = if (p.dark) 0.45f else 0.50f
     var screen by remember { mutableStateOf(Size.Zero) }
+    val hostCoordinates = remember { mutableStateOf<LayoutCoordinates?>(null) }
     Box(
         Modifier
             .fillMaxSize()
             .background(p.bg)
+            .onGloballyPositioned { hostCoordinates.value = it }
             .onSizeChanged { screen = Size(it.width.toFloat(), it.height.toFloat()) }
     ) {
         if (image != null) {
             Image(
                 bitmap = image,
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = imageAlpha },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = imageAlpha
+                        if (isRenderEffectSupported()) {
+                            renderEffect = BlurEffect(12f, 12f, TileMode.Clamp)
+                        }
+                    },
                 contentScale = ContentScale.Crop
             )
         }
@@ -83,7 +97,8 @@ fun GlassBackdropHost(
                 background = p.bg,
                 imageAlpha = imageAlpha,
                 screenWidth = screen.width,
-                screenHeight = screen.height
+                screenHeight = screen.height,
+                hostCoordinates = hostCoordinates
             )
         ) {
             content()

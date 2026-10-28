@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -209,7 +210,13 @@ fun StatsScreen(app: AppState) {
                 }
             },
             actions = {
-                MiniToggle(listOf("月", "年"), if (range == "month") "月" else "年") {
+                MiniToggle(
+                    listOf("月", "年"),
+                    if (range == "month") "月" else "年",
+                    // 卡片内切换按钮距右侧 32+32；TopBar 自带 20，补 34 再整体右移 10
+                    modifier = Modifier.padding(end = rpx(34)),
+                    glassStyle = app.glassStyle
+                ) {
                     val newRange = if (it == "月") "month" else "year"
                     if (newRange != range) {
                         range = newRange
@@ -321,7 +328,12 @@ fun StatsScreen(app: AppState) {
                             Spacer(Modifier.width(rpx(12)))
                             Text(if (range == "month") "每日统计" else "每月统计", color = p.text, fontSize = rsp(32), fontWeight = FontWeight.SemiBold)
                         }
-                        MiniToggle(listOf("柱状", "折线"), if (chartType == "bar") "柱状" else "折线") {
+                        MiniToggle(
+                            listOf("柱状", "折线"),
+                            if (chartType == "bar") "柱状" else "折线",
+                            modifier = Modifier.offset(x = rpx(10)),
+                            glassStyle = app.glassStyle
+                        ) {
                             chartType = if (it == "柱状") "bar" else "line"
                         }
                     }
@@ -477,7 +489,12 @@ fun StatsScreen(app: AppState) {
                             Spacer(Modifier.width(rpx(12)))
                             Text("分类报表", color = p.text, fontSize = rsp(32), fontWeight = FontWeight.SemiBold)
                         }
-                        MiniToggle(listOf("支出", "收入"), if (donutKind == "expense") "支出" else "收入") {
+                        MiniToggle(
+                            listOf("支出", "收入"),
+                            if (donutKind == "expense") "支出" else "收入",
+                            modifier = Modifier.offset(x = rpx(10)),
+                            glassStyle = app.glassStyle
+                        ) {
                             donutKind = if (it == "支出") "expense" else "income"
                         }
                     }

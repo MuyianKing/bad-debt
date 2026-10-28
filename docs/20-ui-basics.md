@@ -4,7 +4,7 @@
 
 ## 页面结构与导航
 
-- 单 Activity：`MainActivity` + `state/AppState` 的导航栈（`Screen` 枚举、`stack`、`current`、`navigate()`、`pop()`）。页面切换由根节点的 `AnimatedContent` 统一处理，进出栈动画按 `navForward` 区分。
+- 单 Activity：`MainActivity` + `state/AppState` 的导航栈（`Screen` 枚举、`stack`、`current`、`navigate(screen, motion)`、`pop()`）。页面切换由根节点的 `AnimatedContent` 统一处理，进出栈动画按 `navForward` 区分；`navMotion` 决定方向：默认 `Vertical`（从下往上），抽屉菜单进入用 `Horizontal`（从右往左），出栈时按被弹出页面的进入方向原路返回。
 - 新增页面必须同时在 `state/AppState.kt` 的 `Screen` 里加枚举值，并在 `MainActivity` 的 `when (screen)` 中渲染；不要在页面内部自己写 `Activity` 跳转。
 - 全局浮层（Toast、确认框、操作菜单、滚轮选择器、日期选择器、图片预览）由 `AppState` 的状态位驱动，`MainActivity` 末尾固定挂 `AppToastHost` / `ConfirmDialogHost` / `ActionSheetHost` / `PickerSheetHost` / `DatePickerHost` / `ImagePreviewHost`，页面只调 `app.showToast()` / `app.confirm()` / `app.showPicker()` 等方法。
 - 页面根节点用 `statusBarsPadding()` 让顶栏避开状态栏；可滚动内容底部用 `WindowInsets.navigationBars.asPaddingValues()` 补安全区；带输入法的页面用 `imePadding()`。不要写死状态栏高度。
