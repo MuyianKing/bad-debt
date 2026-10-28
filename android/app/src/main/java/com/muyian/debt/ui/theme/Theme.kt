@@ -64,7 +64,6 @@ data class Palette(
     val sub: Color,
     val dim: Color,
     val bg: Color,
-    val pageWash: Color,
     val card: Color,
     val line: Color,
     val lineSoft: Color,
@@ -86,6 +85,15 @@ data class Palette(
     val gradViolet: List<Color>,
     val gradMint: List<Color>,
     val gradRose: List<Color>
+)
+
+/**
+ * 液态玻璃模式的可读性修正：玻璃比毛玻璃透，叠上壁纸后原 sub/dim 灰阶容易糊在背景里。
+ * 只加深这两档灰阶，主文字、强调色、底色不动；毛玻璃仍用原令牌。
+ */
+fun Palette.liquidReadable(): Palette = copy(
+    sub = if (dark) hex("#B9B9C3") else hex("#5F6675"),
+    dim = if (dark) hex("#8C8C97") else hex("#8A92A2")
 )
 
 private val commonBlue = listOf(hex("#74ADFF"), hex("#4489FE"))
@@ -125,8 +133,7 @@ val Wukong = Palette(
     text = hex("#1D2129"),
     sub = hex("#8A90A0"),
     dim = hex("#C2C6D1"),
-    bg = hex("#F7F4EC"),
-    pageWash = hex("#FEF9ED"),
+    bg = hex("#FEF9ED"),
     card = Color.White,
     line = hex("#F2F0EA"),
     lineSoft = Color.Black.copy(alpha = 0.06f),
@@ -164,7 +171,7 @@ val Nezha = Wukong.copy(
     heroFrom = hex("#FF7D63"),
     heroMid = hex("#EA3F30"),
     heroTo = hex("#BB1F19"),
-    pageWash = hex("#FDF1F0"),
+    bg = hex("#FDF1F0"),
     bar = hex("#FF9D8C"),
     gradPrimary = listOf(hex("#FF7D63"), hex("#E8402F"), hex("#C9211B")),
     gradPrimaryStrong = listOf(hex("#FF6A4D"), hex("#E33A2C"), hex("#B81D18"))
@@ -196,7 +203,6 @@ val Shaseng = Wukong.copy(
     sub = hex("#A2A2AA"),
     dim = hex("#6A6A72"),
     bg = Color.Black,
-    pageWash = Color.Black,
     card = hex("#121214"),
     line = hex("#232327"),
     lineSoft = Color.White.copy(alpha = 0.07f),

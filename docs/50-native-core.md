@@ -36,7 +36,7 @@
 - 弃用 API（`AccessibilityNodeInfo.recycle()`、`stopForeground(boolean)`、`Notification.Builder(Context)` / `setPriority()`、`startActivityForResult()`、`SOFT_INPUT_ADJUST_RESIZE`、`statusBarColor` / `navigationBarColor`）必须保留原有版本判断分支，不要强行升级；调用处用 `@Suppress("DEPRECATION")` 标注。重写弃用成员（如 `onBackPressed()`）要用 `@Suppress("OVERRIDE_DEPRECATION")`。
 - 同步块写成独立语句，配合局部变量或辅助方法（如 `showNextSheet()` / `onSheetClosed()`），不要直接赋给 `val`。
 - 无障碍服务注册名固定全限定名 `muyian.bill.listener.MuyianBillAccessibilityService`，配置在 `app/src/main/res/xml/muyian_accessibility_config.xml`；辅助通知监听服务为 `muyian.bill.listener.BillNotificationListener`；两者都在 `android/app/src/main/AndroidManifest.xml` 注册。
-- **无障碍自愈顺序**：MIUI/HyperOS 在强停/清理应用时会把服务从 `enabled_accessibility_services` 里移除。设置页/首页需要检测状态时，必须**先 `repairAccessibilityService()` 再 `isAccessibilityEnabled()`**，自愈成功时同步把 UI 状态置为已开启；顺序反了会出现「服务已静默补回、界面却一直挂着未开启」的误报。`getSelfRepairState()` 只读展示自愈能力状态。
+- **无障碍自愈顺序**：MIUI/HyperOS 在强停/清理应用时会把服务从 `enabled_accessibility_services` 里移除。应用每次回前台（`AppState.onResume()`）都必须**先 `repairAccessibilityIfNeeded()` 再自增 `resumeToken`**，页面随后读到的就是已恢复的状态；设置页「立即恢复」走同一个 `repairAccessibilityService()`。顺序反了会出现「服务已静默补回、界面却一直挂着未开启」的误报。`getSelfRepairState()` 只读展示自愈能力状态。
 
 ## 金额择取
 

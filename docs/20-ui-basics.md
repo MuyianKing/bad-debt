@@ -24,14 +24,14 @@
 
 ## 设计令牌与配色
 
-- 配色/圆角/阴影统一走 `ui/theme/Theme.kt` 的 `Palette`：`primary` / `primaryDeep` / `primaryFill`、`out`（支出红）、`inn`（收入绿）、`text` / `sub` / `dim` 文字层级、`bg` / `pageWash` / `card` / `line` / `lineSoft` / `fill` 面板、`key*` 键盘键帽、`gradPrimary` 等主题渐变。页面通过 `LocalPalette.current` 取色，**禁止硬编码主题色**。
+- 配色/圆角/阴影统一走 `ui/theme/Theme.kt` 的 `Palette`：`primary` / `primaryDeep` / `primaryFill`、`out`（支出红）、`inn`（收入绿）、`text` / `sub` / `dim` 文字层级、`bg` / `card` / `line` / `lineSoft` / `fill` 面板、`key*` 键盘键帽、`gradPrimary` 等主题渐变。页面通过 `LocalPalette.current` 取色，**禁止硬编码主题色**。
 - 填充面（按钮、总览卡、键盘）上的文字与图标用 `inkOnPrimary` / `onPrimarySub`；不要深色字压在主题色上。
 - 装饰性渐变只复用主题令牌（`gradPrimary` / `gradPrimaryStrong` / 分类色块）；不要临时拼颜色，也不要新增光斑、光晕、发光描边。
 - 分段开关/页内小切换用中性轨道 + `raised` 滑块 + 主题色文字，不要整块主题色填充。
 
 ## 通用组件
 
-- `Modifier.glass(shape, alpha)`：半透明玻璃卡；`Modifier.solidCard(shape)`：实底卡；`Modifier.pressable(color, onClick)`：按压反馈。
+- `Modifier.glass(shape, alpha)`：半透明玻璃卡（默认）；`Modifier.liquidGlass(shape, alpha)`：液态玻璃卡（采样玻璃背景图，未设背景图时全透明，不画白边），由设置页的玻璃材质开关决定首页账单卡用哪一档；`Modifier.solidCard(shape)`：实底卡；`Modifier.pressable(color, onClick)`：按压反馈。
 - `GroupTitle`（区块标题）、`AppFab`、`AppSwitch`（开关）、`MiniToggle`、`StateChip`、`IconBlock`、`StatCell`、`DividerLine`、`EmptyCopy`、`TopBar`、`PrimaryButton`、`GhostButton`。
 - `BillList` / `BillRow`：按日分组账单列表，首页与日历页共用；`flush` 为 true 时去掉自带卡片底，供嵌进外层卡片。
 - `MascotFace` / `MascotImage`：角色表情渲染；`WheelPicker`：滚轮选择器。
@@ -40,7 +40,7 @@
 ## 统计页面板写法（勿回退）
 
 - 总览卡只保留「标签 + 大号金额 + 三项指标」，指标靠细分隔线分组，不要再套半透明面板 + 2×2 分格线，也不要星星/圆环装饰。
-- 大号金额用 `rsp(76)` / `FontWeight.SemiBold`，字距收紧；卡片统一 `solidCard` 或 `glass`，按现有页面保持一致。
+- 大号金额用 `rsp(76)` / `FontWeight.SemiBold`，字距收紧；总览卡毛玻璃下用 `primaryFill` 实底 + 白字，液态玻璃下与首页头区一致，改用 `liquidGlass` + 主题文字色。
 - 空状态只留两行文案，不放图标。
 - 区块标题图标用实心字形直接着主题色，不要彩色方块底座。
 - 柱状图必须有 25% 递增的网格线，且**柱高按 `axisMax`（取整后的刻度上限）换算**，不能按实际最大值换算，否则柱顶与左侧刻度对不上；报表表格日期左对齐、金额右对齐、表头弱化到 `rsp(20)` 的 `dim` 色。

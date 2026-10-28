@@ -18,7 +18,7 @@
 
 ## 深色主题（沙僧黑）
 
-- `Palette.dark = true` 时，所有页面、浮层、键盘、滚轮都要用深色令牌：`bg` / `pageWash` / `card` / `line` / `fill` / `raised` / `key*`。禁止写死 `Color.White`、`#fff`、`rgba(29,33,41,...)` 这类浅色值。
+- `Palette.dark = true` 时，所有页面、浮层、键盘、滚轮都要用深色令牌：`bg` / `card` / `line` / `fill` / `raised` / `key*`。禁止写死 `Color.White`、`#fff`、`rgba(29,33,41,...)` 这类浅色值。
 - 深色主题的 `primary` 是**强调色**（亮银，用于柱条、选中描边、图标字面色）；承载白字的实底填充用 `primaryFill` / `primaryPress`（统计总览卡、记一笔保存键）。
 - `Cats.colorHexOf()` + `ui/theme/hex()` 与 `ui/theme/tintColor(base, dark)` 已按主题处理浅底/深底混合，页面不要自己拼浅色底。
 - 日期/期间选择不要用平台 `DatePickerDialog`（深色主题下是白底），统一用 `DatePickerHost`（`WheelPicker` 自绘）或 `AppState.showDatePicker()`。
@@ -32,10 +32,19 @@
 - **记一笔页的分类宫格是例外**：保持克制的原版样式——圆形透明底 + 灰色实体图标，选中项用 `primaryTint` 淡圆底 + `primaryDeep` 主题色图标。
 - 区块标题的图标用实心字形直接着主题色（无底座）；设置项/抽屉这类列表里的功能图标用白色图标压纯色块上。
 
-## 毛玻璃与统一底色
+## 毛玻璃与液态玻璃
 
-- 毛玻璃统一用 `ui/components/Basics.kt` 的 `Modifier.glass()`：浅色主题是白色 72% + 白色描边，深色主题是 `card` 82% + 10% 白描边，外加 `shadow(10.dp)`。
+- 玻璃材质有两档，由设置页「外观 → 玻璃材质」切换，持久化 key `muyian_glass_style_v1`（`frost` / `liquid`），默认 `frost`。读取走 `AppState.glassStyle`，切换走 `AppState.updateGlassStyle()`，类型是 `data/Prefs.kt` 的 `GlassStyle`。
+- 毛玻璃用 `Modifier.glass()`：浅色主题是白色 72% + 白色描边，深色主题是 `card` 82% + 10% 白描边，外加 `shadow(10.dp)`。
+- 液态玻璃用 `Modifier.liquidGlass()`：内置 `com.kyant.backdrop`（Kyant0/AndroidLiquidGlass 2.0.0，Apache-2.0，许可与改动见 `android/third_party/kyant-backdrop/`）做真采样：按卡片窗口位置取一整屏底图的一块，做模糊、边缘折射和轻微提亮，再叠阴影。边缘只画一条发丝级（0.6dp）的迎光高光：左上最亮、往下渐隐；不要加宽描边或整圈高光（会变成“大白边”）。
+- 底图由 `ui/components/GlassBackdrop.kt` 提供：设置页「外观 → 玻璃背景图」单独设置（key `muyian_glass_bg_v1`）；没设置时**全透明**，不掺主题色。底图不会画到页面上，页面底色仍是统一的 `bg` 纯色。
+- 液态玻璃不加宽描边/边框；迎光侧那条发丝级高光是唯一的“边”，卡片边界仍主要靠折射和阴影，不要给卡片补 border。
+- 液态玻璃下 `sub` / `dim` 两档灰阶会经 `Palette.liquidReadable()` 加深（玻璃透底强，叠壁纸后原灰阶会发虚）；`MainActivity` 只在液态玻璃模式提供这份调色板，毛玻璃仍用原令牌。改灰阶时两档都要看。
+- API 31 以下没有 `RenderEffect`，`liquidGlass` 退回自绘的半透玻璃体（不采样）；设置页预览也用这一档。
+- 全局生效：`MainActivity` 用 `GlassBackdropHost` 铺一层全屏壁纸（玻璃背景图，50% 压在 `p.bg` 上），并 provide `LocalGlassStyle`；`Modifier.glass()` 在液态设置下自动委托给 `liquidGlass()`，所以全站卡片（含设置/统计/日历）都跟着切换。需要固定毛玻璃的场合用 `frostGlass()`（设置页的预览就是）。
+- 首页 Hero 和抽屉头部在液态玻璃下本身就是一块玻璃（没有自己的背景）；毛玻璃下用主题渐变。
+- 页面根部不要再写 `.background(p.bg)`，底色由 `GlassBackdropHost` 统一铺；抽屉面板用 `glassPageBackground()`。
 - 实底卡用 `Modifier.solidCard()`；需要强调的实底区域（如统计总览卡）直接用 `primaryFill`，不要再叠 `glass` 把底色冲掉。
-- **首页 / 抽屉 / 记一笔页统一底色**：都用 `pageWash`（浅色是极淡主题色，深色是纯黑），三处保持一致。
-- 玻璃面层次只靠描边 + 阴影；不要用 `Canvas` 画光斑、光晕或 `.page::before` 式的折射层来伪造玻璃。
-- 所有页面的普通卡片都走 `glass` 或 `solidCard`；例外只有统计页总览卡这类 `primaryFill` 实底。
+- **所有页面统一底色**：都用 `p.bg`（与统计页一致；浅色是极淡主题色，深色是纯黑），首页、抽屉、记一笔、统计、日历、分类、设置保持一致，且不受玻璃材质开关影响。
+- 毛玻璃的层次只靠描边 + 阴影；液态玻璃的采样/模糊/折射全部封在 `liquidGlass()` 内部，页面里不要自己用 `Canvas` 画光斑、光晕或 `.page::before` 式的折射层。
+- 所有页面的普通卡片都走 `glass` / `liquidGlass` / `solidCard`；例外只有统计页总览卡：毛玻璃下保持 `primaryFill` 实底 + 白字，液态玻璃下改用 `liquidGlass` + 主题文字色（与首页头区一致）。

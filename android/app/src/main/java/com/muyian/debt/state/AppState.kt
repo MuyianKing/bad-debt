@@ -8,6 +8,7 @@ import com.muyian.debt.data.Bills
 import com.muyian.debt.data.CategoryData
 import com.muyian.debt.data.Mascot
 import com.muyian.debt.data.MascotStyle
+import com.muyian.debt.data.NativeStatus
 import com.muyian.debt.data.Prefs
 import com.muyian.debt.data.fmtMoney
 import com.muyian.debt.ui.theme.Palette
@@ -32,7 +33,7 @@ class AppState(val context: Context) {
     val activeMascot: Mascot get() = theme.activeMascot
     val mascotStyles get() = theme.mascotStyles
     val autoMood get() = theme.autoMood
-    val heroImg get() = theme.heroImg
+    val glassBg get() = theme.glassBg
     val baseMascotStyle: MascotStyle get() = theme.baseMascotStyle
 
     fun mascotStyle(mood: String, mode: String = "auto"): MascotStyle = theme.mascotStyle(mood, mode)
@@ -40,7 +41,7 @@ class AppState(val context: Context) {
     fun applyCardTheme() = theme.applyCardTheme()
     fun setMascotStyle(styleId: String): MascotStyle = theme.setMascotStyle(styleId)
     fun updateAutoMood(enabled: Boolean) = theme.updateAutoMood(enabled)
-    fun updateHeroImg(path: String) = theme.updateHeroImg(path)
+    fun updateGlassBg(path: String) = theme.updateGlassBg(path)
 
     /* ---------- 分类 ---------- */
     val categories: CategoryData get() = categoryStore.categories
@@ -106,6 +107,7 @@ class AppState(val context: Context) {
 
     /* ---------- 设置 / 刷新 ---------- */
     val hideRecents get() = settings.hideRecents
+    val glassStyle get() = settings.glassStyle
     var homeNavSolid: Boolean
         get() = settings.homeNavSolid
         set(value) { settings.homeNavSolid = value }
@@ -114,8 +116,13 @@ class AppState(val context: Context) {
     val versionName get() = settings.versionName
 
     fun updateHideRecents(hidden: Boolean) = settings.updateHideRecents(hidden)
+    fun updateGlassStyle(style: com.muyian.debt.data.GlassStyle) = settings.updateGlassStyle(style)
     fun applyRecentsVisibility() = settings.applyRecentsVisibility()
-    fun onResume() = settings.onResume()
+    fun onResume() {
+        // 覆盖安装/强停会触发 HyperOS 移除无障碍服务，先自愈再让页面刷新状态。
+        NativeStatus.repairAccessibilityIfNeeded(context)
+        settings.onResume()
+    }
     fun bumpBills() = settings.bumpBills()
 
     fun copyText(text: String) {

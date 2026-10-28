@@ -95,6 +95,20 @@ object NativeStatus {
         RepairResult(false, false, e.javaClass.name)
     }
 
+    /**
+     * 回前台自愈：MIUI/HyperOS 在强停应用时会把无障碍服务从系统列表里移除。
+     * 已授予 WRITE_SECURE_SETTINGS 且服务确实关闭时先补回，页面随后读到的就是已恢复的状态。
+     */
+    fun repairAccessibilityIfNeeded(context: Context): Boolean {
+        val state = try {
+            JSONObject(MuyianBillCore.getSelfRepairState(context))
+        } catch (_: Exception) {
+            return false
+        }
+        if (!state.optBoolean("hasPermission") || state.optBoolean("serviceEnabled")) return false
+        return repairAccessibility(context).serviceEnabled
+    }
+
     fun requestOverlayPermission(context: Context): Boolean =
         runCatching { MuyianBillCore.requestOverlayPermission(context) }.getOrDefault(false)
 

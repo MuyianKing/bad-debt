@@ -146,7 +146,7 @@ fun ImportScreen(app: AppState) {
         result = CommitOutcome()
     }
 
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(Modifier.fillMaxSize()) {
         TopBar(title = "导入账单", onBack = { app.pop() })
 
         AnimatedContent(

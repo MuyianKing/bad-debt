@@ -178,7 +178,7 @@ fun BackupScreen(app: AppState) {
     val stats = remember(backup) { Backup.stats(backup.bills) }
 
 
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(Modifier.fillMaxSize()) {
         TopBar(title = "备份·恢复", onBack = { app.pop() })
 
         AnimatedContent(

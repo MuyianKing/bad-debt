@@ -312,7 +312,7 @@ fun AddScreen(app: AppState) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(p.pageWash).imePadding()) {
+    Column(Modifier.fillMaxSize().imePadding()) {
         Column(Modifier.statusBarsPadding()) {
             Row(
                 Modifier.fillMaxWidth().padding(start = rpx(20), end = rpx(20), top = rpx(12)),

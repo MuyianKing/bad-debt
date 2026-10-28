@@ -40,28 +40,50 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.isRenderEffectSupported
+import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 import androidx.compose.material3.Text
 import com.muyian.debt.state.AppState
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
@@ -79,7 +101,7 @@ private fun mascotBitmap(context: Context, asset: String): Bitmap? = synchronize
     }
 }
 
-/** 本地图片（头图/账单图）的解码缓存，多处页面共用。 */
+/** 本地图片（玻璃背景图/账单图）的解码缓存，多处页面共用。 */
 @Composable
 fun rememberFileBitmap(path: String?): Bitmap? {
     val clean = path?.removePrefix("file://").orEmpty()
@@ -113,21 +135,229 @@ fun Modifier.navBarBackground(solid: Boolean): Modifier {
     )
 }
 
+/** 当前玻璃材质设置；由 MainActivity 提供，glass() 据此自动切换。 */
+val LocalGlassStyle = androidx.compose.runtime.compositionLocalOf { com.muyian.debt.data.GlassStyle.Frost }
+
+/** 强制毛玻璃（设置页的预览、以及需要固定材质的场合用它）。 */
 @Composable
-fun Modifier.glass(
+fun Modifier.frostGlass(
     shape: Shape? = null,
     alpha: Float? = null
 ): Modifier {
     val p = LocalPalette.current
     val actual = shape ?: RoundedCornerShape(rpx(28))
     val bg = if (p.dark) p.card.copy(alpha = alpha ?: 0.82f)
-    else Color.White.copy(alpha = alpha ?: 0.72f)
+    else Color.White.copy(alpha = alpha ?: 0.56f)
     val border = if (p.dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.85f)
+    val sheen = if (p.dark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.34f)
     return this
-        .shadow(10.dp, actual, clip = false, ambientColor = Color.Black.copy(alpha = 0.10f), spotColor = Color.Black.copy(alpha = 0.12f))
         .clip(actual)
         .background(bg)
+        // 斜向反光：纯色底上也能看出一块玻璃，而不是一块平色板
+        .drawWithContent {
+            // 只留左上角反光，不要底部压暗
+            drawRect(
+                Brush.linearGradient(
+                    0f to sheen,
+                    0.48f to Color.Transparent,
+                    start = Offset.Zero,
+                    end = Offset(size.width, size.height)
+                )
+            )
+            drawContent()
+        }
         .border(1.dp, border, actual)
+}
+
+/** 玻璃卡：跟随全局材质设置，液态时直接复用 liquidGlass。 */
+@Composable
+fun Modifier.glass(
+    shape: Shape? = null,
+    alpha: Float? = null
+): Modifier {
+    if (LocalGlassStyle.current == com.muyian.debt.data.GlassStyle.Liquid && LocalGlassArt.current != null) {
+        return liquidGlass(shape, alpha)
+    }
+    return frostGlass(shape, alpha)
+}
+
+/**
+ * 液态玻璃：半透玻璃片，内部叠一层「隔玻璃看到的虚化背景」——几团低透明度色斑 + 压暗层，
+ * 再加斜向柔光、内缘折射环、亮描边和底部暗边。这样即使页面底色很平，玻璃片本身也有层次。
+ * Compose 无法低成本采样背后内容做真模糊，色斑用大半径径向渐变代替，视觉上等价且滚动无额外开销。
+ */
+@Composable
+fun Modifier.liquidGlass(
+    shape: Shape? = null,
+    alpha: Float? = null
+): Modifier {
+    val p = LocalPalette.current
+    val actual = shape ?: RoundedCornerShape(rpx(30))
+    val k = (alpha ?: 1f).coerceIn(0.15f, 1f)
+    // 有整屏底图（玻璃背景图/主题渐变）且系统支持 RenderEffect 时，走真采样 + 模糊 + 折射
+    val art = LocalGlassArt.current
+    if (art != null && isRenderEffectSupported()) {
+        val density = LocalDensity.current
+        val blurPx = with(density) { 6.dp.toPx() }
+        val lensHeightPx = with(density) { 22.dp.toPx() }
+        val lensAmountPx = with(density) { 38.dp.toPx() }
+        val origin = remember { mutableStateOf(Offset.Zero) }
+        val backdrop = remember(art, origin) { ScreenArtBackdrop(art, origin) }
+        return this
+            .onGloballyPositioned { origin.value = it.positionInRoot() }
+            .drawBackdrop(
+            backdrop = backdrop,
+            shape = { actual },
+            effects = {
+                blur(blurPx)
+                vibrancy()
+                // 折射 shader 只支持圆角形；其它形状（如整块矩形）跳过，避免直接崩
+                if (actual is androidx.compose.foundation.shape.CornerBasedShape) {
+                    lens(refractionHeight = lensHeightPx, refractionAmount = lensAmountPx)
+                }
+            },
+            // 不画描边/高光边：液态玻璃的边界只靠折射和阴影，避免出现白边
+            highlight = null,
+            shadow = null,
+            innerShadow = null,
+            onDrawSurface = {
+                if (art.image != null) {
+                    // 壁纸已经按半透明压在底色上，卡片直接透它即可；白衬多给一点，保证小字不发虚
+                    drawRect(
+                        if (p.dark) Color.White.copy(alpha = 0.07f * k)
+                        else Color.White.copy(alpha = 0.12f * k)
+                    )
+                } else {
+                    // 纯色底：保持透明，但给一层极淡的白和最上角的反光，避免看着像平色块
+                    drawRect(
+                        if (p.dark) Color.White.copy(alpha = 0.03f * k)
+                        else Color.White.copy(alpha = 0.05f * k)
+                    )
+                    val w = size.width
+                    val h = size.height
+                    drawRect(
+                        Brush.linearGradient(
+                            0f to Color.White.copy(alpha = if (p.dark) 0.09f else 0.34f),
+                            0.55f to Color.Transparent,
+                            start = Offset.Zero,
+                            end = Offset(w * 0.9f, h * 0.9f)
+                        )
+                    )
+
+                }
+            }
+        )
+        .drawBehind {
+            // 迎光面一条极细的高亮光线：左上最亮，往右下自然消失，宽度控制在发丝级
+            val outline = actual.createOutline(size, layoutDirection, this)
+            val rim = when (outline) {
+                is Outline.Rectangle -> Path().apply { addRect(outline.rect) }
+                is Outline.Rounded -> Path().apply { addRoundRect(outline.roundRect) }
+                is Outline.Generic -> outline.path
+            }
+            drawPath(
+                rim,
+                Brush.linearGradient(
+                    0f to Color.White.copy(alpha = if (p.dark) 0.9f else 0.85f),
+                    0.32f to Color.White.copy(alpha = 0.28f),
+                    0.62f to Color.Transparent,
+                    start = Offset.Zero,
+                    end = Offset(size.width * 0.3f, size.height)
+                ),
+                style = Stroke(width = 0.6.dp.toPx())
+            )
+        }
+    }
+    val fillTop: Color
+    val fillBottom: Color
+    val bloom: Color
+    val tintA: Color
+    val tintB: Color
+    val veil: Color
+    val sheen: Color
+    val underShade: Color
+    if (p.dark) {
+        fillTop = Color.White.copy(alpha = 0.105f * k)
+        fillBottom = Color.White.copy(alpha = 0.045f * k)
+        bloom = Color.White.copy(alpha = 0.10f * k)
+        tintA = p.primary.copy(alpha = 0.12f * k)
+        tintB = p.primaryLight.copy(alpha = 0.07f * k)
+        veil = Color.Transparent
+        sheen = Color.White.copy(alpha = 0.10f * k)
+        underShade = Color.Black.copy(alpha = 0.34f)
+    } else {
+        fillTop = Color.White.copy(alpha = 0.30f * k)
+        fillBottom = Color.White.copy(alpha = 0.18f * k)
+        bloom = Color.Transparent
+        tintA = p.primary.copy(alpha = 0.05f * k)
+        tintB = p.primaryDeep.copy(alpha = 0.03f * k)
+        veil = Color(0xFF1D2129).copy(alpha = 0.055f)
+        sheen = Color.White.copy(alpha = 0.22f * k)
+        underShade = Color(0xFF2A2F3A).copy(alpha = 0.09f)
+    }
+    return this
+        .shadow(
+            22.dp, actual, clip = false,
+            ambientColor = Color.Black.copy(alpha = if (p.dark) 0.36f else 0.12f),
+            spotColor = Color.Black.copy(alpha = if (p.dark) 0.46f else 0.18f)
+        )
+        .clip(actual)
+        .background(Brush.verticalGradient(listOf(fillTop, fillBottom)))
+        .drawWithContent {
+            val w = size.width
+            val h = size.height
+            // 隔玻璃看到的虚化背景：极淡的主题色，避免玻璃片发灰
+            if (bloom.alpha > 0f) {
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(bloom, Color.Transparent),
+                        center = Offset(w * 0.80f, h * 0.10f),
+                        radius = w * 0.62f
+                    )
+                )
+            }
+            if (tintA.alpha > 0f) {
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(tintA, Color.Transparent),
+                        center = Offset(w * 0.08f, h * 0.96f),
+                        radius = w * 0.78f
+                    )
+                )
+            }
+            if (tintB.alpha > 0f) {
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(tintB, Color.Transparent),
+                        center = Offset(w * 0.98f, h * 0.62f),
+                        radius = w * 0.58f
+                    )
+                )
+            }
+            // 整体压暗一档，让玻璃片比页面“沉”一点，文字更稳
+            if (veil.alpha > 0f) drawRect(veil)
+            // 左上角斜向柔光：玻璃表面的反射，越靠右下越淡
+            drawRect(
+                Brush.linearGradient(
+                    0f to sheen,
+                    0.52f to Color.Transparent,
+                    start = Offset.Zero,
+                    end = Offset(w, h)
+                )
+            )
+            // 底缘内阴影：给玻璃片一个厚度，不压内容
+            val shadeTop = h * 0.70f
+            drawRect(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, underShade),
+                    startY = shadeTop,
+                    endY = h
+                ),
+                topLeft = Offset(0f, shadeTop),
+                size = Size(w, h - shadeTop)
+            )
+            drawContent()
+        }
 }
 
 @Composable
@@ -229,6 +459,7 @@ fun GroupTitle(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
+    val liquid = LocalGlassStyle.current == GlassStyle.Liquid
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "fab")
@@ -245,17 +476,63 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 scaleY = s
                 alpha = appear.value
             }
-            .shadow(
-                14.dp, CircleShape, clip = false,
-                ambientColor = p.primary.copy(alpha = 0.35f),
-                spotColor = p.primary.copy(alpha = 0.35f)
+            .then(
+                if (liquid) Modifier
+                    // 主操作按钮浮在列表上：补一层柔和投影 + 整圈发丝边，避免玻璃糊进账单里
+                    .shadow(
+                        12.dp, CircleShape, clip = false,
+                        ambientColor = Color.Black.copy(alpha = 0.14f),
+                        spotColor = Color.Black.copy(alpha = 0.22f)
+                    )
+                    .liquidGlass(shape = CircleShape)
+                    .drawBehind {
+                        // 左上 / 右下两团大光晕：软扩散，像光打在圆玻璃的两侧
+                        val disc = Path().apply { addOval(Rect(Offset.Zero, size)) }
+                        clipPath(disc) {
+                            val radius = size.minDimension * 1.15f
+                            val glow = if (p.dark) 0.5f else 0.42f
+                            drawRect(
+                                Brush.radialGradient(
+                                    colorStops = arrayOf(
+                                        0f to Color.White.copy(alpha = glow),
+                                        0.55f to Color.White.copy(alpha = glow * 0.35f),
+                                        1f to Color.Transparent
+                                    ),
+                                    center = Offset.Zero,
+                                    radius = radius
+                                )
+                            )
+                            drawRect(
+                                Brush.radialGradient(
+                                    colorStops = arrayOf(
+                                        0f to Color.White.copy(alpha = glow * 0.85f),
+                                        0.55f to Color.White.copy(alpha = glow * 0.3f),
+                                        1f to Color.Transparent
+                                    ),
+                                    center = Offset(size.width, size.height),
+                                    radius = radius
+                                )
+                            )
+                        }
+                        // 发丝边保留，别粗
+                        drawCircle(
+                            color = Color.White.copy(alpha = if (p.dark) 0.45f else 0.4f),
+                            style = Stroke(width = 0.6.dp.toPx())
+                        )
+                    }
+                else Modifier
+                    .shadow(
+                        14.dp, CircleShape, clip = false,
+                        ambientColor = p.primary.copy(alpha = 0.35f),
+                        spotColor = p.primary.copy(alpha = 0.35f)
+                    )
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(p.gradPrimary))
             )
-            .clip(CircleShape)
-            .background(Brush.linearGradient(p.gradPrimary))
             .clickable(interactionSource = source, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        AppIcon("plus", Color.White, 26.dp, 2.6f)
+        AppIcon("plus", if (liquid) p.text else Color.White, 26.dp, 2.6f)
     }
 }
 

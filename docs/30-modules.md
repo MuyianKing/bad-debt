@@ -14,12 +14,12 @@
 - `Stats.kt` / `CalendarModel.kt` / `WeekStats.kt` / `Dates.kt` — 统计、日历、最近 7 日与日期格式化的纯计算；页面只负责动画与绘制。
 - `Backup.kt` / `ImportFlow.kt` / `FilePick.kt` / `Batch.kt` — 备份解析与恢复、钱迹导入流程、SAF 选文件轮询、分块写库；页面不再直接解析原生 JSON。
 - `NativeStatus.kt` — 无障碍/通知/悬浮窗/MIUI 弹层/电池/自愈状态的类型化快照与系统页面跳转。
-- `Files.kt` — 应用私有目录图片复制/删除（账单图、首页头图共用）。
+- `Files.kt` — 应用私有目录图片复制/删除（账单图、玻璃背景图共用）。
 
 ## state/（应用状态）
 
 - `AppState.kt` — 门面，持有 `ThemeState` / `CategoryState` / `NavState` / `OverlayState` / `SettingsState`，保留页面使用的属性名。
-- `ThemeState.kt` — 主题、角色、头图与原生弹层强调色。
+- `ThemeState.kt` — 主题、角色、玻璃背景图与原生弹层强调色。
 - `CategoryState.kt` — 分类读写与深拷贝快照。
 - `NavState.kt` — `Screen`、导航栈、记一笔草稿、首页月份。
 - `OverlayState.kt` — Toast/确认框/操作菜单/选择器/图片预览状态。

@@ -72,9 +72,11 @@ import com.muyian.debt.ui.components.MiniToggle
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.liquidGlass
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.components.stagger
 import com.muyian.debt.data.DonutSlice
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.Stats
 import com.muyian.debt.ui.components.TopBar
 import com.muyian.debt.ui.components.navBottomPadding
@@ -145,6 +147,7 @@ fun StatsScreen(app: AppState) {
         balance > 0 -> "success"
         else -> "idle"
     }
+    val liquid = app.glassStyle == GlassStyle.Liquid
 
     val chartSlots = remember(range, year, month, nowStamp) {
         Stats.chartSlots(range, year, month, nowStamp)
@@ -172,7 +175,7 @@ fun StatsScreen(app: AppState) {
         load()
     }
 
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(Modifier.fillMaxSize()) {
         TopBar(
             title = "",
             onBack = { app.pop() },
@@ -224,12 +227,19 @@ fun StatsScreen(app: AppState) {
             )
         ) {
             item {
+                val cardShape = RoundedCornerShape(rpx(32))
+                val ink = if (liquid) p.text else Color.White
+                val inkSub = if (liquid) p.sub else Color.White.copy(alpha = 0.82f)
+                val inkLine = if (liquid) p.line else Color.White.copy(alpha = 0.32f)
+                val badgeBg = if (liquid) p.fill else Color.White.copy(alpha = 0.18f)
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = rpx(32), vertical = rpx(20))
-                        .clip(RoundedCornerShape(rpx(32)))
-                        .background(p.primaryFill)
+                        .then(
+                            if (liquid) Modifier.liquidGlass(shape = cardShape)
+                            else Modifier.clip(cardShape).background(p.primaryFill)
+                        )
                 ) {
                     Column(
                         Modifier
@@ -239,26 +249,26 @@ fun StatsScreen(app: AppState) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 if (range == "month") "本月支出" else "本年支出",
-                                color = Color.White.copy(alpha = 0.82f),
+                                color = inkSub,
                                 fontSize = rsp(30)
                             )
                             Spacer(Modifier.width(rpx(14)))
                             Text(
                                 "${bills.size} 笔",
-                                color = Color.White.copy(alpha = 0.92f),
+                                color = inkSub,
                                 fontSize = rsp(22),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(rpx(999)))
-                                    .background(Color.White.copy(alpha = 0.18f))
+                                    .background(badgeBg)
                                     .padding(horizontal = rpx(16), vertical = rpx(6))
                             )
                         }
                         Spacer(Modifier.height(rpx(16)))
                         Row(verticalAlignment = Alignment.Bottom) {
-                            Text("¥", color = Color.White.copy(alpha = 0.72f), fontSize = rsp(32), modifier = Modifier.padding(bottom = rpx(10), end = rpx(10)))
+                            Text("¥", color = inkSub, fontSize = rsp(32), modifier = Modifier.padding(bottom = rpx(10), end = rpx(10)))
                                 Text(
                                     fmtMoney(expenseShown),
-                                    color = Color.White,
+                                    color = ink,
                                     fontSize = rsp(78),
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -268,21 +278,21 @@ fun StatsScreen(app: AppState) {
                         Spacer(Modifier.height(rpx(26)))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column {
-                                Text(if (range == "month") "月收入" else "年收入", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
+                                Text(if (range == "month") "月收入" else "年收入", color = inkSub, fontSize = rsp(24))
                                     Text(
                                         fmtMoney(incomeShown),
-                                        color = Color.White,
+                                        color = ink,
                                         fontSize = rsp(32),
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(top = rpx(6)).widthIn(max = rpx(170))
                                     )
                             }
-                            Box(Modifier.padding(horizontal = rpx(44)).width(rpx(1)).height(rpx(52)).background(Color.White.copy(alpha = 0.32f)))
+                            Box(Modifier.padding(horizontal = rpx(44)).width(rpx(1)).height(rpx(52)).background(inkLine))
                             Column {
-                                Text(if (range == "month") "本月结余" else "本年结余", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
+                                Text(if (range == "month") "本月结余" else "本年结余", color = inkSub, fontSize = rsp(24))
                                     Text(
                                         fmtMoney(balanceShown),
-                                        color = Color.White,
+                                        color = ink,
                                         fontSize = rsp(32),
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(top = rpx(6)).widthIn(max = rpx(170))
@@ -321,13 +331,13 @@ fun StatsScreen(app: AppState) {
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val avgColor = p.sub.copy(alpha = 0.6f)
+                            val avgColor = p.inn.copy(alpha = 0.85f)
                             Canvas(Modifier.width(rpx(34)).height(rpx(10))) {
                                 drawLine(
                                     color = avgColor,
                                     start = Offset(0f, size.height / 2),
                                     end = Offset(size.width, size.height / 2),
-                                    strokeWidth = 1.5.dp.toPx(),
+                                    strokeWidth = 1.dp.toPx(),
                                     pathEffect = PathEffect.dashPathEffect(
                                         floatArrayOf(5.dp.toPx(), 4.dp.toPx())
                                     )
@@ -347,22 +357,23 @@ fun StatsScreen(app: AppState) {
                             EmptyCopy("该期间暂无支出", "记一笔后显示每日趋势")
                         }
                     } else {
+                        val chartH = 240
                         Row(Modifier.fillMaxWidth()) {
                             Column(
-                                Modifier.height(rpx(330)).padding(end = rpx(10)),
+                                Modifier.height(rpx(chartH)).padding(end = rpx(10)),
                                 verticalArrangement = Arrangement.SpaceBetween,
                                 horizontalAlignment = Alignment.End
                             ) {
                                 for (t in yTicks) Text(fmtTick(t), color = p.dim, fontSize = rsp(24), maxLines = 1)
                             }
                             Column(Modifier.weight(1f)) {
-                                Box(Modifier.fillMaxWidth().height(rpx(330)).background(Color.Transparent)) {
+                                Box(Modifier.fillMaxWidth().height(rpx(chartH)).background(Color.Transparent)) {
                                     // 网格线
                                     for (i in 0..3) {
                                         Box(
                                             Modifier
                                                 .fillMaxWidth()
-                                                .padding(top = rpx(330 * i / 4))
+                                                .padding(top = rpx(chartH * i / 4))
                                                 .height(rpx(1))
                                                 .background(p.lineSoft)
                                         )
@@ -399,7 +410,7 @@ fun StatsScreen(app: AppState) {
                                         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Bottom) {
                                             for (i in barSums.indices) {
                                                 val v = barSums[i]
-                                                val h = if (v > 0) max(10, (v / axisMax * 328).roundToInt()) else 0
+                                                val h = if (v > 0) max(10, (v / axisMax * (chartH - 2)).roundToInt()) else 0
                                                 val grow = stagger(barGrow.value, i, barSums.size)
                                                 Box(
                                                     Modifier
@@ -425,7 +436,7 @@ fun StatsScreen(app: AppState) {
                                     }
                                     // 平均参考线：与柱子同步从底部升起
                                     if (chartAvg > 0) {
-                                        val avgColor = p.sub.copy(alpha = 0.6f)
+                                        val avgColor = p.inn.copy(alpha = 0.85f)
                                         Canvas(Modifier.fillMaxSize()) {
                                             val ratio = (chartAvg / axisMax).toFloat().coerceIn(0f, 1f)
                                             val y = size.height * (1 - ratio * barGrow.value)
@@ -433,7 +444,7 @@ fun StatsScreen(app: AppState) {
                                                 color = avgColor,
                                                 start = Offset(0f, y),
                                                 end = Offset(size.width, y),
-                                                strokeWidth = 1.5.dp.toPx(),
+                                                strokeWidth = 1.dp.toPx(),
                                                 pathEffect = PathEffect.dashPathEffect(
                                                     floatArrayOf(6.dp.toPx(), 5.dp.toPx())
                                                 )

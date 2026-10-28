@@ -5,7 +5,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,14 +53,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -72,6 +70,9 @@ import androidx.compose.ui.unit.dp
 import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Bills
+import com.muyian.debt.data.GlassStyle
+import com.muyian.debt.data.NativeStatus
+import com.muyian.debt.data.NativeStatusSnapshot
 import com.muyian.debt.state.Screen
 import com.muyian.debt.data.fmtMoney
 import com.muyian.debt.data.fmtNum
@@ -88,30 +89,57 @@ import com.muyian.debt.ui.components.MascotFace
 import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.glassPageBackground
+import com.muyian.debt.ui.components.liquidGlass
 import com.muyian.debt.ui.components.navBottomPadding
 import com.muyian.debt.ui.components.pressable
-import com.muyian.debt.ui.components.rememberFileBitmap
 import com.muyian.debt.ui.components.stagger
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+private data class AutoBillState(val level: String, val title: String, val sub: String)
+
+/** 抽屉底部状态：全量权限聚合，见 docs/22-layout-interactions.md。 */
+private fun autoBillStateOf(s: NativeStatusSnapshot): AutoBillState {
+    val missing = buildList {
+        if (!s.overlay) add("悬浮窗")
+        if (s.popup.miui && (if (s.popup.known) s.popup.miuiPopup != 0 else s.popup.blocked)) add("后台弹出界面")
+        if (!s.notificationsAllowed) add("通知权限")
+        if (!s.batteryUnrestricted) add("电池优化")
+        if (!s.notificationListener) add("通知使用权")
+        if (!s.repair.hasPermission) add("无障碍自恢复")
+    }
+    return when {
+        !s.accessibility -> AutoBillState("off", "自动记账未开启", "点此开启无障碍服务")
+        missing.isNotEmpty() -> {
+            val names = missing.take(2).joinToString("、") +
+                if (missing.size > 2) " 等 ${missing.size} 项" else ""
+            AutoBillState("warn", "自动记账异常", "缺少：$names")
+        }
+        else -> AutoBillState("on", "自动记账运行中", "所需权限已就绪")
+    }
+}
+
 @Composable
 fun HomeScreen(app: AppState, activity: Activity) {
     val p = LocalPalette.current
+    val liquid = app.glassStyle == GlassStyle.Liquid
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var year by remember { mutableIntStateOf(app.homeYear) }
     var month by remember { mutableIntStateOf(app.homeMonth) }
     var bills by remember { mutableStateOf<List<Bill>>(emptyList()) }
     var weekBills by remember { mutableStateOf<List<Bill>>(emptyList()) }
+    var nativeStatus by remember { mutableStateOf(NativeStatus.snapshot(ctx)) }
     val listState = rememberLazyListState()
     val navSolid by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8 } }
 
@@ -143,9 +171,15 @@ fun HomeScreen(app: AppState, activity: Activity) {
     fun load() {
         bills = Bills.month(ctx, year, month)
         loadWeekBills()
+        nativeStatus = NativeStatus.snapshot(ctx)
     }
 
-    LaunchedEffect(app.resumeToken, app.billsVersion) { load() }
+    LaunchedEffect(app.resumeToken, app.billsVersion) {
+        load()
+        // 系统权限页返回后部分 ROM 落盘稍晚，补一次延时刷新
+        delay(500)
+        nativeStatus = NativeStatus.snapshot(ctx)
+    }
 
     val totals = remember(bills) { Stats.totals(bills) }
     val monthExpense = totals.expense
@@ -153,19 +187,20 @@ fun HomeScreen(app: AppState, activity: Activity) {
     val monthBalance = totals.balance
     val groups = remember(bills, year, month) { groupByDay(bills, year, month) }
     val week = remember(weekBills) { WeekStats.last7(weekBills) }
+    val autoBill = remember(nativeStatus) { autoBillStateOf(nativeStatus) }
 
     fun closeDrawer() {
         animateDrawer(0f)
     }
 
     fun openDrawer() {
+        nativeStatus = NativeStatus.snapshot(ctx)
         animateDrawer(1f)
     }
 
     Box(
         Modifier
             .fillMaxSize()
-            .background(p.pageWash)
             .pointerInput(drawerWidthPx) {
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
@@ -226,7 +261,7 @@ fun HomeScreen(app: AppState, activity: Activity) {
             }
             if (groups.isNotEmpty()) {
                 item(key = "week") {
-                    WeekCard(week)
+                    WeekCard(week, app.glassStyle)
                 }
             }
             items(groups, key = { it.day }) { group ->
@@ -235,7 +270,8 @@ fun HomeScreen(app: AppState, activity: Activity) {
                     groups = listOf(group),
                     onRow = { app.showBillActions(it) },
                     onRowLong = { app.requestDeleteBill(it) },
-                    modifier = Modifier.animateItem()
+                    modifier = Modifier.animateItem(),
+                    glassStyle = app.glassStyle
                 )
             }
             if (groups.isEmpty()) {
@@ -289,10 +325,10 @@ fun HomeScreen(app: AppState, activity: Activity) {
                         .align(Alignment.CenterStart)
                         .size(rpx(68))
                         .clip(CircleShape)
-                        .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f), ::openDrawer),
+                        .pressable(if (navSolid || liquid) p.fill else Color.White.copy(alpha = 0.18f), ::openDrawer),
                     contentAlignment = Alignment.Center
                 ) {
-                    AppIcon("menu", if (navSolid) p.text else Color.White, 22.dp)
+                    AppIcon("menu", if (navSolid || liquid) p.text else Color.White, 22.dp)
                 }
                 Row(
                     Modifier
@@ -311,14 +347,14 @@ fun HomeScreen(app: AppState, activity: Activity) {
                     Spacer(Modifier.width(rpx(6) + 15.dp))
                     Text(
                         "$year-${pad2(month)}",
-                        color = if (navSolid) p.text else Color.White,
+                        color = if (navSolid || liquid) p.text else Color.White,
                         fontSize = rsp(30),
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.width(rpx(6)))
                     AppIcon(
                         "chevron-down",
-                        if (navSolid) p.text else Color.White.copy(alpha = 0.9f),
+                        if (navSolid || liquid) p.text else Color.White.copy(alpha = 0.9f),
                         15.dp
                     )
                 }
@@ -328,14 +364,14 @@ fun HomeScreen(app: AppState, activity: Activity) {
                 ) {
                     Box(
                         Modifier.size(rpx(68)).clip(CircleShape)
-                            .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Calendar) },
+                            .pressable(if (navSolid || liquid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Calendar) },
                         contentAlignment = Alignment.Center
-                    ) { AppIcon("calendar", if (navSolid) p.text else Color.White, 20.dp) }
+                    ) { AppIcon("calendar", if (navSolid || liquid) p.text else Color.White, 20.dp) }
                     Box(
                         Modifier.size(rpx(68)).clip(CircleShape)
-                            .pressable(if (navSolid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Stats) },
+                            .pressable(if (navSolid || liquid) p.fill else Color.White.copy(alpha = 0.18f)) { app.navigate(Screen.Stats) },
                         contentAlignment = Alignment.Center
-                    ) { AppIcon("bar-chart", if (navSolid) p.text else Color.White, 20.dp) }
+                    ) { AppIcon("bar-chart", if (navSolid || liquid) p.text else Color.White, 20.dp) }
                 }
             }
         }
@@ -368,6 +404,7 @@ fun HomeScreen(app: AppState, activity: Activity) {
             app = app,
             width = drawerWidth,
             progress = drawerProgress,
+            autoBill = autoBill,
             onCloseAndOpen = { screen ->
                 closeDrawer()
                 app.navigate(screen)
@@ -396,21 +433,18 @@ private fun Hero(
     val expenseShown = countUp(expense)
     val incomeShown = countUp(income)
     val balanceShown = countUp(balance)
-    val heroBitmap = rememberFileBitmap(app.heroImg)
+    val liquid = app.glassStyle == GlassStyle.Liquid
+    val heroShape = RoundedCornerShape(bottomStart = rpx(36), bottomEnd = rpx(36))
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(bottomStart = rpx(36), bottomEnd = rpx(36)))
-            .background(Brush.linearGradient(p.gradPrimaryStrong))
-    ) {
-        if (heroBitmap != null) {
-            Image(
-                bitmap = heroBitmap.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.matchParentSize(),
-                contentScale = ContentScale.Crop
+            .clip(heroShape)
+            .then(
+                if (liquid) Modifier.liquidGlass(shape = heroShape)
+                else Modifier.background(Brush.linearGradient(p.gradPrimaryStrong))
             )
-        } else {
+    ) {
+        if (!liquid) {
             Box(
                 Modifier
                     .matchParentSize()
@@ -423,15 +457,15 @@ private fun Hero(
                     )
             )
         }
-        if (heroBitmap == null) {
-            Box(Modifier.matchParentSize()) {
-                Column(
-                    Modifier.align(Alignment.BottomEnd).padding(end = rpx(20)),
-                    horizontalAlignment = Alignment.End
-                ) {
-                    MascotFace(app, "idle", app.baseMascotStyle.widthRpx, mode = "base")
-                }
+        Box(Modifier.matchParentSize()) {
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(end = rpx(20)),
+                horizontalAlignment = Alignment.End
+            ) {
+                MascotFace(app, "idle", app.baseMascotStyle.widthRpx, mode = "base")
             }
+        }
+        if (!liquid) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -444,6 +478,9 @@ private fun Hero(
                     )
             )
         }
+        val ink = if (liquid) p.text else Color.White
+        val inkSub = if (liquid) p.sub else Color.White.copy(alpha = 0.82f)
+        val inkLine = if (liquid) p.line else Color.White.copy(alpha = 0.32f)
         Column(
             Modifier
                 .statusBarsPadding()
@@ -451,13 +488,13 @@ private fun Hero(
         ) {
             Text(
                 "本月支出",
-                color = Color.White.copy(alpha = 0.82f),
+                color = inkSub,
                 fontSize = rsp(26),
                 letterSpacing = rsp(2)
             )
             Text(
                 "¥ ${fmtMoney(expenseShown)}",
-                color = Color.White,
+                color = ink,
                 fontSize = rsp(72),
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = rpx(10))
@@ -467,10 +504,10 @@ private fun Hero(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("月收入", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
+                    Text("月收入", color = inkSub, fontSize = rsp(24))
                     Text(
                         fmtMoney(incomeShown),
-                        color = Color.White,
+                        color = ink,
                         fontSize = rsp(32),
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = rpx(6))
@@ -481,13 +518,13 @@ private fun Hero(
                         .padding(horizontal = rpx(44))
                         .width(rpx(1))
                         .height(rpx(52))
-                        .background(Color.White.copy(alpha = 0.32f))
+                        .background(inkLine)
                 )
                 Column {
-                    Text("本月结余", color = Color.White.copy(alpha = 0.82f), fontSize = rsp(24))
+                    Text("本月结余", color = inkSub, fontSize = rsp(24))
                     Text(
                         fmtMoney(balanceShown),
-                        color = Color.White,
+                        color = ink,
                         fontSize = rsp(32),
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = rpx(6))
@@ -501,7 +538,7 @@ private fun Hero(
 }
 
 @Composable
-private fun WeekCard(summary: WeekSummary) {
+private fun WeekCard(summary: WeekSummary, glassStyle: GlassStyle) {
     val p = LocalPalette.current
     val values = summary.days
     val total = summary.total
@@ -520,7 +557,10 @@ private fun WeekCard(summary: WeekSummary) {
         Modifier
             .fillMaxWidth()
             .padding(horizontal = rpx(24), vertical = rpx(24))
-            .glass()
+            .then(
+                if (glassStyle == GlassStyle.Liquid) Modifier.liquidGlass()
+                else Modifier.glass()
+            )
             .padding(start = rpx(30), end = rpx(30), top = rpx(30), bottom = rpx(24))
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -596,6 +636,7 @@ private fun Drawer(
     app: AppState,
     width: androidx.compose.ui.unit.Dp,
     progress: Float,
+    autoBill: AutoBillState,
     onCloseAndOpen: (Screen) -> Unit
 ) {
     val p = LocalPalette.current
@@ -613,16 +654,20 @@ private fun Drawer(
             .width(width)
             .fillMaxHeight()
             .graphicsLayer { translationX = -widthPx * (1f - progress) }
-            .background(p.pageWash)
+            .glassPageBackground()
     ) {
+        val drawerLiquid = app.glassStyle == GlassStyle.Liquid
         Box(
             Modifier
                 .fillMaxWidth()
                 .clipToBounds()
-                .background(Brush.linearGradient(p.gradPrimaryStrong))
+                .then(
+                    if (drawerLiquid) Modifier.liquidGlass(shape = RoundedCornerShape(0.dp))
+                    else Modifier.background(Brush.linearGradient(p.gradPrimaryStrong))
+                )
         ) {
             // 装饰圆圈放在 matchParentSize 里，只做背景，不参与头部高度测量
-            Box(Modifier.matchParentSize()) {
+            if (!drawerLiquid) Box(Modifier.matchParentSize()) {
                 Box(
                     Modifier
                         .offset(x = rpx(180), y = rpx(-120))
@@ -648,8 +693,8 @@ private fun Drawer(
                     Modifier
                         .size(rpx(74))
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.22f))
-                        .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape)
+                        .background(if (drawerLiquid) p.fill else Color.White.copy(alpha = 0.22f))
+                        .then(if (drawerLiquid) Modifier else Modifier.border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape))
                         .padding(rpx(2)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -657,10 +702,10 @@ private fun Drawer(
                 }
                 Spacer(Modifier.width(rpx(24)))
                 Column {
-                    Text("孽账", color = Color.White, fontSize = rsp(40), fontWeight = FontWeight.Bold, letterSpacing = rsp(2))
+                    Text("孽账", color = if (drawerLiquid) p.text else Color.White, fontSize = rsp(40), fontWeight = FontWeight.Bold, letterSpacing = rsp(2))
                     Text(
                         "记在本地 · 安心省心",
-                        color = Color.White.copy(alpha = 0.85f),
+                        color = if (drawerLiquid) p.sub else Color.White.copy(alpha = 0.85f),
                         fontSize = rsp(23),
                         modifier = Modifier.padding(top = rpx(6))
                     )
@@ -709,6 +754,7 @@ private fun Drawer(
                 }
             }
             }
+            AutoBillStatusCard(autoBill, app.glassStyle) { onCloseAndOpen(Screen.Settings) }
         }
         Column(
             Modifier
@@ -720,7 +766,10 @@ private fun Drawer(
             Row(
                 Modifier
                     .clip(RoundedCornerShape(rpx(999)))
-                    .glass(alpha = 0.6f)
+                    .then(
+                        if (app.glassStyle == GlassStyle.Liquid) Modifier.liquidGlass(alpha = 0.6f)
+                        else Modifier.glass(alpha = 0.6f)
+                    )
                     .padding(horizontal = rpx(20), vertical = rpx(10)),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -735,5 +784,75 @@ private fun Drawer(
                 modifier = Modifier.padding(top = rpx(16))
             )
         }
+    }
+}
+
+@Composable
+private fun AutoBillStatusCard(state: AutoBillState, glassStyle: GlassStyle, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    val shape = RoundedCornerShape(rpx(22))
+    val liquid = glassStyle == GlassStyle.Liquid
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = rpx(20))
+            .padding(bottom = rpx(18))
+            .clip(shape)
+            .then(if (liquid) Modifier.liquidGlass(shape = shape) else Modifier.glass(shape = shape))
+            .then(
+                if (liquid) Modifier.drawBehind {
+                    // 左上 / 右下两团柔光，让玻璃卡在壁纸上有边界，不额外描边
+                    val glow = if (p.dark) 0.26f else 0.24f
+                    val radius = size.minDimension * 1.25f
+                    drawRect(
+                        Brush.radialGradient(
+                            colorStops = arrayOf(
+                                0f to Color.White.copy(alpha = glow),
+                                0.55f to Color.White.copy(alpha = glow * 0.35f),
+                                1f to Color.Transparent
+                            ),
+                            center = Offset.Zero,
+                            radius = radius
+                        )
+                    )
+                    drawRect(
+                        Brush.radialGradient(
+                            colorStops = arrayOf(
+                                0f to Color.White.copy(alpha = glow * 0.85f),
+                                0.55f to Color.White.copy(alpha = glow * 0.3f),
+                                1f to Color.Transparent
+                            ),
+                            center = Offset(size.width, size.height),
+                            radius = radius
+                        )
+                    )
+                } else Modifier
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = rpx(20), vertical = rpx(22)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val dotColor = when (state.level) {
+            "on" -> p.inn
+            "off" -> p.out
+            else -> p.gold
+        }
+        Box(
+            Modifier
+                .size(rpx(14))
+                .clip(CircleShape)
+                .background(dotColor)
+        )
+        Spacer(Modifier.width(rpx(18)))
+        Column(Modifier.weight(1f)) {
+            Text(state.title, color = p.text, fontSize = rsp(25), fontWeight = FontWeight.SemiBold)
+            Text(
+                state.sub,
+                color = p.sub,
+                fontSize = rsp(21),
+                modifier = Modifier.padding(top = rpx(4))
+            )
+        }
+        AppIcon("chevron-right", p.dim, 15.dp)
     }
 }

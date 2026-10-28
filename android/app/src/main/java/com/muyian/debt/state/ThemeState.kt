@@ -14,7 +14,7 @@ import com.muyian.debt.ui.theme.Palette
 import com.muyian.debt.ui.theme.paletteOf
 import muyian.bill.listener.MuyianBillCore
 
-/** 主题、角色与首页头图。只影响外观，不参与导航或账单数据。 */
+/** 主题、角色与玻璃背景图。只影响外观，不参与导航或账单数据。 */
 class ThemeState(private val context: Context, private val prefs: Prefs) {
     var themeId by mutableStateOf(run {
         val id = prefs.str(PrefKeys.THEME, "wukong")
@@ -30,7 +30,7 @@ class ThemeState(private val context: Context, private val prefs: Prefs) {
         private set
     var autoMood by mutableStateOf(Mascots.readAutoMood(prefs))
         private set
-    var heroImg by mutableStateOf(prefs.str(PrefKeys.HERO_IMG, ""))
+    var glassBg by mutableStateOf(prefs.str(PrefKeys.GLASS_BG, ""))
         private set
 
     val baseMascotStyle: MascotStyle
@@ -68,8 +68,8 @@ class ThemeState(private val context: Context, private val prefs: Prefs) {
         autoMood = enabled
     }
 
-    fun updateHeroImg(path: String) {
-        heroImg = path
-        prefs.putStr(PrefKeys.HERO_IMG, path)
+    fun updateGlassBg(path: String) {
+        glassBg = path
+        prefs.putStr(PrefKeys.GLASS_BG, path)
     }
 }

@@ -33,6 +33,7 @@ import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Bill
 import com.muyian.debt.data.Cats
 import com.muyian.debt.data.DayGroup
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.fmtMoney
 import com.muyian.debt.ui.icons.AppIcon
 import com.muyian.debt.ui.theme.LocalPalette
@@ -50,7 +51,8 @@ fun BillList(
     onRowLong: (Bill) -> Unit,
     modifier: Modifier = Modifier,
     hideHead: Boolean = false,
-    flush: Boolean = false
+    flush: Boolean = false,
+    glassStyle: GlassStyle = GlassStyle.Frost
 ) {
     val p = LocalPalette.current
     Column(modifier) {
@@ -61,7 +63,10 @@ fun BillList(
                 Modifier
                     .fillMaxWidth()
                     .padding(start = rpx(24), end = rpx(24), bottom = rpx(24))
-                    .glass()
+                    .then(
+                        if (glassStyle == GlassStyle.Liquid) Modifier.liquidGlass()
+                        else Modifier.glass()
+                    )
                     .padding(horizontal = rpx(28), vertical = rpx(6))
             }
             Column(groupModifier) {

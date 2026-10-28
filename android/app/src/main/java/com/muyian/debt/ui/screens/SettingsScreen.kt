@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.muyian.debt.state.AppState
 import com.muyian.debt.data.Files
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.MascotStyle
 import com.muyian.debt.data.NativeStatus
 import com.muyian.debt.state.ActionSheetState
@@ -61,7 +62,9 @@ import com.muyian.debt.ui.components.Motion
 import com.muyian.debt.ui.components.RiseIn
 import com.muyian.debt.ui.components.StateChip
 import com.muyian.debt.ui.components.AppSwitch
+import com.muyian.debt.ui.components.frostGlass
 import com.muyian.debt.ui.components.glass
+import com.muyian.debt.ui.components.liquidGlass
 import com.muyian.debt.ui.components.TopBar
 import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.components.pressable
@@ -71,6 +74,7 @@ import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.paletteOf
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
+import kotlinx.coroutines.delay
 
 @Composable
 fun SettingsScreen(app: AppState) {
@@ -84,21 +88,24 @@ fun SettingsScreen(app: AppState) {
 
     LaunchedEffect(app.resumeToken) {
         refresh()
+        // 系统权限页返回后部分 ROM（MIUI 省电策略）落盘稍晚，补一次延时刷新
+        delay(500)
+        refresh()
     }
 
-    val heroBitmap = rememberFileBitmap(app.heroImg)
+    val glassBgBitmap = rememberFileBitmap(app.glassBg)
 
-    val heroPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val glassBgPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val path = Files.copyUriToFiles(ctx, uri, "hero")
+        val path = Files.copyUriToFiles(ctx, uri, "glassbg")
         if (path == null) {
             app.showToast("读取图片失败")
             return@rememberLauncherForActivityResult
         }
-        val old = app.heroImg
-        app.updateHeroImg(path)
+        val old = app.glassBg
+        app.updateGlassBg(path)
         Files.delete(old)
-        app.showToast("已设置首页头图")
+        app.showToast("已设置玻璃背景图")
     }
 
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -106,15 +113,15 @@ fun SettingsScreen(app: AppState) {
         app.showToast(if (it) "通知权限已开启" else "请在系统设置中手动允许通知")
     }
 
-    fun chooseHero() {
+    fun chooseGlassBg() {
         app.actionSheet = ActionSheetState(
             listOf("选择图片" to false, "恢复默认" to false)
         ) { index ->
             if (index == 0) {
-                heroPicker.launch("image/*")
+                glassBgPicker.launch("image/*")
             } else {
-                val old = app.heroImg
-                app.updateHeroImg("")
+                val old = app.glassBg
+                app.updateGlassBg("")
                 Files.delete(old)
                 app.showToast("已恢复默认")
             }
@@ -128,7 +135,7 @@ fun SettingsScreen(app: AppState) {
         if (parts.isEmpty()) "按场景自动切换表情" else parts.joinToString("，")
     }
 
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(Modifier.fillMaxSize()) {
         TopBar(title = "设置·关于", onBack = { app.pop() })
 
         Column(
@@ -216,6 +223,94 @@ fun SettingsScreen(app: AppState) {
                             }
                             Text(tp.name, color = p.text, fontSize = rsp(27), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = rpx(12)))
                             Text(tp.tagline, color = p.sub, fontSize = rsp(21), modifier = Modifier.padding(top = rpx(2)))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(rpx(24)))
+                DividerLine(color = p.lineSoft)
+                Spacer(Modifier.height(rpx(20)))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconBlock("layers", Brush.linearGradient(p.gradBlue), 48, 16)
+                    Spacer(Modifier.width(rpx(14)))
+                    Column {
+                        Text("玻璃材质", color = p.text, fontSize = rsp(30))
+                        Text(
+                            "当前：${app.glassStyle.label}，全站生效",
+                            color = p.sub,
+                            fontSize = rsp(22),
+                            lineHeight = rsp(32),
+                            modifier = Modifier.padding(top = rpx(4))
+                        )
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(top = rpx(20)),
+                    horizontalArrangement = Arrangement.spacedBy(rpx(16))
+                ) {
+                    for (style in GlassStyle.entries) {
+                        val active = app.glassStyle == style
+                        val borderColor by animateColorAsState(
+                            if (active) p.primary else Color.Transparent,
+                            tween(200, easing = Motion.InOut),
+                            label = "glass-border"
+                        )
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(rpx(18)))
+                                .background(p.card.copy(alpha = if (p.dark) 0.5f else 0.55f))
+                                .border(2.dp, borderColor, RoundedCornerShape(rpx(18)))
+                                .clickable {
+                                    if (!active) {
+                                        app.updateGlassStyle(style)
+                                        app.showToast("已切换为${style.label}")
+                                    }
+                                }
+                                .padding(rpx(12))
+                        ) {
+                            // 预览：主题渐变底上放一张小卡，直接对比两种材质的边缘和通透度
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(rpx(88))
+                                    .clip(RoundedCornerShape(rpx(14)))
+                                    .background(Brush.linearGradient(p.gradPrimary))
+                                    .padding(rpx(12))
+                            ) {
+                                Column(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .then(
+                                            if (style == GlassStyle.Liquid) Modifier.liquidGlass(
+                                                shape = RoundedCornerShape(rpx(10)),
+                                                alpha = 0.92f
+                                            ) else Modifier.frostGlass(
+                                                shape = RoundedCornerShape(rpx(10)),
+                                                alpha = 0.92f
+                                            )
+                                        )
+                                        .padding(horizontal = rpx(10), vertical = rpx(9)),
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .width(rpx(42))
+                                            .height(rpx(6))
+                                            .clip(RoundedCornerShape(rpx(3)))
+                                            .background(p.dim.copy(alpha = 0.8f))
+                                    )
+                                    Box(
+                                        Modifier
+                                            .padding(top = rpx(6))
+                                            .width(rpx(26))
+                                            .height(rpx(6))
+                                            .clip(RoundedCornerShape(rpx(3)))
+                                            .background(p.dim.copy(alpha = 0.55f))
+                                    )
+                                }
+                            }
+                            Text(style.label, color = p.text, fontSize = rsp(27), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = rpx(12)))
+                            Text(style.desc, color = p.sub, fontSize = rsp(21), lineHeight = rsp(30), modifier = Modifier.padding(top = rpx(2)))
                         }
                     }
                 }
@@ -316,30 +411,32 @@ fun SettingsScreen(app: AppState) {
             }
             }
 
-            RiseIn(2, key = "hero") {
-            SettingGroup {
-                SettingCell(
-                    icon = "image",
-                    gradient = Brush.linearGradient(p.gradSky),
-                    title = "首页头图",
-                    desc = "自定义首页顶部背景图，仅保存在本机",
-                    onClick = ::chooseHero,
-                    trailing = {
-                        if (heroBitmap != null) {
-                            Image(
-                                bitmap = heroBitmap.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier.size(width = rpx(96), height = rpx(60)).clip(RoundedCornerShape(rpx(12))),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Text("设置图片", color = p.primaryDeep, fontSize = rsp(26))
+            if (app.glassStyle == GlassStyle.Liquid) {
+                RiseIn(2, key = "glassbg") {
+                SettingGroup {
+                    SettingCell(
+                        icon = "image",
+                        gradient = Brush.linearGradient(p.gradMint),
+                        title = "玻璃背景图",
+                        desc = "液态玻璃采样的图片；不设置时卡片保持全透明",
+                        onClick = ::chooseGlassBg,
+                        trailing = {
+                            if (glassBgBitmap != null) {
+                                Image(
+                                    bitmap = glassBgBitmap.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(width = rpx(96), height = rpx(60)).clip(RoundedCornerShape(rpx(12))),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text("设置图片", color = p.primaryDeep, fontSize = rsp(26))
+                            }
+                            Spacer(Modifier.width(rpx(8)))
+                            AppIcon("chevron-right", p.dim, 16.dp)
                         }
-                        Spacer(Modifier.width(rpx(8)))
-                        AppIcon("chevron-right", p.dim, 16.dp)
-                    }
-                )
-            }
+                    )
+                }
+                }
             }
 
             RiseIn(3, key = "auto") {
@@ -436,7 +533,7 @@ fun SettingsScreen(app: AppState) {
             }
             }
 
-            RiseIn(4, key = "background") {
+            RiseIn(3, key = "background") {
             GroupTitle("后台运行")
             SettingGroup {
                 SettingCell(
@@ -452,7 +549,11 @@ fun SettingsScreen(app: AppState) {
                         } else {
                             app.confirm(
                                 "关闭电池优化",
-                                "在系统弹窗中选择“不限制”。部分机型还需在“应用详情”里把自启动/后台运行设为允许。",
+                                if (status.popup.miui) {
+                                    "在系统页面把省电策略设为“无限制”。部分机型还需在“应用信息”里把自启动/后台运行设为允许。"
+                                } else {
+                                    "在系统弹窗中选择“不限制”。部分机型还需在“应用详情”里把自启动/后台运行设为允许。"
+                                },
                                 "去设置"
                             ) {
                                 NativeStatus.requestIgnoreBatteryOptimization(ctx)
@@ -501,7 +602,7 @@ fun SettingsScreen(app: AppState) {
             }
             }
 
-            RiseIn(5, key = "privacy") {
+            RiseIn(4, key = "privacy") {
             GroupTitle("隐私说明")
             Column(
                 Modifier

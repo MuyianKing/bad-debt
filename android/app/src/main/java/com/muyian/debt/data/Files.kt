@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.Uri
 import java.io.File
 
-/** 应用私有目录文件操作：AddScreen 的账单图与 Settings 的头图共用。 */
+/** 应用私有目录文件操作：AddScreen 的账单图与 Settings 的玻璃背景图共用。 */
 object Files {
     fun copyUriToFiles(context: Context, uri: Uri, prefix: String = "img"): String? = try {
         val file = target(context, prefix)

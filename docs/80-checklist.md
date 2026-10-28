@@ -4,7 +4,7 @@
 
 1. 新页面已在 `state/AppState.kt` 的 `Screen` 注册，并在 `MainActivity` 的 `AnimatedContent` 中渲染；返回路径走 `app.pop()`，没有自己起 `Activity`；
 2. 新增原生能力已由 `MuyianBillCore` 暴露为同步方法，复杂结构走 JSON 字符串，`data/` 侧有类型化解析封装；页面不直接调 `MuyianBillCore`；
-3. 没有在页面里写死主题色/浅色值；改配色或组件样式时三个主题（悟空黄、哪吒红、沙僧黑）各过一遍：首页 + 抽屉、记一笔、统计（含分类弹层）、日历、分类（含图标选择弹窗）、设置；
+3. 没有在页面里写死主题色/浅色值；改配色、组件样式或玻璃材质时三个主题（悟空黄、哪吒红、沙僧黑）各过一遍，毛玻璃/液态玻璃两档都看（液态玻璃再分有玻璃背景图/无背景图，确认无背景图时全透明且没有白色描边）：首页 + 抽屉、记一笔、统计（含分类弹层）、日历、分类（含图标选择弹窗）、设置；
 4. 金额符号约定（支出负/收入正）、`costType` 叶子名约定未被新代码破坏；统计口径经过 `Cats.topNameOf()` 归并；
 5. 涉及 DB 的改动带旧库 ALTER 兼容（`openDb()` + `billJson()`）；
 6. 涉及 `muyian/bill/listener/` 下任意文件、`android/app/src/main/AndroidManifest.xml` 或 `res/xml/muyian_accessibility_config.xml` 的改动，重新构建安装并在真机回归；权限/服务声明变化后提示用户重新授权；

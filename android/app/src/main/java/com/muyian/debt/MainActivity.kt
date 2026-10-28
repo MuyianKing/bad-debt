@@ -39,14 +39,18 @@ import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 import com.muyian.debt.data.PrefKeys
 import com.muyian.debt.data.Prefs
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.state.AppState
 import com.muyian.debt.state.Screen
 import com.muyian.debt.ui.components.ActionSheetHost
 import com.muyian.debt.ui.components.AppToastHost
 import com.muyian.debt.ui.components.ConfirmDialogHost
+import com.muyian.debt.ui.components.GlassBackdropHost
+import com.muyian.debt.ui.components.LocalGlassStyle
 import com.muyian.debt.ui.components.DatePickerHost
 import com.muyian.debt.ui.components.ImagePreviewHost
 import com.muyian.debt.ui.components.Motion
+import com.muyian.debt.ui.components.rememberFileBitmap
 import com.muyian.debt.ui.components.PickerSheetHost
 import com.muyian.debt.ui.screens.AddScreen
 import com.muyian.debt.ui.screens.BackupScreen
@@ -57,6 +61,7 @@ import com.muyian.debt.ui.screens.ImportScreen
 import com.muyian.debt.ui.screens.SettingsScreen
 import com.muyian.debt.ui.screens.StatsScreen
 import com.muyian.debt.ui.theme.LocalPalette
+import com.muyian.debt.ui.theme.liquidReadable
 import com.muyian.debt.ui.theme.LocalRpx
 import com.muyian.debt.ui.theme.themeStyleRes
 import muyian.bill.listener.MuyianBillCore
@@ -140,8 +145,19 @@ private fun MuyianRoot(app: AppState) {
         }
     }
 
-    CompositionLocalProvider(LocalPalette provides p, LocalRpx provides scale) {
-        Box(Modifier.fillMaxSize().background(p.bg)) {
+    // 液态玻璃透底更强，灰阶文字需要加深一档才看得清；毛玻璃沿用原令牌
+    val palette = remember(p, app.glassStyle) {
+        if (app.glassStyle == GlassStyle.Liquid) p.liquidReadable() else p
+    }
+
+    CompositionLocalProvider(
+        LocalPalette provides palette,
+        LocalRpx provides scale,
+        LocalGlassStyle provides app.glassStyle
+    ) {
+        // 全局壁纸 + 玻璃采样源：所有页面共用同一张背景，玻璃才是“透”而不是贴图
+        GlassBackdropHost(rememberFileBitmap(app.glassBg)) {
+        Box(Modifier.fillMaxSize()) {
             AnimatedContent(
                 targetState = app.current,
                 transitionSpec = {
@@ -199,6 +215,7 @@ private fun MuyianRoot(app: AppState) {
                         .background(p.bg)
                 )
             }
+        }
         }
     }
 }

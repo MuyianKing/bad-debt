@@ -29,7 +29,7 @@
 
 ## 相机与权限
 
-- 记一笔备注图片的拍照入口用 `ActivityResultContracts.TakePicture()`；首次拍照前用 `RequestPermission()` 申请 `android.permission.CAMERA`。相册入口用 `ActivityResultContracts.GetContent()`，设置页头图只从相册选，不触发相机权限。
+- 记一笔备注图片的拍照入口用 `ActivityResultContracts.TakePicture()`；首次拍照前用 `RequestPermission()` 申请 `android.permission.CAMERA`。相册入口用 `ActivityResultContracts.GetContent()`，设置页玻璃背景图只从相册选，不触发相机权限。
 - `android/app/src/main/AndroidManifest.xml` 声明的权限：`CAMERA`、`POST_NOTIFICATIONS`、`SYSTEM_ALERT_WINDOW`、`VIBRATE`、`WRITE_SECURE_SETTINGS`（无障碍自恢复，需 adb 授予）、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`（后台保活）、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`。
 - 只申请与功能直接相关的权限，不额外申请存储/位置/通讯录等权限；文件选择走 SAF，不需要存储权限。
 - 权限属于安装时/运行时配置：清单增删权限后必须重新安装；`WRITE_SECURE_SETTINGS`、无障碍、通知使用权、悬浮窗、MIUI「后台弹出界面」、电池优化白名单在新包/新签名上都要重新授权。

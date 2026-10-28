@@ -124,7 +124,7 @@ fun CalendarScreen(app: AppState) {
     val dayMap = remember(bills) { CalendarModel.dayStats(bills) }
     val cells = remember(year, month) { CalendarModel.cells(year, month) }
 
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(Modifier.fillMaxSize()) {
         TopBar(
             title = "",
             onBack = { app.pop() },

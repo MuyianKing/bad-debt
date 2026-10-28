@@ -32,7 +32,7 @@ cd android
    # 安装本版并至少启动一次后：
    adb shell "run-as com.muyian.debt sh -c 'mkdir -p files databases; cp /data/local/tmp/muyian.db files/muyian.db; cp /data/local/tmp/DCStorage databases/DCStorage'"
    ```
-   首次启动会从 `databases/DCStorage` 只读迁移分类、主题、角色表情、头图等旧版配置（`Prefs.migrateLegacyStorage()`）。
+   首次启动会从 `databases/DCStorage` 只读迁移分类、主题、角色表情等旧版配置（`Prefs.migrateLegacyStorage()`）。
 
 > 用 release 包时 `run-as` 不可用，建议走备份 JSON 导入。
 >
@@ -53,12 +53,12 @@ app/src/main/java/muyian/bill/listener/hybrid.kt   # 系统级原生核心
 
 ## 已实现
 
-- 首页：渐变头图、角色、吸顶玻璃导航、跟手侧滑抽屉、最近 7 日柱状图、按日账单、FAB；不做权限判断（权限状态与授权统一在设置页）；
+- 首页：主题渐变头区、角色、吸顶玻璃导航、跟手侧滑抽屉、最近 7 日柱状图、按日账单、FAB；不做权限判断（权限状态与授权统一在设置页）；
 - 记一笔：5 列分类宫格 + 子类插行、计算键盘、日期滚轮、报销/星标/图片、编辑模式、保存/再记反馈；
 - 统计：月/年、柱状/折线、分类环形图与明细弹层、日报表/月报表、分类明细；
 - 日历：农历/节日角标、四种口径、选中日摘要 + 账单合并卡、编辑/删除；
 - 分类管理：长按拖拽、父类/子类实时让位、增删改、图标选择、子类面板；
-- 设置：三主题、角色表情/跟随场景、头图、无障碍/通知/悬浮窗/MIUI 后台弹出/自恢复/电池/保活/最近任务/自启动；
+- 设置：三主题、角色表情/跟随场景、玻璃背景图（液态玻璃）、无障碍/通知/悬浮窗/MIUI 后台弹出/自恢复/电池/保活/最近任务/自启动；
 - 导入/备份：钱迹 xlsx 映射预览与分批入库、本应用 JSON 导出/合并恢复、缺失分类补全；
 - 主题与原生确认弹层颜色同步。
 

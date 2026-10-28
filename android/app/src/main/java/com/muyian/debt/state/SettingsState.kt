@@ -6,12 +6,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.PrefKeys
 import com.muyian.debt.data.Prefs
 
-/** 应用级设置与刷新信号：最近任务可见性、版本号、resume/账单版本。 */
+/** 应用级设置与刷新信号：最近任务可见性、玻璃材质、版本号、resume/账单版本。 */
 class SettingsState(private val context: Context, private val prefs: Prefs) {
     var hideRecents by mutableStateOf(prefs.bool(PrefKeys.HIDE_RECENTS, true))
+        private set
+
+    var glassStyle by mutableStateOf(GlassStyle.fromKey(prefs.str(PrefKeys.GLASS_STYLE, GlassStyle.Frost.key)))
         private set
 
     /** 首页吸顶导航是否转成实底，由首页滚动状态写入、MainActivity 读取。 */
@@ -37,6 +41,11 @@ class SettingsState(private val context: Context, private val prefs: Prefs) {
         hideRecents = hidden
         prefs.putBool(PrefKeys.HIDE_RECENTS, hidden)
         applyRecentsVisibility()
+    }
+
+    fun updateGlassStyle(style: GlassStyle) {
+        glassStyle = style
+        prefs.putStr(PrefKeys.GLASS_STYLE, style.key)
     }
 
     fun applyRecentsVisibility() {

@@ -6,8 +6,19 @@ import android.database.sqlite.SQLiteDatabase
 /** 应用级 SharedPreferences 键的唯一来源，避免同一个键在多个文件里各写一遍。 */
 object PrefKeys {
     const val THEME = "muyian_theme_v1"
-    const val HERO_IMG = "muyian_hero_img_v1"
     const val HIDE_RECENTS = "muyian_hide_recents_v1"
+    const val GLASS_STYLE = "muyian_glass_style_v1"
+    const val GLASS_BG = "muyian_glass_bg_v1"
+}
+
+/** 卡片玻璃材质：毛玻璃（默认）或液态玻璃。持久化用 [key]，显示用 [label]。 */
+enum class GlassStyle(val key: String, val label: String, val desc: String) {
+    Frost("frost", "毛玻璃", "柔和的半透明底，层次靠描边和阴影"),
+    Liquid("liquid", "液态玻璃", "更透亮的斜面折射，边缘带高光");
+
+    companion object {
+        fun fromKey(raw: String): GlassStyle = entries.firstOrNull { it.key == raw } ?: Frost
+    }
 }
 
 /**

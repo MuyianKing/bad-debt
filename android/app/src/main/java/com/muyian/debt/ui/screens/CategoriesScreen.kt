@@ -425,7 +425,7 @@ fun CategoriesScreen(app: AppState) {
     }
 
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().background(p.bg)) {
+    Column(Modifier.fillMaxSize()) {
         TopBar(
             title = "",
             onBack = { app.pop() },
