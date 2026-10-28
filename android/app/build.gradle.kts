@@ -18,7 +18,23 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    /*
+     * 统一 debug 签名：key 随仓库走（keystore/debug.keystore，密码即 Android 默认的 android），
+     * 换机器构建仍是同一把 key，可直接覆盖安装。不要换成各机自动生成的 ~/.android/debug.keystore。
+     */
+    signingConfigs {
+        create("sharedDebug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("sharedDebug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
