@@ -12,12 +12,18 @@ import java.util.regex.Pattern
 object CaptureText {
 
     private val WHITESPACE = Pattern.compile("\\s+")
+    /** 微信 LiteApp 的 content-desc 会把 "10.90元" 读成 "10点9 0元" */
+    private val CN_POINT_AMOUNT = Pattern.compile(
+        "([0-9]+)\\s*点\\s*([0-9])(?:\\s*([0-9]))?\\s*元"
+    )
     private val CURRENCY_AMOUNT = Pattern.compile(
         "(?:(?:￥|¥|人民币|RMB|CNY)\\s*([0-9]+(?:,[0-9]{3})*(?:\\.\\d{1,2})?|[0-9]+(?:\\.\\d{1,2})?)|" +
             "([0-9]+(?:,[0-9]{3})*(?:\\.\\d{1,2})?|[0-9]+(?:\\.\\d{1,2})?)\\s*(?:元|块|圆))"
     )
-    private val SYMBOL_AMOUNT_LINE = Pattern.compile("^[¥￥]\\s*([0-9]+(?:,[0-9]{3})*(?:\\.\\d{1,2})?)$")
-    private val BARE_DECIMAL_LINE = Pattern.compile("^([0-9]+(?:,[0-9]{3})*\\.\\d{2})$")
+    // 账单详情的大字金额常带正负号（"-30.05"），符号不属于金额本身
+    private val SIGN_PREFIX = Pattern.compile("^[-+−]\\s*")
+    private val SYMBOL_AMOUNT_LINE = Pattern.compile("^[-+−]?\\s*[¥￥]\\s*([0-9]+(?:,[0-9]{3})*(?:\\.\\d{1,2})?)$")
+    private val BARE_DECIMAL_LINE = Pattern.compile("^[-+−]?\\s*([0-9]+(?:,[0-9]{3})*\\.[0-9]{2})$")
     private val LEADING_AMOUNT = Pattern.compile("^[^0-9]{0,6}([0-9]+(?:,[0-9]{3})*(?:\\.[0-9]{1,2})?)")
     private val DATE_LINE = Pattern.compile("^(?:19|20)[0-9]{2}[.\\-/年][0-9]{1,2}")
     private val ORDER_NO = Pattern.compile(
@@ -44,15 +50,43 @@ object CaptureText {
         } catch (_: Exception) {
             raw
         }
-        return n.trim()
+        return CN_POINT_AMOUNT.matcher(n.trim()).replaceAll("$1.$2$3元")
     }
 
     fun compact(raw: String): String = WHITESPACE.matcher(normalize(raw)).replaceAll("")
 
-    fun compact(lines: List<String>): String {
+    /**
+     * 行内去空白、行间留一个空格：既不让上一行结尾和下一行开头拼成新词
+     * （"支付" + "成功" 不能被当成 "支付成功"），又保留 `.`/`\\s*` 的跨行窗口
+     * （"扫一扫" + "收付款" 仍能命中首页标记）。
+     */
+    fun compact(lines: List<String>): String = compactNormalized(lines.map { normalize(it) })
+
+    /** 输入已经是 normalize 过的行文本时用它，避免解析器里反复归一化。 */
+    fun compactNormalized(lines: List<String>): String {
         val sb = StringBuilder()
-        for (line in lines) sb.append(normalize(line))
-        return WHITESPACE.matcher(sb.toString()).replaceAll("")
+        for (line in lines) {
+            val part = WHITESPACE.matcher(line).replaceAll("")
+            if (part.isEmpty()) continue
+            if (sb.isNotEmpty()) sb.append(' ')
+            sb.append(part)
+        }
+        return sb.toString()
+    }
+
+    fun containsExclude(
+        text: String,
+        excludes: List<String>,
+        alreadyNormalized: Boolean = false
+    ): Boolean {
+        if (text.isEmpty()) return false
+        val source = if (alreadyNormalized) text else normalize(text)
+        val normalized = POST_DISCOUNT.matcher(source).replaceAll("")
+        if (FULL_REDUCTION.matcher(normalized).find()) return true
+        for (word in excludes) {
+            if (normalized.contains(word)) return true
+        }
+        return false
     }
 
     fun toAmount(raw: String): Double = try {
@@ -66,16 +100,6 @@ object CaptureText {
 
     fun moneyKey(amount: Double): String = String.format(Locale.US, "%.2f", Math.abs(amount))
 
-    fun containsExclude(text: String, excludes: List<String>): Boolean {
-        if (text.isEmpty()) return false
-        val normalized = POST_DISCOUNT.matcher(normalize(text)).replaceAll("")
-        if (FULL_REDUCTION.matcher(normalized).find()) return true
-        for (word in excludes) {
-            if (normalized.contains(word)) return true
-        }
-        return false
-    }
-
     /**
      * 金额紧邻前缀的排除词检查：只看金额前最近几个字符（压缩空白后 6 字），
      * 而不是整段前缀。整段判定会把"您尾号4321的卡交易¥100.00"整条拒掉，
@@ -83,7 +107,12 @@ object CaptureText {
      * 排除词与金额的典型邻接距离 ≤4（手续费：/立减/余额），6 字够覆盖；
      * "尾号4321的卡交易"这类间隔 10+ 字符的标识信息不再误杀。
      */
-    fun adjacentPrefixExcluded(source: String, amountStart: Int, excludes: List<String>): Boolean {
+    fun adjacentPrefixExcluded(
+        source: String,
+        amountStart: Int,
+        excludes: List<String>,
+        alreadyNormalized: Boolean = false
+    ): Boolean {
         if (amountStart <= 0) return false
         val prefix = source.substring(0, amountStart)
         val sb = StringBuilder(prefix.length)
@@ -91,7 +120,7 @@ object CaptureText {
         val text = sb.toString()
         if (text.isEmpty()) return false
         val window = if (text.length > 6) text.substring(text.length - 6) else text
-        return containsExclude(window, excludes)
+        return containsExclude(window, excludes, alreadyNormalized = true)
     }
 
     fun looksLikeDateOrTime(text: String, end: Int): Boolean {
@@ -112,9 +141,10 @@ object CaptureText {
         tier: AmountTier,
         anchor: String,
         index: Int = 0,
-        sizePx: Int = 0
+        sizePx: Int = 0,
+        alreadyNormalized: Boolean = false
     ): AmountCandidate? {
-        val source = normalize(text)
+        val source = if (alreadyNormalized) text else normalize(text)
         if (source.isEmpty()) return null
         val cm = CURRENCY_AMOUNT.matcher(source)
         while (cm.find()) {
@@ -129,7 +159,7 @@ object CaptureText {
             val amount = toAmount(value)
             if (!isSaneAmount(amount)) continue
             if (looksLikeDateOrTime(source, cm.end())) continue
-            if (adjacentPrefixExcluded(source, cm.start(), excludes)) continue
+            if (adjacentPrefixExcluded(source, cm.start(), excludes, alreadyNormalized = true)) continue
             val hasCurrency = !cm.group(1).isNullOrEmpty()
             return AmountCandidate(
                 value = amount,
@@ -147,7 +177,7 @@ object CaptureText {
             val amount = toAmount(raw)
             if (isSaneAmount(amount) && (allowBareInteger || raw.contains("."))) {
                 if (!looksLikeDateOrTime(source, lm.end(1)) &&
-                    !adjacentPrefixExcluded(source, lm.start(1), excludes) &&
+                    !adjacentPrefixExcluded(source, lm.start(1), excludes, alreadyNormalized = true) &&
                     !hasLeadingNumericNoise(source, lm.start(1))
                 ) {
                     return AmountCandidate(
@@ -166,15 +196,16 @@ object CaptureText {
     }
 
     /** 纯数字行（金额大字）：只接受 ¥xx 或 xx.xx，日期/编号/整数一律不认。 */
-    fun isolatedAmount(text: String): Double {
-        val source = normalize(text)
+    fun isolatedAmount(text: String, alreadyNormalized: Boolean = false): Double {
+        val source = if (alreadyNormalized) text else normalize(text)
         if (source.isEmpty()) return 0.0
         val symbol = SYMBOL_AMOUNT_LINE.matcher(source)
         if (symbol.matches()) {
             val v = toAmount(symbol.group(1) ?: "")
             return if (isSaneAmount(v)) v else 0.0
         }
-        if (DATE_LINE.matcher(source).find()) return 0.0
+        // 去掉符号再判日期，避免 "-2026.11" 这类带符号的日期行被当成金额
+        if (DATE_LINE.matcher(SIGN_PREFIX.matcher(source).replaceFirst("")).find()) return 0.0
         val bare = BARE_DECIMAL_LINE.matcher(source)
         if (bare.matches()) {
             val v = toAmount(bare.group(1) ?: "")

@@ -15,26 +15,10 @@ internal object CaptureRoute {
     private const val TTL_MS = 15L * 60 * 1000L
     private const val RETURN_WINDOW_MS = 3L * 60 * 1000L
     private const val TRIGGER_WINDOW_MS = 10L * 60 * 1000L
-
-    private const val PHASE_HOST = "HOST"
-    private const val PHASE_PAY_ENTERED = "PAY_ENTERED"
-    private const val PHASE_PAY_EVIDENCE = "PAY_EVIDENCE"
-    private const val PHASE_RETURNED = "RETURNED"
+    /** 支付意图（收银台里的金额）在成功页到达前有效的窗口 */
+    private const val INTENT_TTL_MS = 10L * 60 * 1000L
 
     private val lock = Any()
-
-    private data class State(
-        val hostPkg: String = "",
-        val payPkg: String = "",
-        val phase: String = PHASE_HOST,
-        val enteredAt: Long = 0L,
-        val evidenceAt: Long = 0L,
-        val returnedAt: Long = 0L,
-        val hostTriggerAt: Long = 0L,
-        val sessionId: String = "",
-        val lastPkg: String = "",
-        val updatedAt: Long = 0L
-    )
 
     fun noteForeground(context: Context, pkg: String) {
         if (pkg.isEmpty()) return
@@ -42,37 +26,17 @@ internal object CaptureRoute {
         if (rule.role == AppRole.OFF) return
         val isPay = rule.role == AppRole.PAY
         val isHost = rule.role == AppRole.HOST
+        if (!isPay && !isHost) return
         val now = System.currentTimeMillis()
         synchronized(lock) {
             val state = load(context, now)
             if (state.lastPkg == pkg) return
             val prev = state.lastPkg
-            var next = state.copy(lastPkg = pkg, updatedAt = now)
-            if (isPay) {
-                val fromHost = prev.isNotEmpty() && prev != pkg &&
-                    CaptureRegistry.isHostApp(context, prev)
-                if (fromHost || state.payPkg != pkg || state.payPkg.isEmpty()) {
-                    next = next.copy(
-                        hostPkg = if (fromHost) prev else state.hostPkg,
-                        payPkg = pkg,
-                        phase = PHASE_PAY_ENTERED,
-                        enteredAt = now,
-                        evidenceAt = 0L,
-                        returnedAt = 0L,
-                        sessionId = pkg + ":" + now
-                    )
-                }
-            } else if (isHost) {
-                val cameFromPay = state.payPkg.isNotEmpty() && prev == state.payPkg &&
-                    state.evidenceAt >= state.enteredAt && state.evidenceAt > 0L
-                next = if (cameFromPay) {
-                    next.copy(hostPkg = pkg, phase = PHASE_RETURNED, returnedAt = now)
-                } else {
-                    next.copy(hostPkg = pkg)
-                }
-            } else {
-                return
-            }
+            val fromHost = isPay && prev.isNotEmpty() && prev != pkg &&
+                CaptureRegistry.isHostApp(context, prev)
+            val next = CaptureRoutePolicy.foreground(
+                state, pkg, isPay, isHost, fromHost, now
+            ) ?: return
             save(context, next)
         }
     }
@@ -84,13 +48,13 @@ internal object CaptureRoute {
             val now = System.currentTimeMillis()
             val state = load(context, now)
             val keep = state.payPkg == pkg && state.sessionId.isNotEmpty() &&
-                state.phase == PHASE_PAY_ENTERED && now - state.enteredAt <= 60_000L
+                state.phase == RoutePhase.PAY_ENTERED && now - state.enteredAt <= 60_000L
             val next = if (keep) {
                 state.copy(evidenceAt = maxOf(state.evidenceAt, at), updatedAt = now)
             } else {
                 state.copy(
                     payPkg = pkg,
-                    phase = PHASE_PAY_ENTERED,
+                    phase = RoutePhase.PAY_ENTERED,
                     enteredAt = at,
                     evidenceAt = at,
                     returnedAt = 0L,
@@ -109,10 +73,10 @@ internal object CaptureRoute {
             val now = System.currentTimeMillis()
             val state = load(context, now)
             val sameSession = state.payPkg == pkg && state.sessionId.isNotEmpty() &&
-                state.phase != PHASE_RETURNED && now - state.evidenceAt <= 60_000L
+                state.phase != RoutePhase.RETURNED && now - state.evidenceAt <= 60_000L
             val next = if (sameSession) {
                 state.copy(
-                    phase = PHASE_PAY_EVIDENCE,
+                    phase = RoutePhase.PAY_EVIDENCE,
                     evidenceAt = maxOf(state.evidenceAt, at),
                     updatedAt = now
                 )
@@ -120,7 +84,7 @@ internal object CaptureRoute {
                 // 锁屏碰卡/通知先到，或上一笔已经完成：单开一个会话
                 state.copy(
                     payPkg = pkg,
-                    phase = PHASE_PAY_EVIDENCE,
+                    phase = RoutePhase.PAY_EVIDENCE,
                     enteredAt = at,
                     evidenceAt = at,
                     returnedAt = 0L,
@@ -145,12 +109,126 @@ internal object CaptureRoute {
         }
     }
 
+    /**
+     * 记录收银台/确认购买页/支付宝付款弹窗里的金额。
+     * 宿主内嵌支付时包名仍是宿主，所以这里同时承担"宿主支付上下文"的职责。
+     */
+    fun markIntent(
+        context: Context, pkg: String, at: Long, intent: PaymentIntent, host: Boolean
+    ) {
+        if (pkg.isEmpty() || intent.amount <= 0) return
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            val state = load(context, now)
+            var next = state.copy(
+                intentAmount = intent.amount,
+                intentChannel = intent.channel,
+                intentMerchant = intent.merchant,
+                intentPkg = pkg,
+                intentHost = if (host) pkg else state.hostPkg.ifEmpty { state.intentHost },
+                intentAt = at,
+                updatedAt = now
+            )
+            if (host) {
+                // 宿主自己的确认页/付款弹窗意味着一次新的购买开始：
+                // 清掉上一笔残留的支付会话，避免成功页复用旧 session 被账本误并
+                next = next.copy(
+                    hostPkg = pkg,
+                    hostTriggerAt = maxOf(state.hostTriggerAt, at),
+                    payPkg = "",
+                    phase = RoutePhase.HOST,
+                    enteredAt = 0L,
+                    evidenceAt = 0L,
+                    returnedAt = 0L,
+                    sessionId = ""
+                )
+            } else {
+                val sameSession = state.payPkg == pkg && state.sessionId.isNotEmpty() &&
+                    now - state.evidenceAt <= 60_000L
+                next = if (sameSession) {
+                    next.copy(
+                        phase = RoutePhase.PAY_EVIDENCE,
+                        evidenceAt = maxOf(state.evidenceAt, at)
+                    )
+                } else {
+                    next.copy(
+                        payPkg = pkg,
+                        phase = RoutePhase.PAY_EVIDENCE,
+                        enteredAt = at,
+                        evidenceAt = at,
+                        returnedAt = 0L,
+                        sessionId = pkg + ":" + at
+                    )
+                }
+            }
+            save(context, next)
+        }
+    }
+
+    /** 宿主成功页可用的金额证据；只接受同一条宿主路线的 intent。 */
+    fun intentFor(context: Context, hostPkg: String, now: Long): PaymentIntent? {
+        if (hostPkg.isEmpty()) return null
+        synchronized(lock) {
+            val state = load(context, now)
+            if (state.intentAmount <= 0 || state.intentPkg.isEmpty()) return null
+            if (now - state.intentAt > INTENT_TTL_MS) return null
+            val owner = state.intentHost.ifEmpty { state.hostPkg }
+            if (owner != hostPkg) return null
+            return PaymentIntent(
+                amount = state.intentAmount,
+                channel = state.intentChannel,
+                merchant = state.intentMerchant,
+                pkg = state.intentPkg,
+                at = state.intentAt
+            )
+        }
+    }
+
+    /** 支付 App 成功页可用的金额证据：只接受同一笔支付会话的 intent。 */
+    fun intentForPayment(context: Context, payPkg: String, now: Long): PaymentIntent? {
+        if (payPkg.isEmpty()) return null
+        synchronized(lock) {
+            val state = load(context, now)
+            if (state.intentAmount <= 0 || state.intentPkg.isEmpty()) return null
+            if (now - state.intentAt > INTENT_TTL_MS) return null
+            if (state.payPkg != payPkg) return null
+            return PaymentIntent(
+                amount = state.intentAmount,
+                channel = state.intentChannel,
+                merchant = state.intentMerchant,
+                pkg = state.intentPkg,
+                at = state.intentAt
+            )
+        }
+    }
+
+    /** 成功页已消费，避免停留在后台的同一页再次复用。 */
+    fun clearIntent(context: Context) {
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            val state = load(context, now)
+            if (state.intentAmount <= 0 && state.intentPkg.isEmpty()) return
+            save(
+                context,
+                state.copy(
+                    intentAmount = 0.0,
+                    intentChannel = "",
+                    intentMerchant = "",
+                    intentPkg = "",
+                    intentHost = "",
+                    intentAt = 0L,
+                    updatedAt = now
+                )
+            )
+        }
+    }
+
     fun hasHostContext(context: Context, hostPkg: String, now: Long): Boolean {
         if (hostPkg.isEmpty()) return false
         synchronized(lock) {
             val state = load(context, now)
             if (now - state.updatedAt > TTL_MS) return false
-            if (state.phase == PHASE_RETURNED && state.hostPkg == hostPkg &&
+            if (state.phase == RoutePhase.RETURNED && state.hostPkg == hostPkg &&
                 now - state.returnedAt <= RETURN_WINDOW_MS
             ) return true
             if (state.hostTriggerAt > 0 && state.hostPkg == hostPkg &&
@@ -164,14 +242,20 @@ internal object CaptureRoute {
         if (pkg.isEmpty()) return ""
         synchronized(lock) {
             val state = load(context, now)
-            if (now - state.updatedAt > TTL_MS) return ""
-            if (state.payPkg == pkg && state.sessionId.isNotEmpty() &&
-                now - state.enteredAt <= TTL_MS
-            ) return state.sessionId
-            if (state.phase == PHASE_RETURNED && state.hostPkg == pkg &&
-                state.sessionId.isNotEmpty() && now - state.returnedAt <= TTL_MS
-            ) return state.sessionId
-            return ""
+            return CaptureSession.resolve(
+                pkg = pkg,
+                payPkg = state.payPkg,
+                hostPkg = state.hostPkg,
+                sessionId = state.sessionId,
+                returned = state.phase == RoutePhase.RETURNED,
+                enteredAt = state.enteredAt,
+                evidenceAt = state.evidenceAt,
+                returnedAt = state.returnedAt,
+                updatedAt = state.updatedAt,
+                now = now,
+                ttlMs = TTL_MS,
+                returnWindowMs = RETURN_WINDOW_MS
+            )
         }
     }
 
@@ -185,34 +269,40 @@ internal object CaptureRoute {
         }
     }
 
-    private fun load(context: Context, now: Long): State {
+    private fun load(context: Context, now: Long): RouteState {
         val raw = try {
             prefs(context).getString(KEY, "") ?: ""
         } catch (_: Exception) {
             ""
         }
-        if (raw.isEmpty()) return State(updatedAt = now)
+        if (raw.isEmpty()) return RouteState(updatedAt = now)
         return try {
             val o = JSONObject(raw)
-            val state = State(
+            val state = RouteState(
                 hostPkg = o.optString("hostPkg", ""),
                 payPkg = o.optString("payPkg", ""),
-                phase = o.optString("phase", PHASE_HOST),
+                phase = o.optString("phase", RoutePhase.HOST),
                 enteredAt = o.optLong("enteredAt", 0L),
                 evidenceAt = o.optLong("evidenceAt", 0L),
                 returnedAt = o.optLong("returnedAt", 0L),
                 hostTriggerAt = o.optLong("hostTriggerAt", 0L),
                 sessionId = o.optString("sessionId", ""),
                 lastPkg = o.optString("lastPkg", ""),
-                updatedAt = o.optLong("updatedAt", 0L)
+                updatedAt = o.optLong("updatedAt", 0L),
+                intentAmount = o.optDouble("intentAmount", 0.0),
+                intentChannel = o.optString("intentChannel", ""),
+                intentMerchant = o.optString("intentMerchant", ""),
+                intentPkg = o.optString("intentPkg", ""),
+                intentHost = o.optString("intentHost", ""),
+                intentAt = o.optLong("intentAt", 0L)
             )
-            if (now - state.updatedAt > TTL_MS) State(updatedAt = now) else state
+            if (now - state.updatedAt > TTL_MS) RouteState(updatedAt = now) else state
         } catch (_: Exception) {
-            State(updatedAt = now)
+            RouteState(updatedAt = now)
         }
     }
 
-    private fun save(context: Context, state: State) {
+    private fun save(context: Context, state: RouteState) {
         try {
             val o = JSONObject()
             o.put("hostPkg", state.hostPkg)
@@ -225,6 +315,12 @@ internal object CaptureRoute {
             o.put("sessionId", state.sessionId)
             o.put("lastPkg", state.lastPkg)
             o.put("updatedAt", state.updatedAt)
+            o.put("intentAmount", state.intentAmount)
+            o.put("intentChannel", state.intentChannel)
+            o.put("intentMerchant", state.intentMerchant)
+            o.put("intentPkg", state.intentPkg)
+            o.put("intentHost", state.intentHost)
+            o.put("intentAt", state.intentAt)
             prefs(context).edit().putString(KEY, o.toString()).apply()
         } catch (e: Exception) {
             Log.w(TAG, "save route failed", e)

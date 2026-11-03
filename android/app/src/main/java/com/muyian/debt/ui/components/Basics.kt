@@ -204,7 +204,8 @@ fun Modifier.liquidGlass(
     refractionHeight: Dp = 12.dp,
     refractionAmount: Dp = 24.dp,
     chromaticAberration: Boolean = false,
-    surfaceStrength: Float = 1f
+    surfaceStrength: Float = 1f,
+    dropShadow: Boolean = true
 ): Modifier {
     val p = LocalPalette.current
     val actual = shape ?: RoundedCornerShape(rpx(30))
@@ -244,7 +245,7 @@ fun Modifier.liquidGlass(
             highlight = if (chromaticAberration) {
                 { Highlight(width = 0.8.dp, blurRadius = 1.4.dp, alpha = 0.82f, style = HighlightStyle.Default) }
             } else null,
-            shadow = if (chromaticAberration) {
+            shadow = if (chromaticAberration && dropShadow) {
                 { Shadow(radius = 18.dp, offset = DpOffset(0.dp, 5.dp), color = Color.Black.copy(alpha = 0.22f)) }
             } else null,
             innerShadow = if (chromaticAberration) {
@@ -326,10 +327,12 @@ fun Modifier.liquidGlass(
         underShade = Color(0xFF2A2F3A).copy(alpha = 0.09f)
     }
     return this
-        .shadow(
-            22.dp, actual, clip = false,
-            ambientColor = Color.Black.copy(alpha = if (p.dark) 0.36f else 0.12f),
-            spotColor = Color.Black.copy(alpha = if (p.dark) 0.46f else 0.18f)
+        .then(
+            if (dropShadow) Modifier.shadow(
+                22.dp, actual, clip = false,
+                ambientColor = Color.Black.copy(alpha = if (p.dark) 0.36f else 0.12f),
+                spotColor = Color.Black.copy(alpha = if (p.dark) 0.46f else 0.18f)
+            ) else Modifier
         )
         .clip(actual)
         .background(Brush.verticalGradient(listOf(fillTop, fillBottom)))
@@ -508,47 +511,15 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
             }
             .then(
                 if (liquid) Modifier
-                    // 主操作按钮浮在列表上：补一层柔和投影 + 整圈发丝边，避免玻璃糊进账单里
-                    .shadow(
-                        12.dp, CircleShape, clip = false,
-                        ambientColor = Color.Black.copy(alpha = 0.14f),
-                        spotColor = Color.Black.copy(alpha = 0.22f)
-                    )
+                    // 主操作按钮浮在列表上：整圈发丝边，避免玻璃糊进账单里；不带投影（含材质内置阴影）
                     .liquidGlass(
                         shape = CircleShape,
                         refractionHeight = 28.dp,
                         refractionAmount = 60.dp,
-                        chromaticAberration = true
+                        chromaticAberration = true,
+                        dropShadow = false
                     )
                     .drawBehind {
-                        // 左上 / 右下两团大光晕：软扩散，像光打在圆玻璃的两侧
-                        val disc = Path().apply { addOval(Rect(Offset.Zero, size)) }
-                        clipPath(disc) {
-                            val radius = size.minDimension * 1.15f
-                            val glow = if (p.dark) 0.5f else 0.42f
-                            drawRect(
-                                Brush.radialGradient(
-                                    colorStops = arrayOf(
-                                        0f to Color.White.copy(alpha = glow),
-                                        0.55f to Color.White.copy(alpha = glow * 0.35f),
-                                        1f to Color.Transparent
-                                    ),
-                                    center = Offset.Zero,
-                                    radius = radius
-                                )
-                            )
-                            drawRect(
-                                Brush.radialGradient(
-                                    colorStops = arrayOf(
-                                        0f to Color.White.copy(alpha = glow * 0.85f),
-                                        0.55f to Color.White.copy(alpha = glow * 0.3f),
-                                        1f to Color.Transparent
-                                    ),
-                                    center = Offset(size.width, size.height),
-                                    radius = radius
-                                )
-                            )
-                        }
                         // 发丝边保留，别粗
                         drawCircle(
                             color = Color.White.copy(alpha = if (p.dark) 0.45f else 0.4f),
@@ -556,11 +527,6 @@ fun AppFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                         )
                     }
                 else Modifier
-                    .shadow(
-                        14.dp, CircleShape, clip = false,
-                        ambientColor = p.primary.copy(alpha = 0.35f),
-                        spotColor = p.primary.copy(alpha = 0.35f)
-                    )
                     .clip(CircleShape)
                     .background(Brush.linearGradient(p.gradPrimary))
             )

@@ -18,6 +18,7 @@ sealed class Screen {
     data object Categories : Screen()
     data object Settings : Screen()
     data object Capture : Screen()
+    data object CaptureAll : Screen()
     data object Import : Screen()
     data object Backup : Screen()
 }

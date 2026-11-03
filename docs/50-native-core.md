@@ -6,16 +6,17 @@
 
 - 原生核心包名 `muyian.bill.listener`，对外入口是 `object MuyianBillCore`（`hybrid.kt`），方法全部 `@JvmStatic`、同步返回。复杂结构用 **JSON 字符串**传递，页面侧通过 `data/Bills.kt`、`data/Qianji.kt`、`data/Capture.kt` 的解析函数消费。
 - 同包分文件，不要把所有逻辑塞回 `hybrid.kt`：
-  - `CaptureModels.kt` / `CaptureText.kt` / `CaptureRules.kt` / `CaptureParser.kt` / `CaptureGates.kt`：纯 Kotlin，无 Android import，可单测。
+  - `CaptureModels.kt` / `CaptureText.kt` / `CaptureRules.kt` / `CapturePage.kt` / `CaptureAmount.kt` / `CaptureClassify.kt` / `CaptureParser.kt` / `CaptureGates.kt`：纯 Kotlin，无 Android import，可单测。
   - `CaptureRegistry.kt`：App 角色、用户覆盖、采集设置、应用名查询。
   - `CaptureRoute.kt`：支付路线状态机（`HOST → PAY_ENTERED → PAY_EVIDENCE → RETURNED`），状态落盘 15 分钟。
-  - `CaptureLedger.kt`：交易账本（`capture_ledger`）、待确认队列（`pending_captures`）、诊断记录（`capture_trace`）。
+  - `CaptureLedger.kt`：交易账本（`capture_ledger`）、待确认队列（`pending_captures`）、不可变决策日志（`capture_trace`）、用户反馈（`capture_feedback`）。
+  - `CaptureStats.kt`：今日漏斗、按 App/页面类型统计、屏幕/通知双通道对账；只读，不参与捕获决策。
   - `CaptureEngine.kt`：观察 → 解析 → 门禁 → 账本 → 弹层编排。
   - `CapturePresenter.kt`：待确认队列与 `BillSheetActivity` 拉起。
   - `CaptureLearning.kt`：商户/App → 分类的本地计数。
   - `BillDb.kt`：SQLite；`SystemPerms.kt`：权限/自愈/主题色；`XlsxReader.kt`：xlsx；`PendingNotices.kt`：待确认通知；`hybrid.kt`：门面 + 导入/备份。
 - Kotlin 侧只用 Android 框架 API + `org.json`，禁止引入第三方库。
-- 新增采集能力只改对应层：App 名单与页面/金额规则 → `CaptureRules.kt`；解析 → `CaptureParser.kt`；交易身份 → `CaptureGates.kt` 的 `CaptureIdentity`；门禁顺序 → `CaptureGates.kt` + `CaptureEngine.kt`。不要在 `CaptureEngine` 里写某个 App 的 `if`。
+- 新增采集能力只改对应层：App 名单与页面/金额规则 → `CaptureRules.kt`；页面文档 → `CapturePage.kt`；金额候选/择取 → `CaptureAmount.kt`；页面分类/证据打分 → `CaptureClassify.kt`；字段组装 → `CaptureParser.kt`；交易身份 → `CaptureGates.kt` 的 `CaptureIdentity`；门禁顺序 → `CaptureGates.kt` + `CaptureEngine.kt`。不要在 `CaptureEngine` 里写某个 App 的 `if`。
 
 ## 自动记账链路（唯一路径）
 
@@ -48,9 +49,9 @@
 ## 交易身份与去重
 
 - 身份键：`order:<单号>`（24h）> `session:<支付会话>`（15min）> `page:<包名:页面指纹>`（宿主结果页，24h）> `capture:<包名:金额:方向:商户>`（5min）> `bill:<真实渠道:金额:方向>`（2min）。
-- `CaptureLedger.claim()` 在一个事务里查询全部键：命中同会话/同单号 → `MERGED`（后到的支付侧字段补进已排队账单）；命中页面/捕获/账单 → `DUPLICATE`；否则插入并返回 `CLAIMED`。
+- `CaptureLedger.claim()` 在一个事务里查询全部键：命中同会话/同单号 → `MERGED`（后到的支付侧字段补进已排队账单）；命中页面/捕获/账单 → `DUPLICATE`；强键与重复类键指向不同 txn 时按 `DUPLICATE` 处理，不跨 txn 合并；否则插入并返回 `CLAIMED`。
 - 已入账兜底：有单号先查 `bills.orderNo`；无单号查同渠道 + 金额 ±0.005 + `createdAt` ±2 分钟。`bills` 表新增 `idx_bills_created` / `idx_bills_order` 索引，禁止再全表扫描。
-- 支付会话：`CaptureRoute` 在支付 App 出现收银台/成功页/支付通知时记证据，回到宿主后进入 `RETURNED`；宿主结果页只接受「3 分钟内刚从有证据的支付 App 返回」或「10 分钟内点过收银台/提交订单」。**不再使用“15 分钟内存在任意 flow 就放行”的兜底。**
+- 支付会话：`CaptureRoute` 在支付 App 出现收银台/成功页/支付通知时记证据，回到宿主后进入 `RETURNED`；宿主结果页只接受「3 分钟内刚从有证据的支付 App 返回」或「10 分钟内点过收银台/提交订单」。路线只属于记录的宿主，进入另一个 HOST App 会清空 `hostTrigger`/`intent`/`session`。**不再使用“15 分钟内存在任意 flow 就放行”的兜底。**
 - 锁顺序：`CaptureRoute` 内部串行；`CapturePresenter` 内部队列串行；`CaptureLedger` 用独立事务。禁止在持有 presenter 锁时调 route/ledger 的长操作。
 
 ## 底部确认弹层
@@ -63,9 +64,9 @@
 
 ## 诊断与设置
 
-- `getCaptureDiagnostics(context, limit)` 返回 `{"summary":{accepted,saved,discarded,rejected,merged,reasons[]},"traces":[…],"settings":{…}}`；`getCaptureApps` / `setCaptureApp` 管理 App 角色与开关；`getCaptureSettings` / `setCaptureSettings` 管理 `recordTransfers` / `debugText` / `lowConfidence`。
+- `getCaptureDiagnostics(context, limit)` 返回 `{"summary":{pending,captured,accepted,saved,discarded,rejected,merged,amountEdited,reasons[],apps[],kinds[],reconcile{}},"traces":[…],"settings":{…}}`；`replayCaptureTraces(context, limit)` 用当前规则影子回放已保存文本；`getCaptureApps` / `setCaptureApp` 管理 App 角色与开关；`getCaptureSettings` / `setCaptureSettings` 管理 `recordTransfers` / `debugText` / `lowConfidence`。
 - 诊断记录默认**不存页面文本**；只有用户打开「记录页面文本（调试）」才存最近 500 条、保留 7 天，仅本机、可一键清空。禁止上传。
-- 页面侧只通过 `data/Capture.kt` 消费这些 JSON；设置页入口是「自动记账 → 识别记录与诊断」。
+- 页面侧只通过 `data/Capture.kt` 消费这些 JSON；入口是首页菜单的「识别记录」，设置页不再提供入口。
 
 ## 原生核心写法与兼容
 

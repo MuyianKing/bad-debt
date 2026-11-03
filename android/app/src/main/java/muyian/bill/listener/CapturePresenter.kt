@@ -43,6 +43,21 @@ internal object CapturePresenter {
         return true
     }
 
+    /** 支付侧后到、补进已排队账单：内存队列和正在显示的弹层都要同步，不能只改数据库。 */
+    fun merge(txnId: String, billJson: String) {
+        if (txnId.isEmpty()) return
+        val bill = try {
+            JSONObject(billJson)
+        } catch (_: Exception) {
+            return
+        }
+        synchronized(lock) {
+            val index = queue.indexOfFirst { it.optString("txnId") == txnId }
+            if (index >= 0) queue[index] = bill
+        }
+        BillSheetActivity.mergeCurrent(txnId, bill.toString())
+    }
+
     /** 从待确认通知点回来：插到队首，当前弹层结束后立即显示。 */
     fun enqueueFromNotice(context: Context, billJson: String): Boolean {
         val bill = try {
@@ -107,15 +122,22 @@ internal object CapturePresenter {
     fun onSaved(context: Context, bill: JSONObject, costType: String, finalAmount: Double = 0.0) {
         val txnId = bill.optString("txnId")
         if (txnId.isNotEmpty()) {
-            CaptureLedger.markState(context.applicationContext, txnId, CaptureLedger.STATE_SAVED)
-            CaptureLedger.removePending(context.applicationContext, txnId)
-        }
-        // 用户改过金额：记一条诊断标记，按 App 统计金额识别质量
-        if (finalAmount > 0) {
             val original = Math.abs(bill.optDouble("money", 0.0))
-            if (original > 0 && Math.abs(original - finalAmount) > 0.005) {
-                CaptureLedger.markAmountEdited(context.applicationContext, txnId)
-            }
+            val finalValue = if (finalAmount > 0) finalAmount else original
+            val edited = finalAmount > 0 && original > 0 &&
+                Math.abs(original - finalAmount) > 0.005
+            CaptureLedger.markState(context.applicationContext, txnId, CaptureLedger.STATE_SAVED)
+            CaptureLedger.recordFeedback(
+                context.applicationContext,
+                txnId,
+                bill,
+                CaptureLedger.STATE_SAVED,
+                finalValue,
+                edited,
+                costType,
+                bill.optString("merchant")
+            )
+            CaptureLedger.removePending(context.applicationContext, txnId)
         }
         CaptureLearning.record(
             context.applicationContext,
@@ -129,6 +151,16 @@ internal object CapturePresenter {
         val txnId = bill.optString("txnId")
         if (txnId.isNotEmpty()) {
             CaptureLedger.markState(context.applicationContext, txnId, CaptureLedger.STATE_DISCARDED)
+            CaptureLedger.recordFeedback(
+                context.applicationContext,
+                txnId,
+                bill,
+                CaptureLedger.STATE_DISCARDED,
+                0.0,
+                false,
+                "",
+                bill.optString("merchant")
+            )
             CaptureLedger.removePending(context.applicationContext, txnId)
         }
     }

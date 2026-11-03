@@ -47,7 +47,7 @@ app/src/main/java/com/muyian/debt/
 ├── ui/theme/Theme.kt        # 三主题设计令牌（Palette）
 ├── ui/icons/                # 24x24 图标路径 + Compose 绘制
 ├── ui/components/           # 玻璃卡、角色图、账单列表、底部弹层、滚轮、动效
-└── ui/screens/              # 首页/记一笔/统计/日历/分类/设置/识别记录/导入/备份
+└── ui/screens/              # 首页/记一笔/统计/日历/分类/设置/识别记录(含全部)/导入/备份
 app/src/main/java/muyian/bill/listener/   # 系统级原生核心
   ├── Capture*.kt             # 观察/解析/路线/账本/编排/弹层队列
   ├── hybrid.kt               # MuyianBillCore 门面 + 导入/备份

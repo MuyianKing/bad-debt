@@ -29,8 +29,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -83,7 +81,6 @@ import com.muyian.debt.data.Cats
 import com.muyian.debt.data.Category
 import com.muyian.debt.data.CategoryData
 import com.muyian.debt.data.SubCat
-import com.muyian.debt.ui.components.AppFab
 import com.muyian.debt.ui.components.AnimatedCenter
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.MascotFace
@@ -474,6 +471,15 @@ fun CategoriesScreen(app: AppState) {
                         }
                     }
                 }
+            },
+            actions = {
+                Box(
+                    Modifier
+                        .size(rpx(72))
+                        .clip(CircleShape)
+                        .pressable(p.fill, ::openAddTop),
+                    contentAlignment = Alignment.Center
+                ) { AppIcon("plus", p.text, 22.dp) }
             }
         )
 
@@ -641,14 +647,6 @@ fun CategoriesScreen(app: AppState) {
         }
 
     }
-    AppFab(
-        onClick = ::openAddTop,
-        modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .navigationBarsPadding()
-            .padding(end = rpx(40), bottom = rpx(48))
-    )
-
     AnimatedCenter(value = if (dlgShow) dlgTitle else null, onDismiss = { dlgShow = false }) {
             Column(
                 Modifier

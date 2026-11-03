@@ -8,7 +8,8 @@
 - 转场保留抽屉的方位感：`transitionSpec` 对 `Screen.Menu` 特判——进栈时菜单页从左缘推进、首页向右让位 1/5；出栈原路滑回左缘。菜单项进入其他页面仍走 `NavMotion.Horizontal` 的常规右推。返回键（`MainActivity` 的全局 `BackHandler` → `app.pop()`）逐级回退：其他页面 → 菜单页 → 首页，首页按返回键才 `moveTaskToBack(true)`。
 - 首页只保留「向右滑开菜单」的触发手势：`pointerInput` + `awaitEachGesture` 判水平/垂直位移比（1.2 倍占优且向右），松手触发跳转；不再跟手拖拽，没有遮罩与进度动画。不要恢复跟手位移或「过半才开」的阈值判定。
 - 状态栏图标：菜单页头部与首页头区同用主色渐变，`MainActivity` 对 `Screen.Menu` 沿用 `homeDarkInk` 判定，不要套普通页面的 `!p.dark`。
-- 悬浮加号 `AppFab` 只属于首页，与菜单页无关。液态玻璃下 `AppFab` 用圆形 `liquidGlass` + 主题色加号，并特殊补一层柔和投影、整圈发丝级高光，以及左上/右下两团较大的软光晕，避免玻璃按钮糊进账单列表；毛玻璃下保持主题渐变 + 白色加号。
+- 悬浮加号 `AppFab` 只属于首页，与菜单页无关。液态玻璃下 `AppFab` 用圆形 `liquidGlass`（**`dropShadow = false`**，连材质内置的 `Shadow` 一起关掉）+ 主题色加号，特殊补整圈发丝级高光；毛玻璃下保持主题渐变 + 白色加号。两种玻璃风格都**不带投影、不画光晕**（`shadow` 与左上/右下光晕已明确移除，别加回来）。
+- `AppFab` 的显隐跟列表滚动走（`HomeScreen` 的 `fabShown`）：列表停在最顶部（`firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset == 0`）才显示，滚离顶部就收起，回顶再弹出；动画用 `AnimatedVisibility` 的缩放（0.72↔1）+ 淡入淡出，时长取 `Motion.Enter` / `Motion.Exit`。不要改成跟随滚动方向判断或无动画硬切。
 
 ## 首页不做权限判断
 

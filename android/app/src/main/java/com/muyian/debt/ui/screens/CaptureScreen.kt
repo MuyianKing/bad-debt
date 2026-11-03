@@ -1,5 +1,6 @@
 package com.muyian.debt.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import com.muyian.debt.data.CaptureSettingsData
 import com.muyian.debt.data.CaptureTrace
 import com.muyian.debt.state.ActionSheetState
 import com.muyian.debt.state.AppState
+import com.muyian.debt.state.Screen
 import com.muyian.debt.ui.components.AppSwitch
 import com.muyian.debt.ui.components.DividerLine
 import com.muyian.debt.ui.components.GroupTitle
@@ -50,6 +52,7 @@ import com.muyian.debt.ui.components.pageBottomPadding
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import com.muyian.debt.ui.theme.rsp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,14 +61,31 @@ import java.util.Date
 import java.util.Locale
 
 /** 进程内快照：再次进入先用上次数据渲染，避免空态在入场动画里闪一下。 */
-private object CaptureSnapshot {
+internal object CaptureSnapshot {
     var diag: CaptureDiagnostics? = null
     var apps: List<CaptureApp>? = null
     var settings: CaptureSettingsData? = null
 }
 
-/** 最近识别首屏渲染条数：一次铺满 120 行会在入场那一帧卡顿。 */
-private const val TRACE_PAGE = 30
+/** 最近识别首屏只渲染最新 10 条，其余进「查看全部」子页。 */
+private const val TRACE_PREVIEW = 10
+
+/** 全部识别记录页的分块渲染大小：一次铺满 200 行会在入场那一帧卡顿。 */
+internal const val TRACE_PAGE = 30
+
+/** 重新识别：把保存的页面文本重跑一遍解析，结果弹层展示；不写账本、不弹确认。 */
+internal fun reparseCaptureTrace(ctx: Context, scope: CoroutineScope, app: AppState, t: CaptureTrace) {
+    if (t.text.isEmpty() || t.pkg.isEmpty()) {
+        app.showToast("这条记录没有保存页面文本")
+        return
+    }
+    scope.launch {
+        val result = withContext(Dispatchers.IO) {
+            Capture.reparse(ctx, t.pkg, t.source, t.text)
+        }
+        app.alert("重新识别结果", result.summary())
+    }
+}
 
 /** 识别记录与诊断：本地只读，展示最近判定、拒绝原因、App 开关与采集设置。 */
 @Composable
@@ -78,7 +98,6 @@ fun CaptureScreen(app: AppState) {
     var loaded by remember { mutableStateOf(CaptureSnapshot.diag != null) }
     var includeAllApps by remember { mutableStateOf(false) }
     var scanning by remember { mutableStateOf(false) }
-    var showAllTraces by remember { mutableStateOf(false) }
     // 每行各建一个 SimpleDateFormat 会在成批组合时明显拖慢，全页共用一个即可
     val timeFmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
 
@@ -109,16 +128,11 @@ fun CaptureScreen(app: AppState) {
     }
 
     val scope = rememberCoroutineScope()
-    fun reparseTrace(t: CaptureTrace) {
-        if (t.text.isEmpty() || t.pkg.isEmpty()) {
-            app.showToast("这条记录没有保存页面文本")
-            return
-        }
+    fun reparseTrace(t: CaptureTrace) = reparseCaptureTrace(ctx, scope, app, t)
+    fun replayAll() {
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                Capture.reparse(ctx, t.pkg, t.source, t.text)
-            }
-            app.alert("重新识别结果", result.summary())
+            val result = withContext(Dispatchers.IO) { Capture.replay(ctx, 200) }
+            app.alert("回放结果", result.summary())
         }
     }
 
@@ -165,10 +179,35 @@ fun CaptureScreen(app: AppState) {
                     .padding(vertical = rpx(22)),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                Stat("待确认", diag.summary.accepted, p.primaryDeep)
+                Stat("捕获", diag.summary.accepted, p.primaryDeep)
                 Stat("保存", diag.summary.saved, p.inn)
                 Stat("丢弃", diag.summary.discarded, p.out)
                 Stat("拒绝", diag.summary.rejected, p.sub)
+            }
+
+            if (diag.summary.pending > 0) {
+                Text(
+                    "当前待确认 ${diag.summary.pending} 笔",
+                    color = p.sub,
+                    fontSize = rsp(22),
+                    modifier = Modifier.padding(horizontal = rpx(28), vertical = rpx(2))
+                )
+            }
+
+            val rc = diag.summary.reconcile
+            if (rc.screen > 0 || rc.notify > 0) {
+                Text(
+                    "双通道对账：屏幕 ${rc.screen} · 通知 ${rc.notify} · 对上 ${rc.matched} · 仅屏幕 ${rc.screenOnly} · 仅通知 ${rc.notifyOnly}",
+                    color = p.sub,
+                    fontSize = rsp(21),
+                    modifier = Modifier.padding(horizontal = rpx(28), vertical = rpx(2))
+                )
+                Text(
+                    "同额 + 2 分钟内配对，仅作漏采参考",
+                    color = p.sub,
+                    fontSize = rsp(19),
+                    modifier = Modifier.padding(horizontal = rpx(28), vertical = rpx(1))
+                )
             }
 
             if (diag.summary.amountEdited > 0) {
@@ -208,6 +247,74 @@ fun CaptureScreen(app: AppState) {
                 }
             }
 
+            if (diag.apps.isNotEmpty()) {
+                GroupTitle("按 App")
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = rpx(20), vertical = rpx(4))
+                        .glass(shape = RoundedCornerShape(rpx(20)))
+                        .padding(vertical = rpx(6))
+                ) {
+                    for (a in diag.apps.take(6)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = rpx(24), vertical = rpx(10)),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                a.app.ifEmpty { a.pkg },
+                                color = p.text,
+                                fontSize = rsp(24),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "捕获 ${a.captured} · 保存 ${a.saved} · 改 ${a.edited}",
+                                color = p.sub,
+                                fontSize = rsp(21)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (diag.kinds.isNotEmpty()) {
+                GroupTitle("按页面类型")
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = rpx(20), vertical = rpx(4))
+                        .glass(shape = RoundedCornerShape(rpx(20)))
+                        .padding(vertical = rpx(6))
+                ) {
+                    for (k in diag.kinds.take(6)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = rpx(24), vertical = rpx(10)),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                k.label.ifEmpty { k.kind },
+                                color = p.text,
+                                fontSize = rsp(24),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "捕获 ${k.captured} · 保存 ${k.saved} · 改 ${k.edited}",
+                                color = p.sub,
+                                fontSize = rsp(21)
+                            )
+                        }
+                    }
+                }
+            }
+
             GroupTitle("识别行为")
             Column(
                 Modifier
@@ -235,6 +342,22 @@ fun CaptureScreen(app: AppState) {
                     checked = settings.lowConfidence,
                     onChange = { saveSettings(settings.copy(lowConfidence = it)) }
                 )
+                DividerLine(color = p.lineSoft)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { replayAll() }
+                        .padding(horizontal = rpx(24), vertical = rpx(18)),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "回放已保存文本",
+                        color = p.primaryDeep,
+                        fontSize = rsp(24),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("用当前规则重跑", color = p.sub, fontSize = rsp(21))
+                }
             }
 
             GroupTitle("识别应用")
@@ -353,27 +476,26 @@ fun CaptureScreen(app: AppState) {
                     )
                 }
             } else {
-                val visible = if (showAllTraces) diag.traces.take(120) else diag.traces.take(TRACE_PAGE)
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = rpx(20), vertical = rpx(4))
                         .glass(shape = RoundedCornerShape(rpx(20)))
                 ) {
-                    for (t in visible) {
+                    for (t in diag.traces.take(TRACE_PREVIEW)) {
                         TraceRow(t, timeFmt, onReparse = { reparseTrace(t) })
                         DividerLine(color = p.lineSoft)
                     }
-                    if (diag.traces.size > TRACE_PAGE) {
+                    if (diag.traces.size > TRACE_PREVIEW) {
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { showAllTraces = !showAllTraces }
+                                .clickable { app.navigate(Screen.CaptureAll) }
                                 .padding(horizontal = rpx(24), vertical = rpx(16)),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                if (showAllTraces) "收起" else "查看全部 ${minOf(diag.traces.size, 120)} 条",
+                                "查看全部 ${diag.traces.size} 条",
                                 color = p.primaryDeep,
                                 fontSize = rsp(22),
                                 fontWeight = FontWeight.Medium
@@ -498,7 +620,7 @@ private fun AppRow(app: CaptureApp, onToggle: (Boolean) -> Unit, onRole: () -> U
 }
 
 @Composable
-private fun TraceRow(t: CaptureTrace, timeFmt: SimpleDateFormat, onReparse: (() -> Unit)? = null) {
+internal fun TraceRow(t: CaptureTrace, timeFmt: SimpleDateFormat, onReparse: (() -> Unit)? = null) {
     val p = LocalPalette.current
     val time = remember(t.at) { timeFmt.format(Date(t.at)) }
     Row(

@@ -1,0 +1,14 @@
+# 自动记账回放语料：name \t pkg \t source \t kind \t amount \t direction \t lines
+# source=screen 时 lines 用 | 分行；source=notify 时第一段是标题，其余是正文/大文本。
+# amount=0 表示期望"页面识别成功但没有金额"或"非成功页"。
+alipay_success	com.eg.android.AlipayGphone	screen	PAY_SUCCESS	38.50	EXPENSE	支付成功|¥38.50|收款方 星巴克咖啡|订单号 2026102612345678
+alipay_refund	com.eg.android.AlipayGphone	screen	REFUND_SUCCESS	50.00	REFUND	退款成功|实付金额 ¥100.00|退款金额 ¥50.00
+wechat_chat	com.tencent.mm	screen	CHAT	0	UNKNOWN	张三|微信转账|已收款 ¥100.00|转账说明|输入消息|发送
+wechat_marketing	com.tencent.mm	screen	AD	0	UNKNOWN	微信支付|支付立减，最高88元|立即领取
+meituan_order_list	com.sankuai.meituan	screen	ORDER_LIST	0	UNKNOWN	我的订单|全部订单|支付成功 ¥38.50
+taobao_cashier	com.taobao.taobao	screen	CASHIER	0	UNKNOWN	淘宝闪购商户|¥7.60|余额宝|极速付款
+xianyu_success_without_amount	com.taobao.idlefish	screen	PAY_SUCCESS	0	UNKNOWN	支付成功|0.01元兑好礼|去领取
+bank_sms	com.icbc	notify	PAY_SUCCESS	38.50	EXPENSE	工商银行|您尾号4321的卡消费人民币38.50元
+wechat_pay_notify	com.tencent.mm	notify	PAY_SUCCESS	38.50	EXPENSE	微信支付|支付成功 ¥38.50
+alipay_marketing_notify	com.eg.android.AlipayGphone	notify	AD	0	UNKNOWN	支付宝|支付立减，最高88元
+alipay_transfer_receipt	com.eg.android.AlipayGphone	screen	TRANSFER_SUCCESS	0.01	EXPENSE	转账成功￥0.01|转账成功|0.01|收款方|木易之(杨麟)|交易方式|余额宝(转出资金付款)|完成|回首页

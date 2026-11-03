@@ -24,6 +24,8 @@ internal object CaptureLedger {
 
     @Volatile
     private var lastPurgeAt = 0L
+    @Volatile
+    private var lastTracePurgeAt = 0L
 
     enum class ClaimKind { CLAIMED, MERGED, DUPLICATE }
 
@@ -54,6 +56,7 @@ internal object CaptureLedger {
         val orderNo: String,
         val confidence: Double,
         val needsReview: Boolean,
+        val evidence: String,
         val text: String
     )
 
@@ -104,6 +107,7 @@ internal object CaptureLedger {
                 "confidence real not null default 0," +
                 "needs_review integer not null default 0," +
                 "text_hash text not null default ''," +
+                "evidence text not null default ''," +
                 "text text not null default '')"
         )
         db.execSQL("create index if not exists idx_capture_trace_created on capture_trace(created_at)")
@@ -112,7 +116,34 @@ internal object CaptureLedger {
         } catch (_: Exception) {
             // column already exists
         }
+        try {
+            db.execSQL("alter table capture_trace add column evidence text not null default ''")
+        } catch (_: Exception) {
+            // column already exists
+        }
         db.execSQL("create index if not exists idx_capture_trace_txn on capture_trace(txn_id)")
+        db.execSQL(
+            "create index if not exists idx_capture_trace_result " +
+                "on capture_trace(result, created_at)"
+        )
+        // 用户反馈与决策日志分开：trace 一旦写入不再改写，保存/丢弃/改金额写这里
+        db.execSQL(
+            "create table if not exists capture_feedback(" +
+                "txn_id text primary key," +
+                "pkg text not null default ''," +
+                "source text not null default ''," +
+                "kind text not null default ''," +
+                "outcome text not null default ''," +
+                "final_amount real not null default 0," +
+                "amount_edited integer not null default 0," +
+                "cost_type text not null default ''," +
+                "merchant text not null default ''," +
+                "created_at integer not null)"
+        )
+        db.execSQL(
+            "create index if not exists idx_capture_feedback_created " +
+                "on capture_feedback(created_at)"
+        )
         // 账单表的去重/核对索引：不再全表扫描
         try {
             db.execSQL("create index if not exists idx_bills_created on bills(createdAt)")
@@ -135,13 +166,22 @@ internal object CaptureLedger {
             db.beginTransaction()
             try {
                 val hits = queryHits(db, candidate.keys, System.currentTimeMillis())
-                if (hits.isNotEmpty()) {
-                    val mergeHit = hits.firstOrNull { it.second == "session" }
-                        ?: hits.firstOrNull { it.second == "order" }
-                    if (mergeHit != null) {
-                        val txnId = mergeHit.first
+                    .map { ClaimHit(it.first, it.second, it.third) }
+                val choice = CaptureClaimPolicy.choose(hits)
+                if (choice != null) {
+                    val duplicateReason = choice.duplicateReason
+                    if (duplicateReason != null) {
+                        db.setTransactionSuccessful()
+                        return Claim(
+                            ClaimKind.DUPLICATE,
+                            choice.duplicateTxnId.ifEmpty { candidate.txnId },
+                            duplicateReason
+                        )
+                    }
+                    val txnId = choice.mergeTxnId
+                    if (txnId.isNotEmpty()) {
                         for (key in candidate.keys) {
-                            if (!hits.any { it.third == key.key }) {
+                            if (hits.none { it.key == key.key }) {
                                 insertKey(db, key, txnId, candidate, STATE_QUEUED)
                             }
                         }
@@ -149,16 +189,6 @@ internal object CaptureLedger {
                         db.setTransactionSuccessful()
                         return Claim(ClaimKind.MERGED, txnId)
                     }
-                    // 页面/捕获/账单键直接判重
-                    val duplicate = hits.first()
-                    val reason = when (duplicate.second) {
-                        "page" -> Reason.DUPLICATE_PAGE
-                        "capture" -> Reason.DUPLICATE_CAPTURE
-                        "bill" -> Reason.DUPLICATE_BILL
-                        else -> Reason.DUPLICATE_CAPTURE
-                    }
-                    db.setTransactionSuccessful()
-                    return Claim(ClaimKind.DUPLICATE, duplicate.first, reason)
                 }
 
                 // 已入账账单兜底：单号优先，其次同渠道+金额+2 分钟
@@ -393,26 +423,31 @@ internal object CaptureLedger {
         return 0
     }
 
-    /** 同一笔在宿主/支付侧各被捕获一次时，把后到的权威字段补进已排队账单。 */
-    fun mergePending(context: Context, txnId: String, incomingJson: String, incomingIsPay: Boolean) {
-        if (txnId.isEmpty()) return
+    /**
+     * 同一笔在宿主/支付侧各被捕获一次时，把后到的权威字段补进已排队账单。
+     * @return 合并后的账单 JSON；没有待确认行时返回 null。
+     */
+    fun mergePending(
+        context: Context, txnId: String, incomingJson: String, incomingIsPay: Boolean
+    ): String? {
+        if (txnId.isEmpty()) return null
         val db = BillDb.openDb(context)
         var cursor: Cursor? = null
         try {
             cursor = db.rawQuery(
                 "select bill_json from pending_captures where txn_id=? limit 1", arrayOf(txnId)
             )
-            if (!cursor.moveToFirst()) return
+            if (!cursor.moveToFirst()) return null
             val target = try {
                 org.json.JSONObject(cursor.getString(0) ?: "{}")
             } catch (_: Exception) {
-                return
+                return null
             }
             if (incomingIsPay) {
                 val incoming = try {
                     org.json.JSONObject(incomingJson)
                 } catch (_: Exception) {
-                    return
+                    return null
                 }
                 target.put("money", incoming.optDouble("money", target.optDouble("money", 0.0)))
                 target.put("bankName", incoming.optString("bankName", target.optString("bankName")))
@@ -429,8 +464,10 @@ internal object CaptureLedger {
             val cv = ContentValues()
             cv.put("bill_json", target.toString())
             db.update("pending_captures", cv, "txn_id=?", arrayOf(txnId))
+            return target.toString()
         } catch (e: Exception) {
             Log.w(TAG, "merge pending failed", e)
+            return null
         } finally {
             cursor?.close()
             db.close()
@@ -445,10 +482,7 @@ internal object CaptureLedger {
             cv.put("state", state)
             cv.put("reason", reason)
             db.update("capture_ledger", cv, "txn_id=?", arrayOf(txnId))
-            val trace = ContentValues()
-            trace.put("result", state)
-            if (reason.isNotEmpty()) trace.put("reason", reason)
-            db.update("capture_trace", trace, "txn_id=?", arrayOf(txnId))
+            // capture_trace 是决策日志，保持不可变；保存/丢弃写入 capture_feedback
         } catch (e: Exception) {
             Log.w(TAG, "mark ledger state failed", e)
         } finally {
@@ -457,21 +491,38 @@ internal object CaptureLedger {
     }
 
     /**
-     * 用户在弹层里改过金额：往该笔的判定记录上追加 amount_edited 标记。
-     * 这是规则迭代最重要的信号——哪类页面金额识别得差，看它排序就知道。
+     * 用户反馈：保存/丢弃与是否改过金额。与 capture_trace 分开存，
+     * 决策日志一旦写入不再改写，漏斗（捕获→保存/丢弃）才能还原。
      */
-    fun markAmountEdited(context: Context, txnId: String) {
+    fun recordFeedback(
+        context: Context,
+        txnId: String,
+        bill: org.json.JSONObject,
+        outcome: String,
+        finalAmount: Double,
+        amountEdited: Boolean,
+        costType: String,
+        merchant: String
+    ) {
         if (txnId.isEmpty()) return
         val db = BillDb.openDb(context)
         try {
-            db.execSQL(
-                "update capture_trace set reason = case " +
-                    "when reason like '%amount_edited%' then reason " +
-                    "else reason || '|amount_edited' end where txn_id=?",
-                arrayOf(txnId)
+            val cv = ContentValues()
+            cv.put("txn_id", txnId)
+            cv.put("pkg", bill.optString("sourcePkg"))
+            cv.put("source", bill.optString("capture"))
+            cv.put("kind", bill.optString("pageKind"))
+            cv.put("outcome", outcome)
+            cv.put("final_amount", finalAmount)
+            cv.put("amount_edited", if (amountEdited) 1 else 0)
+            cv.put("cost_type", costType)
+            cv.put("merchant", merchant)
+            cv.put("created_at", System.currentTimeMillis())
+            db.insertWithOnConflict(
+                "capture_feedback", null, cv, SQLiteDatabase.CONFLICT_REPLACE
             )
         } catch (e: Exception) {
-            Log.w(TAG, "mark amount edited failed", e)
+            Log.w(TAG, "record capture feedback failed", e)
         } finally {
             db.close()
         }
@@ -489,6 +540,7 @@ internal object CaptureLedger {
         reason: String,
         txnId: String,
         facts: Facts?,
+        evidence: String = "",
         text: String
     ) {
         val db = BillDb.openDb(context)
@@ -508,17 +560,36 @@ internal object CaptureLedger {
             cv.put("confidence", facts?.confidence ?: 0.0)
             cv.put("needs_review", if (facts?.needsReview == true) 1 else 0)
             cv.put("text_hash", CaptureText.hash(text))
+            cv.put("evidence", evidence)
             cv.put("text", text)
             db.insert("capture_trace", null, cv)
-            db.delete("capture_trace", "created_at < ?", arrayOf((createdAt - TRACE_TTL_MS).toString()))
+            maybePurgeTraces(db, createdAt)
+        } catch (e: Exception) {
+            Log.w(TAG, "write capture trace failed", e)
+        } finally {
+            db.close()
+        }
+    }
+
+    /** 清理最多每小时一次；不再每插一条 trace 就做一次全表维护。 */
+    private fun maybePurgeTraces(db: SQLiteDatabase, now: Long) {
+        if (now - lastTracePurgeAt < 60L * 60 * 1000L) return
+        lastTracePurgeAt = now
+        try {
+            db.delete(
+                "capture_trace", "created_at < ?",
+                arrayOf((now - TRACE_TTL_MS).toString())
+            )
+            db.delete(
+                "capture_feedback", "created_at < ?",
+                arrayOf((now - TRACE_TTL_MS).toString())
+            )
             db.execSQL(
                 "delete from capture_trace where id not in " +
                     "(select id from capture_trace order by id desc limit $TRACE_MAX)"
             )
         } catch (e: Exception) {
-            Log.w(TAG, "write capture trace failed", e)
-        } finally {
-            db.close()
+            Log.w(TAG, "purge capture trace failed", e)
         }
     }
 
@@ -529,7 +600,7 @@ internal object CaptureLedger {
         try {
             cursor = db.rawQuery(
                 "select id,created_at,pkg,source,kind,result,reason,txn_id,amount,direction," +
-                    "channel,order_no,confidence,needs_review,text from capture_trace " +
+                    "channel,order_no,confidence,needs_review,evidence,text from capture_trace " +
                     "order by id desc limit " + limit,
                 null
             )
@@ -550,7 +621,8 @@ internal object CaptureLedger {
                         orderNo = cursor.getString(11) ?: "",
                         confidence = cursor.getDouble(12),
                         needsReview = cursor.getInt(13) == 1,
-                        text = cursor.getString(14) ?: ""
+                        evidence = cursor.getString(14) ?: "",
+                        text = cursor.getString(15) ?: ""
                     )
                 )
             }
@@ -567,6 +639,7 @@ internal object CaptureLedger {
         val db = BillDb.openDb(context)
         try {
             db.delete("capture_trace", null, null)
+            db.delete("capture_feedback", null, null)
         } catch (e: Exception) {
             Log.w(TAG, "clear trace failed", e)
         } finally {
@@ -580,6 +653,10 @@ internal object CaptureLedger {
         try {
             db.delete("capture_ledger", "expires_at < ?", arrayOf(now.toString()))
             db.delete("pending_captures", "created_at < ?", arrayOf((now - PENDING_TTL_MS).toString()))
+            db.delete(
+                "capture_feedback", "created_at < ?",
+                arrayOf((now - TRACE_TTL_MS).toString())
+            )
         } catch (e: Exception) {
             Log.w(TAG, "purge capture tables failed", e)
         } finally {

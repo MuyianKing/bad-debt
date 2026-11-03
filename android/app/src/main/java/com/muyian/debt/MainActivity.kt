@@ -61,6 +61,7 @@ import com.muyian.debt.ui.screens.AddScreen
 import com.muyian.debt.ui.screens.BackupScreen
 import com.muyian.debt.ui.screens.CalendarScreen
 import com.muyian.debt.ui.screens.CaptureScreen
+import com.muyian.debt.ui.screens.CaptureAllScreen
 import com.muyian.debt.ui.screens.CategoriesScreen
 import com.muyian.debt.ui.screens.HomeScreen
 import com.muyian.debt.ui.screens.ImportScreen
@@ -271,6 +272,7 @@ private fun MuyianRoot(app: AppState) {
                     Screen.Categories -> CategoriesScreen(app)
                     Screen.Settings -> SettingsScreen(app)
                     Screen.Capture -> CaptureScreen(app)
+                    Screen.CaptureAll -> CaptureAllScreen(app)
                     Screen.Import -> ImportScreen(app)
                     Screen.Backup -> BackupScreen(app)
                 }
