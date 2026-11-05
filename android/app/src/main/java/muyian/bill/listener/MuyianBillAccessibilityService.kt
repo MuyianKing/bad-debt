@@ -22,6 +22,8 @@ class MuyianBillAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "MuyianBill"
         private const val THROTTLE_MS = 600L
+        /** 同签名只在短时间内跳过：账本才是去重边界，采集层不能永久吞掉第二笔同额交易 */
+        private const val SIGNATURE_TTL_MS = 2_000L
         private const val MAX_NODES = 600
         private const val MAX_DEPTH = 30
         private const val ALIPAY_PKG = "com.eg.android.AlipayGphone"
@@ -33,6 +35,7 @@ class MuyianBillAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val lastEventAt = HashMap<String, Long>()
     private val lastSignature = HashMap<String, String>()
+    private val lastSignatureAt = HashMap<String, Long>()
     private val pendingPages = HashSet<String>()
     private var alipayPassesScheduled = false
 
@@ -101,16 +104,24 @@ class MuyianBillAccessibilityService : AccessibilityService() {
         val root = findRoot(pkg) ?: return
         val items = ArrayList<UiText>()
         collectTexts(root, items, 0, intArrayOf(MAX_NODES), HashSet())
+        if (pkg == "com.tencent.mm" && items.isEmpty()) {
+            // 微信 LiteApp 支付页：内容只在 content-desc，且节点被标记为不可见。
+            // 只在这种"可见节点为空"的情况下补收，避免把普通微信页面的隐藏文本带进来。
+            collectContentDescs(root, items, 0, intArrayOf(MAX_NODES), HashSet())
+        }
         if (items.isEmpty()) return
         items.sortWith(compareBy<UiText> { it.top }.thenBy { it.left })
 
+        val now = System.currentTimeMillis()
         val signature = pkg + "#" + CaptureText.hash(
             items.joinToString("|") { it.text + "@" + it.top }
         )
-        if (signature == lastSignature[pkg]) return
+        val lastAt = lastSignatureAt[pkg] ?: 0L
+        if (signature == lastSignature[pkg] && now - lastAt < SIGNATURE_TTL_MS) return
         lastSignature[pkg] = signature
+        lastSignatureAt[pkg] = now
 
-        val snapshot = buildSnapshot(items, System.currentTimeMillis())
+        val snapshot = buildSnapshot(items, now)
         executor.execute(Runnable {
             try {
                 MuyianBillCore.handleScreenSnapshot(
@@ -124,11 +135,21 @@ class MuyianBillAccessibilityService : AccessibilityService() {
 
     /** 优先从交互窗口里选包名匹配且层级最高的窗口，避免切回宿主时 root 还停在支付 App。 */
     private fun findRoot(pkg: String): AccessibilityNodeInfo? {
+        // 微信 LiteApp/支付页的活动窗口内容只挂在 rootInActiveWindow 上，
+        // windows 里同名窗口的根节点可能是空的；先试当前活动窗口。
+        val active = rootInActiveWindow
+        if (active?.packageName?.toString() == pkg) return active
         var best: AccessibilityNodeInfo? = null
+        var bestLayer = Int.MIN_VALUE
         try {
             for (window in windows) {
                 val root = window.root ?: continue
-                if (root.packageName?.toString() == pkg) best = root
+                if (root.packageName?.toString() != pkg) continue
+                // windows 不保证顺序；账单详情可能叠在账单列表上，必须按 layer 取最上层
+                if (window.layer > bestLayer) {
+                    bestLayer = window.layer
+                    best = root
+                }
             }
         } catch (_: Exception) {
             // 部分 ROM 不返回 windows，退回 rootInActiveWindow
@@ -173,6 +194,40 @@ class MuyianBillAccessibilityService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             collectTexts(node.getChild(i), out, depth + 1, budget, seen)
+            if (budget[0] <= 0) return
+        }
+    }
+
+    /** 微信 LiteApp 支付页：文本只在 contentDescription 里，且节点不可见。 */
+    private fun collectContentDescs(
+        node: AccessibilityNodeInfo?, out: ArrayList<UiText>, depth: Int,
+        budget: IntArray, seen: HashSet<String>
+    ) {
+        if (node == null || depth > MAX_DEPTH || budget[0] <= 0) return
+        val desc = node.contentDescription?.toString()?.trim()
+        if (!desc.isNullOrEmpty()) {
+            val rect = Rect()
+            node.getBoundsInScreen(rect)
+            val key = desc + "@" + rect.left + "," + rect.top
+            if (seen.add(key)) {
+                out.add(
+                    UiText(
+                        text = desc,
+                        left = rect.left,
+                        top = rect.top,
+                        right = rect.right,
+                        bottom = rect.bottom,
+                        sizePx = rect.height(),
+                        className = node.className?.toString() ?: "",
+                        viewId = node.viewIdResourceName ?: "",
+                        depth = depth
+                    )
+                )
+                budget[0]--
+            }
+        }
+        for (i in 0 until node.childCount) {
+            collectContentDescs(node.getChild(i), out, depth + 1, budget, seen)
             if (budget[0] <= 0) return
         }
     }

@@ -37,7 +37,7 @@
 
 - 新页面已在 `Screen` 中注册，并在 `MainActivity` 的 `AnimatedContent` 中渲染。
 - 新增原生能力已由 `MuyianBillCore` 暴露，复杂结构走 JSON 字符串；`data/` 侧有对应解析函数。
-- 改采集/解析/去重时，先跑 `./gradlew :app:testDebugUnitTest`；新增规则补 `CaptureParserTest` / `CaptureIdentityTest` 回归样例，并在真机「设置 → 自动记账 → 识别记录与诊断」核对原因码。
+- 改采集/解析/去重时，先跑 `./gradlew :app:testDebugUnitTest`；新增规则补 `CaptureParserTest` / `CaptureIdentityTest` 回归样例，并在真机「首页菜单 → 识别记录」核对原因码。
 - 无新增网络请求；金额符号与 `costType` 叶子名未被破坏。
 - 改到 `muyian/bill/listener/` 下任意文件或 `android/app/src/main/AndroidManifest.xml` 时，重新构建安装；权限/服务声明变化后提示用户重新授权。
 - 改到配色/组件样式时，三个主题（悟空黄、哪吒红、沙僧黑）各过一遍。

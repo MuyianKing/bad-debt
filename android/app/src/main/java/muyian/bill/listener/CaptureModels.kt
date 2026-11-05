@@ -59,6 +59,7 @@ enum class Reason(val label: String) {
     PAGE_PENDING("处理中/待支付"),
     PAGE_CASHIER("收银台"),
     PAGE_UNKNOWN("未识别页面"),
+    PAGE_AMBIGUOUS("页面证据冲突"),
     NO_PAYMENT_CONTEXT("没有支付路线"),
     NO_AMOUNT("没有可信金额"),
     NO_DIRECTION("无法判断收支方向"),
@@ -164,7 +165,9 @@ data class Facts(
 data class PageAnalysis(
     val kind: PageKind,
     val facts: Facts? = null,
-    val reason: Reason? = null
+    val reason: Reason? = null,
+    /** 完成标记文本；宿主成功页没有金额时，用它和 PaymentIntent 合成一笔 */
+    val completionMark: String = ""
 ) {
     val isSuccess: Boolean
         get() = facts != null && (
@@ -176,7 +179,52 @@ data class PageAnalysis(
             )
 }
 
+/**
+ * 支付意图：收银台/确认购买页/支付宝付款弹窗里读到的金额证据。
+ * 宿主自己的成功页经常只有"支付成功"没有金额（闲鱼就是典型），
+ * 这时用同一会话里最近一次 intent 补金额，完成语义仍来自成功页。
+ */
+data class PaymentIntent(
+    val amount: Double,
+    val channel: String,
+    val merchant: String,
+    val pkg: String,
+    val at: Long,
+    val confidence: Double = 0.9
+)
+
 data class LedgerKey(val key: String, val kind: String, val ttlMs: Long)
+
+/** 支付路线阶段；字符串值与 SharedPreferences 里的历史字段保持兼容。 */
+object RoutePhase {
+    const val HOST = "HOST"
+    const val PAY_ENTERED = "PAY_ENTERED"
+    const val PAY_EVIDENCE = "PAY_EVIDENCE"
+    const val RETURNED = "RETURNED"
+}
+
+/**
+ * 支付路线快照：纯数据，状态迁移在 CaptureRoutePolicy，落盘由 CaptureRoute 负责。
+ * 一条路线只属于一个宿主；进入另一个宿主时由策略整体作废，避免跨 App 复用上下文。
+ */
+data class RouteState(
+    val hostPkg: String = "",
+    val payPkg: String = "",
+    val phase: String = RoutePhase.HOST,
+    val enteredAt: Long = 0L,
+    val evidenceAt: Long = 0L,
+    val returnedAt: Long = 0L,
+    val hostTriggerAt: Long = 0L,
+    val sessionId: String = "",
+    val lastPkg: String = "",
+    val updatedAt: Long = 0L,
+    val intentAmount: Double = 0.0,
+    val intentChannel: String = "",
+    val intentMerchant: String = "",
+    val intentPkg: String = "",
+    val intentHost: String = "",
+    val intentAt: Long = 0L
+)
 
 data class Candidate(
     val txnId: String,

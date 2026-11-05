@@ -48,53 +48,86 @@ internal object CaptureEngine {
             items = items,
             observedAt = now
         )
-        val analysis = CaptureParser.parseScreen(
+        val parsed = CaptureParser.parseScreenDetailed(
             effectiveRule, obs, ParseOptions(settings.recordTransfers)
         )
+        val analysis = parsed.analysis
+        val classification = parsed.classification
         val debugText = if (settings.debugText) items.joinToString("\n") { it.text } else ""
 
         if (analysis.kind == PageKind.CASHIER) {
             if (!force) {
-                if (effectiveRule.role == AppRole.PAY) {
+                val intent = CaptureParser.parseCashierIntent(effectiveRule, obs)
+                if (intent != null) {
+                    CaptureRoute.markIntent(
+                        context, pkg, now, intent, effectiveRule.role == AppRole.HOST
+                    )
+                } else if (effectiveRule.role == AppRole.PAY) {
                     CaptureRoute.markCashier(context, pkg, now)
                 } else if (effectiveRule.role == AppRole.HOST) {
                     CaptureRoute.markHostTrigger(context, pkg, now)
                 }
             }
             trace(context, settings, now, pkg, CaptureSource.SCREEN, analysis.kind,
-                "rejected", Reason.PAGE_CASHIER, "", null, debugText)
+                "rejected", Reason.PAGE_CASHIER, "", null, debugText, classification)
             return rejected(Reason.PAGE_CASHIER)
         }
 
-        val facts = analysis.facts
+        var facts = analysis.facts
+        // 成功页经常只有"支付成功"没有金额（闲鱼成功页、微信 LiteApp 成功页）：
+        // 宿主页用同路线 intent，支付 App 页用同一支付会话的 intent 补齐。
+        if (facts == null && analysis.kind == PageKind.PAY_SUCCESS) {
+            val intent = when (effectiveRule.role) {
+                AppRole.HOST -> CaptureRoute.intentFor(context, pkg, now)
+                AppRole.PAY -> CaptureRoute.intentForPayment(context, pkg, now)
+                else -> null
+            }
+            if (intent != null) {
+                facts = Facts(
+                    pageKind = PageKind.PAY_SUCCESS,
+                    direction = Direction.EXPENSE,
+                    amount = intent.amount,
+                    tier = AmountTier.STRONG_LABEL,
+                    amountConfidence = intent.confidence,
+                    needsReview = false,
+                    channel = intent.channel.ifEmpty { "银行卡" },
+                    merchant = intent.merchant,
+                    orderNo = "",
+                    occurredAt = now,
+                    completionMark = analysis.completionMark.ifEmpty { "支付成功" },
+                    confidence = 0.88,
+                    suppressReason = null
+                )
+            }
+        }
         if (facts == null) {
             val reason = analysis.reason ?: CaptureGates.pageReason(analysis.kind)
                 ?: Reason.NO_COMPLETION_MARK
             trace(context, settings, now, pkg, CaptureSource.SCREEN, analysis.kind,
-                "rejected", reason, "", null, debugText)
+                "rejected", reason, "", null, debugText, classification)
             return rejected(reason)
         }
 
         if (!force) {
-            val contextReason = CaptureGates.contextReason(
-                effectiveRule, CaptureRoute.hasHostContext(context, pkg, now)
-            )
+            val hasContext = CaptureRoute.hasHostContext(context, pkg, now) ||
+                CaptureRoute.intentFor(context, pkg, now) != null
+            val contextReason = CaptureGates.contextReason(effectiveRule, hasContext)
             if (contextReason != null) {
                 trace(context, settings, now, pkg, CaptureSource.SCREEN, analysis.kind,
-                    "rejected", contextReason, "", facts, debugText)
+                    "rejected", contextReason, "", facts, debugText, classification)
                 return rejected(contextReason)
             }
         }
         val semantic = CaptureGates.semanticReason(facts)
         if (semantic != null && !force) {
             trace(context, settings, now, pkg, CaptureSource.SCREEN, analysis.kind,
-                "rejected", semantic, "", facts, debugText)
+                "rejected", semantic, "", facts, debugText, classification)
             return rejected(semantic)
         }
         val extra = extraReason(settings, effectiveRule, facts, CaptureSource.SCREEN, now)
         if (extra != null && !force) {
             trace(context, settings, now, pkg, CaptureSource.SCREEN, analysis.kind,
-                "rejected", extra, "", facts, debugText)
+                "rejected", extra, "", facts, debugText, classification)
             return rejected(extra)
         }
         if (!force && effectiveRule.role == AppRole.PAY) {
@@ -114,7 +147,13 @@ internal object CaptureEngine {
         )
         val txnId = built.first
         val candidate = Candidate(txnId, CaptureSource.SCREEN, pkg, facts, built.second, now)
-        return deliver(context, settings, candidate, analysis, debugText)
+        val result = deliver(context, settings, candidate, analysis, debugText, classification)
+        if ((effectiveRule.role == AppRole.HOST || effectiveRule.role == AppRole.PAY) &&
+            analysis.kind == PageKind.PAY_SUCCESS
+        ) {
+            CaptureRoute.clearIntent(context)
+        }
+        return result
     }
 
     fun handleNotification(
@@ -136,9 +175,11 @@ internal object CaptureEngine {
             }
         }
         val effectiveRule = rule ?: return rejected(Reason.NOT_CANDIDATE)
-        val analysis = CaptureParser.parseNotification(
+        val parsed = CaptureParser.parseNotificationDetailed(
             effectiveRule, obs, ParseOptions(settings.recordTransfers)
         )
+        val analysis = parsed.analysis
+        val classification = parsed.classification
         val debugText = if (settings.debugText) {
             listOf(obs.title, obs.subText, obs.text, obs.bigText).joinToString("\n")
         } else {
@@ -149,7 +190,7 @@ internal object CaptureEngine {
             val reason = analysis.reason ?: CaptureGates.pageReason(analysis.kind)
                 ?: Reason.NO_COMPLETION_MARK
             trace(context, settings, now, obs.pkg, CaptureSource.NOTIFICATION, analysis.kind,
-                "rejected", reason, "", null, debugText)
+                "rejected", reason, "", null, debugText, classification)
             return rejected(reason)
         }
         if (!force) {
@@ -158,20 +199,20 @@ internal object CaptureEngine {
             )
             if (contextReason != null) {
                 trace(context, settings, now, obs.pkg, CaptureSource.NOTIFICATION, analysis.kind,
-                    "rejected", contextReason, "", facts, debugText)
+                    "rejected", contextReason, "", facts, debugText, classification)
                 return rejected(contextReason)
             }
         }
         val semantic = CaptureGates.semanticReason(facts)
         if (semantic != null && !force) {
             trace(context, settings, now, obs.pkg, CaptureSource.NOTIFICATION, analysis.kind,
-                "rejected", semantic, "", facts, debugText)
+                "rejected", semantic, "", facts, debugText, classification)
             return rejected(semantic)
         }
         val extra = extraReason(settings, effectiveRule, facts, CaptureSource.NOTIFICATION, now)
         if (extra != null && !force) {
             trace(context, settings, now, obs.pkg, CaptureSource.NOTIFICATION, analysis.kind,
-                "rejected", extra, "", facts, debugText)
+                "rejected", extra, "", facts, debugText, classification)
             return rejected(extra)
         }
         if (!force && effectiveRule.role == AppRole.PAY) {
@@ -187,7 +228,7 @@ internal object CaptureEngine {
             facts, CaptureSource.NOTIFICATION, obs.pkg, false, session, now
         )
         val candidate = Candidate(built.first, CaptureSource.NOTIFICATION, obs.pkg, facts, built.second, now)
-        return deliver(context, settings, candidate, analysis, debugText)
+        return deliver(context, settings, candidate, analysis, debugText, classification)
     }
 
     private fun deliver(
@@ -195,14 +236,15 @@ internal object CaptureEngine {
         settings: CaptureRegistry.Settings,
         candidate: Candidate,
         analysis: PageAnalysis,
-        debugText: String
+        debugText: String,
+        classification: Classification? = null
     ): String {
         val facts = candidate.facts
         if (CaptureLedger.countPending(context) >= CapturePresenter.MAX_QUEUE &&
             !CapturePresenter.contains(candidate.txnId)
         ) {
             trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
-                analysis.kind, "rejected", Reason.QUEUE_FULL, candidate.txnId, facts, debugText)
+                analysis.kind, "rejected", Reason.QUEUE_FULL, candidate.txnId, facts, debugText, classification)
             return rejected(Reason.QUEUE_FULL)
         }
         val claim = CaptureLedger.claim(context, candidate)
@@ -210,7 +252,7 @@ internal object CaptureEngine {
             CaptureLedger.ClaimKind.DUPLICATE -> {
                 val reason = claim.reason ?: Reason.DUPLICATE_CAPTURE
                 trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
-                    analysis.kind, "duplicate", reason, candidate.txnId, facts, debugText)
+                    analysis.kind, "duplicate", reason, candidate.txnId, facts, debugText, classification)
                 return rejected(reason)
             }
             CaptureLedger.ClaimKind.MERGED -> {
@@ -220,10 +262,15 @@ internal object CaptureEngine {
                 if (candidate.sourcePkg.isNotEmpty() &&
                     CaptureRegistry.isPaymentApp(context, candidate.sourcePkg)
                 ) {
-                    CaptureLedger.mergePending(context, claim.txnId, bill.toString(), true)
+                    val merged = CaptureLedger.mergePending(
+                        context, claim.txnId, bill.toString(), true
+                    )
+                    if (merged != null) {
+                        CapturePresenter.merge(claim.txnId, merged)
+                    }
                 }
                 trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
-                    analysis.kind, "merged", Reason.DUPLICATE_SESSION, claim.txnId, facts, debugText)
+                    analysis.kind, "merged", Reason.DUPLICATE_SESSION, claim.txnId, facts, debugText, classification)
                 return rejected(Reason.DUPLICATE_SESSION)
             }
             CaptureLedger.ClaimKind.CLAIMED -> {
@@ -239,12 +286,12 @@ internal object CaptureEngine {
                 if (!presented) {
                     CaptureLedger.release(context, candidate.txnId)
                     trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
-                        analysis.kind, "rejected", Reason.QUEUE_FULL, candidate.txnId, facts, debugText)
+                        analysis.kind, "rejected", Reason.QUEUE_FULL, candidate.txnId, facts, debugText, classification)
                     return rejected(Reason.QUEUE_FULL)
                 }
                 val reason = CaptureGates.acceptedReason(facts)
                 trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
-                    analysis.kind, "accepted", reason, candidate.txnId, facts, debugText)
+                    analysis.kind, "accepted", reason, candidate.txnId, facts, debugText, classification)
                 return accepted(bill, reason)
             }
         }
@@ -394,20 +441,14 @@ internal object CaptureEngine {
         val traces = CaptureLedger.traces(context, limit)
         val out = JSONObject()
         val arr = JSONArray()
-        var accepted = 0
-        var saved = 0
-        var discarded = 0
-        var rejected = 0
-        var merged = 0
-        val reasons = HashMap<String, Int>()
-        val editedByApp = HashMap<String, Int>()
-        var amountEdited = 0
         val cal = Calendar.getInstance()
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         val dayStart = cal.timeInMillis
+        val stats = CaptureStats.today(context, dayStart)
+
         for (t in traces) {
             val o = JSONObject()
             o.put("id", t.id)
@@ -426,36 +467,23 @@ internal object CaptureEngine {
             o.put("orderNo", t.orderNo)
             o.put("confidence", t.confidence)
             o.put("needsReview", t.needsReview)
+            if (t.evidence.isNotEmpty()) o.put("evidence", t.evidence)
             if (t.text.isNotEmpty()) o.put("text", t.text)
             arr.put(o)
-            if (t.createdAt >= dayStart) {
-                when (t.result) {
-                    "accepted" -> accepted++
-                    "saved" -> saved++
-                    "discarded" -> discarded++
-                    "merged" -> merged++
-                    else -> rejected++
-                }
-                val key = t.reason
-                if (key.isNotEmpty() &&
-                    (t.result == "rejected" || t.result == "duplicate" || t.result == "merged")
-                ) {
-                    reasons[key] = (reasons[key] ?: 0) + 1
-                }
-                if (t.reason.contains("amount_edited")) {
-                    amountEdited++
-                    if (t.pkg.isNotEmpty()) editedByApp[t.pkg] = (editedByApp[t.pkg] ?: 0) + 1
-                }
-            }
         }
+
         val summary = JSONObject()
-        summary.put("accepted", accepted)
-        summary.put("saved", saved)
-        summary.put("discarded", discarded)
-        summary.put("rejected", rejected)
-        summary.put("merged", merged)
+        summary.put("pending", CaptureLedger.countPending(context))
+        summary.put("accepted", stats.captured)
+        summary.put("captured", stats.captured)
+        summary.put("saved", stats.saved)
+        summary.put("discarded", stats.discarded)
+        summary.put("rejected", stats.rejected)
+        summary.put("merged", stats.merged)
+        summary.put("amountEdited", stats.edited)
+
         val reasonArr = JSONArray()
-        for ((k, v) in reasons.entries.sortedByDescending { it.value }.take(8)) {
+        for ((k, v) in stats.reasons.entries.sortedByDescending { it.value }.take(8)) {
             val o = JSONObject()
             o.put("reason", k)
             o.put("label", reasonLabel(k))
@@ -463,16 +491,52 @@ internal object CaptureEngine {
             reasonArr.put(o)
         }
         summary.put("reasons", reasonArr)
-        summary.put("amountEdited", amountEdited)
-        val editedArr = JSONArray()
-        for ((pkg, count) in editedByApp.entries.sortedByDescending { it.value }.take(5)) {
+
+        val appArr = JSONArray()
+        for (a in stats.apps.take(12)) {
             val o = JSONObject()
-            o.put("pkg", pkg)
-            o.put("app", CaptureRegistry.appLabel(context, pkg))
-            o.put("count", count)
+            o.put("pkg", a.pkg)
+            o.put("app", CaptureRegistry.appLabel(context, a.pkg).ifEmpty { a.pkg })
+            o.put("captured", a.captured)
+            o.put("saved", a.saved)
+            o.put("discarded", a.discarded)
+            o.put("rejected", a.rejected)
+            o.put("edited", a.edited)
+            appArr.put(o)
+        }
+        summary.put("apps", appArr)
+
+        val kindArr = JSONArray()
+        for (k in stats.kinds.take(12)) {
+            val o = JSONObject()
+            o.put("kind", k.kind)
+            o.put("kindLabel", kindLabel(k.kind))
+            o.put("captured", k.captured)
+            o.put("saved", k.saved)
+            o.put("discarded", k.discarded)
+            o.put("rejected", k.rejected)
+            o.put("edited", k.edited)
+            kindArr.put(o)
+        }
+        summary.put("kinds", kindArr)
+
+        val editedArr = JSONArray()
+        for (a in stats.apps.sortedByDescending { it.edited }.filter { it.edited > 0 }.take(5)) {
+            val o = JSONObject()
+            o.put("pkg", a.pkg)
+            o.put("app", CaptureRegistry.appLabel(context, a.pkg).ifEmpty { a.pkg })
+            o.put("count", a.edited)
             editedArr.put(o)
         }
         summary.put("editedByApp", editedArr)
+
+        val reconcile = JSONObject()
+        reconcile.put("screen", stats.reconcile.screen)
+        reconcile.put("notify", stats.reconcile.notify)
+        reconcile.put("matched", stats.reconcile.matched)
+        reconcile.put("screenOnly", stats.reconcile.screenOnly)
+        reconcile.put("notifyOnly", stats.reconcile.notifyOnly)
+        summary.put("reconcile", reconcile)
         out.put("summary", summary)
         out.put("traces", arr)
         out.put("settings", JSONObject(settingsJson(context)))
@@ -486,11 +550,99 @@ internal object CaptureEngine {
 
     /** 诊断页「重新识别」：只跑解析，不写账本、不弹层。 */
     fun reparse(context: Context, pkg: String, source: String, text: String): String {
+        val analysis = analyzeText(context, pkg, source, text)
+        val out = JSONObject()
+        out.put("kind", analysis.kind.name)
+        out.put("kindLabel", analysis.kind.label)
+        out.put("reason", analysis.reason?.name ?: "")
+        out.put("reasonLabel", analysis.reason?.label ?: "")
+        val facts = analysis.facts
+        if (facts != null) {
+            out.put("amount", facts.amount)
+            out.put("direction", facts.direction.name)
+            out.put("merchant", facts.merchant)
+            out.put("orderNo", facts.orderNo)
+            out.put("channel", facts.channel)
+            out.put("confidence", facts.confidence)
+            out.put("needsReview", facts.needsReview)
+        }
+        return out.toString()
+    }
+
+    /** 影子回放：用当前解析规则重跑已保存的页面文本，对比历史决策。 */
+    fun replayTraces(context: Context, limit: Int): String {
+        val traces = CaptureLedger.traces(context, limit)
+        var total = 0
+        var withText = 0
+        var changed = 0
+        var kindChanged = 0
+        var amountChanged = 0
+        var newlyParsed = 0
+        var lostParse = 0
+        val samples = JSONArray()
+        for (t in traces) {
+            total++
+            if (t.text.isEmpty()) continue
+            withText++
+            val analysis = analyzeText(context, t.pkg, t.source, t.text)
+            val oldHadFacts = t.amount > 0
+            val newFacts = analysis.facts
+            val newHadFacts = newFacts != null
+            val oldKind = t.kind
+            val newKind = analysis.kind.name
+            val oldAmount = t.amount
+            val newAmount = newFacts?.amount ?: 0.0
+            val kindDiff = oldKind != newKind
+            val amountDiff = Math.abs(oldAmount - newAmount) > 0.005
+            if (kindDiff) kindChanged++
+            if (amountDiff) amountChanged++
+            if (!oldHadFacts && newHadFacts) newlyParsed++
+            if (oldHadFacts && !newHadFacts) lostParse++
+            val rowChanged = kindDiff || amountDiff || oldHadFacts != newHadFacts
+            if (rowChanged) changed++
+            if (rowChanged && samples.length() < 20) {
+                val o = JSONObject()
+                o.put("id", t.id)
+                o.put("at", t.createdAt)
+                o.put("app", CaptureRegistry.appLabel(context, t.pkg).ifEmpty { t.pkg })
+                o.put("oldKind", oldKind)
+                o.put("oldKindLabel", kindLabel(oldKind))
+                o.put("newKind", newKind)
+                o.put("newKindLabel", analysis.kind.label)
+                o.put("oldAmount", oldAmount)
+                o.put("newAmount", newAmount)
+                o.put("oldReason", t.reason)
+                o.put("oldReasonLabel", reasonLabel(t.reason))
+                o.put("newReason", analysis.reason?.name ?: "")
+                o.put("newReasonLabel", analysis.reason?.label ?: "")
+                o.put("oldDirection", t.direction)
+                o.put("newDirection", newFacts?.direction?.name ?: "")
+                samples.put(o)
+            }
+        }
+        val out = JSONObject()
+        out.put("total", total)
+        out.put("withText", withText)
+        out.put("changed", changed)
+        out.put("kindChanged", kindChanged)
+        out.put("amountChanged", amountChanged)
+        out.put("newlyParsed", newlyParsed)
+        out.put("lostParse", lostParse)
+        out.put("samples", samples)
+        return out.toString()
+    }
+
+    private fun analyzeText(
+        context: Context,
+        pkg: String,
+        source: String,
+        text: String
+    ): PageAnalysis {
         val settings = CaptureRegistry.settings(context)
         val rule = CaptureRegistry.ruleFor(context, pkg)
             ?: AppRule(pkg, AppRole.HOST, AdapterId.GENERIC, "", builtin = false)
         val now = System.currentTimeMillis()
-        val analysis = if (source == "notify") {
+        return if (source == "notify") {
             val lines = text.split('\n')
             val title = lines.firstOrNull() ?: ""
             val body = if (lines.size > 1) lines.drop(1).joinToString("\n") else ""
@@ -512,22 +664,6 @@ internal object CaptureEngine {
                 ParseOptions(settings.recordTransfers)
             )
         }
-        val out = JSONObject()
-        out.put("kind", analysis.kind.name)
-        out.put("kindLabel", analysis.kind.label)
-        out.put("reason", analysis.reason?.name ?: "")
-        out.put("reasonLabel", analysis.reason?.label ?: "")
-        val facts = analysis.facts
-        if (facts != null) {
-            out.put("amount", facts.amount)
-            out.put("direction", facts.direction.name)
-            out.put("merchant", facts.merchant)
-            out.put("orderNo", facts.orderNo)
-            out.put("channel", facts.channel)
-            out.put("confidence", facts.confidence)
-            out.put("needsReview", facts.needsReview)
-        }
-        return out.toString()
     }
 
     fun setApp(context: Context, pkg: String, role: String, enabled: Boolean): Boolean =
@@ -580,14 +716,45 @@ internal object CaptureEngine {
         reason: Reason,
         txnId: String,
         facts: Facts?,
-        text: String
+        text: String,
+        classification: Classification? = null
     ) {
         val stored = if (settings.debugText) text else ""
+        val evidence = classificationEvidence(classification, settings.debugText)
         CaptureLedger.trace(
             context, at, pkg,
             if (source == CaptureSource.SCREEN) "screen" else "notify",
-            kind.name, result, reason.name, txnId, facts, stored
+            kind.name, result, reason.name, txnId, facts, evidence, stored
         )
+    }
+
+    /** 分类证据：默认只存信号种类/权重，开了调试文本才带命中片段。 */
+    private fun classificationEvidence(
+        classification: Classification?,
+        includeText: Boolean
+    ): String {
+        if (classification == null) return ""
+        return try {
+            val o = JSONObject()
+            o.put("score", classification.confidence)
+            o.put("margin", classification.margin)
+            o.put("kind", classification.kind.name)
+            val arr = JSONArray()
+            for (signal in classification.signals.take(8)) {
+                val so = JSONObject()
+                so.put("k", signal.kind.name)
+                so.put("w", signal.weight)
+                signal.reason?.let { so.put("r", it.name) }
+                if (includeText && signal.evidence.isNotEmpty()) {
+                    so.put("e", signal.evidence.take(80))
+                }
+                arr.put(so)
+            }
+            o.put("signals", arr)
+            o.toString()
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun kindLabel(name: String): String {

@@ -290,6 +290,10 @@ class MuyianBillCore private constructor() {
             CaptureEngine.reparse(context, pkg, source, text)
 
         @JvmStatic
+        fun replayCaptureTraces(context: Context, limit: Int): String =
+            CaptureEngine.replayTraces(context, limit)
+
+        @JvmStatic
         fun setCaptureSettings(context: Context, json: String): Boolean =
             CaptureEngine.setSettings(context, json)
 

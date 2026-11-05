@@ -6,15 +6,15 @@
 
 | 层 | 文件 |
 | --- | --- |
-| 观察模型 / 文本 / 规则 / 解析 / 门禁 | `CaptureModels.kt` / `CaptureText.kt` / `CaptureRules.kt` / `CaptureParser.kt` / `CaptureGates.kt` |
+| 观察模型 / 文本 / 规则 / 页面文档 / 金额抽取 / 页面分类 / 解析 / 门禁 | `CaptureModels.kt` / `CaptureText.kt` / `CaptureRules.kt` / `CapturePage.kt` / `CaptureAmount.kt` / `CaptureClassify.kt` / `CaptureParser.kt` / `CaptureGates.kt` |
 | App 注册表与设置 | `CaptureRegistry.kt` |
 | 支付路线 | `CaptureRoute.kt` |
-| 账本 / 队列 / 诊断 | `CaptureLedger.kt` |
+| 账本 / 队列 / 决策日志 / 反馈 / 诊断 / 统计 | `CaptureLedger.kt` / `CaptureStats.kt` |
 | 编排 | `CaptureEngine.kt` |
 | 弹层队列 | `CapturePresenter.kt` |
 | 本地分类学习 | `CaptureLearning.kt` |
 | 页面侧封装 / 诊断页 | `data/Capture.kt` / `ui/screens/CaptureScreen.kt` |
-| 回归测试 | `app/src/test/java/muyian/bill/listener/CaptureParserTest.kt` / `CaptureIdentityTest.kt` |
+| 回归测试 | `app/src/test/java/muyian/bill/listener/CaptureParserTest.kt` / `CaptureIdentityTest.kt` / `CaptureRouteTest.kt` / `CaptureCorpusTest.kt` |
 
 ## 1. 重构前的问题（历史记录）
 
@@ -95,10 +95,14 @@
 | --- | --- | --- |
 | `CaptureModels.kt` | `Observation` / `PageKind` / `Direction` / `Facts` / `Candidate` / `Decision` / `Reason` 枚举与数据类 | 无 |
 | `CaptureText.kt` | 文本归一化、行切分、金额/日期/单号 token 解析 | 无 |
+| `CapturePage.kt` | `PageDoc` / `DocLine`：一次归一化，保留行边界与几何字段 | 无 |
+| `CaptureAmount.kt` | 屏幕/通知/收银台共用的金额候选生成与择取（`AmountExtractor`） | 无 |
+| `CaptureClassify.kt` | 页面信号、权重、假设与 margin（`PageClassifier`） | 无 |
 | `CaptureRules.kt` | App 注册表、页面标记、金额锚点与排除词、通知渠道规则 | 无 |
-| `CaptureParser.kt` | 页面/通知 → `Facts`，金额候选打分与择取 | 无 |
+| `CaptureParser.kt` | 页面/通知 → `PageKind` + `Facts`（分类/方向/商户/单号/时间），金额委托 `AmountExtractor` | 无 |
 | `CaptureRoute.kt` | 支付路线状态机、会话 ID、宿主上下文 | 仅 `Context` 存取 |
-| `CaptureLedger.kt` | 去重账本与待确认队列表（SQLite） | 仅 `Context` |
+| `CaptureLedger.kt` | 去重账本、待确认队列、不可变决策日志、用户反馈（SQLite） | 仅 `Context` |
+| `CaptureStats.kt` | 今日漏斗、按 App/页面类型统计、屏幕/通知双通道对账 | 仅 `Context` |
 | `CaptureGates.kt` | 有序门禁与原因码 | 无（账本接口注入） |
 | `CaptureEngine.kt` | 编排：观察 → 判定 → 弹层；`MuyianBillCore` 门面转调 | 有 |
 | `CaptureDiagnostics.kt` | 诊断查询、计数、调试文本留存 | 有 |
@@ -106,7 +110,7 @@
 
 ### 3.2 纯逻辑下沉的好处
 
-`CaptureModels/CaptureText/CaptureRules/CaptureParser/CaptureGates` 不 import Android，放在主源码集但可以直接被 `android/app/src/test` 覆盖。真机只负责"文本采得全不全"，不再负责"规则对不对"。
+`CaptureModels/CaptureText/CaptureRules/CapturePage/CaptureAmount/CaptureClassify/CaptureParser/CaptureGates` 不 import Android，放在主源码集但可以直接被 `android/app/src/test` 覆盖。真机只负责"文本采得全不全"，不再负责"规则对不对"。
 
 ## 4. 观察层（Observation）
 
@@ -135,7 +139,8 @@ data class ScreenObservation(
 
 采集改动（`MuyianBillAccessibilityService`）：
 
-- 配置增加 `flagRetrieveInteractiveWindows`；用 `windows` 找**包名匹配且层级最高**的窗口，而不是只信 `rootInActiveWindow`。保留现有"root 包名不一致就跳过"的校验，但改为"从 windows 里选正确的那个"。
+- 配置增加 `flagRetrieveInteractiveWindows`、`flagIncludeNotImportantViews`、`flagRequestEnhancedWebAccessibility`；窗口选择先看 `rootInActiveWindow`（包名匹配时直接用，微信 LiteApp 的活动窗口只在它上面有内容），否则按 `windows` 的 `layer` 选**包名匹配且层级最高**的窗口。
+- 微信 LiteApp（京东小程序支付页）的文本只在 `contentDescription` 且节点被标记为不可见：`collectTexts` 为空时**仅对 `com.tencent.mm`** 补收 `contentDescription`；其他 App 不受影响，避免隐藏文本进入候选。
 - 去掉"只收 `isVisibleToUser`"的硬过滤，改为**收可见节点 + 最多额外 N 个不可见节点**；金额可能被滚动出视口，但同一窗口里仍然存在。
 - 每个节点记录 bounds / 字号 / className / viewId / depth；上限从 400 提到 600，超出时优先保留字号大的节点（先做两遍：先统计字号分布，再按优先级截断）。实现可以简化为：第一遍收全部，超过上限时按 `sizePx` 降序保留。
 - 事件去抖保持现状（每 App 600ms + 签名去重），但 `screenSignature` 改为基于 `(text + bounds.top)` 的稳定哈希，避免页面轻微动效导致重复解析。
@@ -181,7 +186,7 @@ enum class PageKind {
 }
 ```
 
-分类顺序（先命中先返回，最具体优先）：
+分类顺序（现在由 `PageClassifier` 的权重表达，数值保证顺序不变，最具体优先）：
 
 1. `PAY_FAILURE` / `PAY_PENDING`（完成标记与失败标记同时出现时，失败优先）。
 2. `ORDER_LIST` / `BILL_LIST`（"全部订单/账单明细/本月支出"等整页标记）。
@@ -193,6 +198,8 @@ enum class PageKind {
 8. `UNKNOWN`。
 
 **关键约束**：`CHAT` 页只有"最顶部/最新的一条支付卡片"可以进入解析，且要求卡片时间与观察时间相差在 2 分钟内。这样微信支付服务号里翻历史消息不会误弹。`CASHIER` 永远不产生交易，只更新路线证据。
+
+实现：每个标记/结构特征产出 `PageSignal(kind, weight, evidence, reason)`；同一 `PageKind` 的多个信号取最高权重（不累加，避免多个弱信号压过更高优先级），不同 `PageKind` 取 top1。top1 与 top2 的 margin `< 5` 时判 `PAGE_AMBIGUOUS`，宁可不弹。信号、假设和 margin 都保留在 `Classification` 里，供测试与后续诊断使用。
 
 分类规则按 App 适配器分组（第 6 节），未命中时走通用规则；通用规则对 `CHAT`/`AD` 的判定更保守。
 
@@ -245,8 +252,8 @@ data class AmountCandidate(
 
 择取顺序与现有语义一致，但增加结构信号：
 
-1. **STRONG_LABEL**：强锚点（实付/支付金额/交易金额/退款金额等）后紧跟的金额；值可在同一行或下一行。
-2. **STRUCT_HEADLINE**：结果卡片内**字号最大**、带货币符号或纯小数、水平居中/独立的金额。字号必须 ≥ 同页中位字号的 1.6 倍，且该行距离完成标记不超过 3 行或 240px。
+1. **STRONG_LABEL**：强锚点（实付/支付金额/交易金额/退款金额等）后紧跟的金额；值可在同一行或下一行。方向专属锚点（退款金额/到账金额/还款金额等）单独成层，优先于通用强锚点。同一层内收集**所有**锚点的候选，按 `候选置信度 + 锚点优先级(≤0.02) + 离完成标记的距离(≤0.04)` 打分，不再由 `STRONG_ANCHORS` 的书写顺序直接决定。
+2. **STRUCT_HEADLINE**：结果卡片内**字号最大**、带货币符号或纯小数（可带前置正负号，如 `-30.05`）、水平居中/独立的金额。字号必须 ≥ 同页中位字号的 1.6 倍，且该行距离完成标记不超过 3 行或 240px。
 3. **WEAK_LABEL**：弱锚点后的金额，必须带货币单位或小数。
 4. **CURRENCY_CONTEXT**：只允许在包含完成标记的卡片区域内扫描；全页兜底取消。
 
@@ -262,7 +269,7 @@ data class AmountCandidate(
 | 比率 | 汇率、利率、费率、折 |
 | 其它 | 尾号、验证码、满…减 |
 
-**歧义处理**：同一层级出现两个不同金额且都通过排除检查时，取置信度高者，并在候选上标 `needsReview = true`；弹层把金额高亮提示"识别到多个金额，请确认"。不因为歧义丢弃整笔（用户仍可改），但绝不静默取一个看起来合理的数。
+**歧义处理**：同一层级出现两个不同金额且都通过排除检查时，取分数最高者，并在候选上标 `needsReview = true`；弹层把金额高亮提示"识别到多个金额，请确认"。不因为歧义丢弃整笔（用户仍可改），但绝不静默取一个看起来合理的数。屏幕层的分数包含空间距离，通知层没有几何，只按锚点优先级与候选置信度打分。
 
 ### 7.2 收支方向
 
@@ -287,6 +294,24 @@ enum class Direction { EXPENSE, INCOME, REFUND, TRANSFER, REPAYMENT, UNKNOWN }
 - 单号：`[A-Za-z0-9]{8,40}`，允许中间空格/连字符但不允许跨到下一个标签；至少 4 位数字；排除 8 位日期和卡尾号；统一大写。取不到就为空。
 - 渠道：优先从文本取"XX银行 + 卡尾号(1234)"；其次 `AppRule.adapter`；最后才是"银行卡"。**禁止所有银行 App 共用"银行卡"**。
 - 时间：页面/通知里有明确时间且落在 `[now-24h, now+5min]` 时用页面时间，否则用观察时间；`bills` 的 `year/month/day/clock` 由它生成。
+
+### 7.4 宿主内支付与支付意图（PaymentIntent）
+
+闲鱼/淘宝这类宿主 App 的付款弹窗包名仍是宿主（支付宝 SDK 进程内嵌），支付宝 App 不会展示可采集的成功页；而闲鱼自己的成功页只有「支付成功」，没有金额，页面里的「0.01元兑好礼」「推荐商品 ¥8」都是营销数字。处理方式：
+
+- 淘宝/天猫/闲鱼注册为 `HOST`；确认购买页、付款弹窗通过 `PAY_TRIGGER`（确认购买、更改付款方式、极速付款等）归为 `CASHIER`。
+- `CASHIER` 页由 `AmountExtractor.pickCashier()` 取金额：先认强锚点（支付金额/付款金额/实付款/确认购买/合计等）；没有标签时认页面大字金额（淘宝闪购付款弹窗只有 `¥7.60`）。前两层都取不到时才启用「收银台页内货币兜底」；宿主成功页仍禁用这一层。
+- 大字兜底只对 `CASHIER` 页启用：进入这一层说明页面已命中收银台触发词，取该页字号最大的独立金额（≥ 中位字号的 1.5 倍），不会扫到推荐区。
+- 支付宝「快速支付/极速付款」按钮旁的独立「支」字图标（或 contentDescription 为支付宝）也是渠道信号：即使页面没有「支付宝/余额宝」文案，也判为支付宝；该按钮本身也是 `CASHIER` 触发词。图标未被无障碍暴露时不做假设，渠道按原逻辑回落。
+- 微信 LiteApp 的 content-desc 会把 `10.90元` 读成 `10点9 0元`：`CaptureText.normalize` 统一归一化为小数金额；支付 App 的成功页没有金额时用 `intentForPayment()` 取同一支付会话的 intent。
+- `CaptureRoute` 把 intent 持久化到路线状态（10 分钟窗口）；宿主收银台 intent 同时充当宿主支付上下文（`hostTriggerAt`）。
+- 宿主成功页解析不到金额时，用同一路线 intent 补金额；完成语义仍来自成功页。
+- **宿主结果页只接受 `STRONG_LABEL` / `STRUCT_HEADLINE` 金额**，弱标签和货币上下文一律不取（闲鱼成功页 0.01 回归即由此修复）。
+- 成功页消费 intent 后立即清空；同一页面二次刷新只会得到 `NO_AMOUNT`，不会重复弹层。
+
+真机样本（闲鱼 2026-11）：确认页「确认购买 75.00」→ 付款弹窗「支付金额75.00元 / 余额宝」→ 成功页「支付成功」无金额；最终识别记录 `PAY_SUCCESS / ACCEPTED / 75.0 / 支付宝`，账本键 `bill:支付宝:75.00:EXPENSE`。
+
+真机样本（淘宝闪购 2026-11）：确认订单页「合计 ¥24.7 / 提交订单」→ 付款弹窗「淘宝闪购商户 / ¥7.60 / 余额宝 / 极速付款」；确认页取 24.7，付款弹窗取 7.60（以后到的弹窗为准）。
 
 ## 8. 交易身份、会话与账本
 
@@ -382,7 +407,7 @@ data class RouteState(
 | 顺序 | Gate | 拒绝原因码 | 说明 |
 | --- | --- | --- | --- |
 | 1 | `SourceGate` | `SELF` / `SYSTEM_UI` / `NOT_CANDIDATE` / `APP_OFF` | 用户关闭的 App 直接忽略 |
-| 2 | `PageGate` | `PAGE_LIST` / `PAGE_ORDER_MGMT` / `PAGE_AD` / `PAGE_CHAT` / `PAGE_FAILURE` / `PAGE_PENDING` / `PAGE_CASHIER` | `CASHIER` 只更新证据 |
+| 2 | `PageGate` | `PAGE_LIST` / `PAGE_ORDER_MGMT` / `PAGE_AD` / `PAGE_CHAT` / `PAGE_FAILURE` / `PAGE_PENDING` / `PAGE_CASHIER` / `PAGE_AMBIGUOUS` | `CASHIER` 只更新证据；`PAGE_AMBIGUOUS` 是 top1/top2 证据分差过小 |
 | 3 | `ContextGate` | `NO_PAYMENT_CONTEXT` | 宿主结果页必须有会话/触发 |
 | 4 | `ParseGate` | `NO_AMOUNT` / `NO_DIRECTION` / `NO_COMPLETION_MARK` | 页面/通知必须有完成语义 |
 | 5 | `SemanticGate` | `INTERNAL_TRANSFER` / `REPAYMENT` / `DUPLICATE_REFUND` | 默认不弹的语义类 |
@@ -401,9 +426,11 @@ confidence = 0.55 * amountConfidence
            + 0.05 * (单号是否为空 ? 0 : 1)
 ```
 
+- `pageConfidence` 来自 `PageClassifier`：top 假设的权重 / 1100（成功页约 0.82），不再固定为 1.0。
+- `needsReview` 在两种情况下为 true：同一层出现多个不同金额；或最终置信度 < 0.80。
 - `≥ 0.80`：正常弹层。
-- `0.60 ~ 0.80`：弹层顶部提示"自动识别可能有误"，金额仍预填。
-- `< 0.60`：仍然弹（硬门禁已保证是成功页），但诊断标记 `low_confidence`；设置页可开"低置信不提醒"，默认开提醒。
+- `0.60 ~ 0.80`：弹层顶部提示"自动识别可能有误"，金额仍预填（弱标签/货币上下文金额通常落在这一档）。
+- `< 0.60`：仍然弹（硬门禁已保证是成功页），但诊断标记 `low_confidence`；设置页可开"低置信不提醒"，默认开提醒。关闭后 `needsReview` 或置信度 <0.60 只记诊断。
 
 ## 11. 展示、反馈与诊断
 
@@ -429,13 +456,16 @@ confidence = 0.55 * amountConfidence
 - `pkg_category_v1`：App → 最常用分类，作为没有商户时的兜底。
 - 只在本机，可一键清空；不参与金额解析，避免"学坏"。
 
-### 11.4 诊断页（设置 → 自动记账 → 识别记录）
+### 11.4 诊断页（首页菜单 → 识别记录）
 
 本地只读列表 + 计数：
 
-- 最近 200 条判定：时间、App、页面类型、方向、金额、结果、原因码、置信度、用户是否修改。
-- 汇总：今日捕获/保存/丢弃/拒绝；按 App、按原因码排序；"金额被改过"最多的页面。
-- 开关：`记录页面文本（调试）`，默认关闭；开启后只保留 7 天、最多 200 条，仅本机，可一键清空。用于收集样本，不做上传。
+- 最近 200 条决策（`capture_trace`，写入后不可变）：时间、App、页面类型、方向、金额、结果、原因码、置信度、分类证据。「最近识别」首屏只展示最新 10 条（`TRACE_PREVIEW`），其余由「查看全部 N 条」进入子页 `Screen.CaptureAll`（`CaptureAllScreen.kt`，按 `TRACE_PAGE`=30 分块懒渲染）。
+- 汇总：今日漏斗（待确认/捕获/保存/丢弃/拒绝/合并）、按 App、按页面类型（捕获 → 保存 → 改金额）、按原因码；统计由 `CaptureStats.today()` 走 SQL 全量聚合，不再受列表 200 条上限影响。
+- 双通道对账：今日已捕获的屏幕/通知成交按「同额 + 2 分钟内」贪心配对，展示屏幕数/通知数/对上/仅屏幕/仅通知；仅作漏采参考，不参与判定。
+- 影子回放：`replayCaptureTraces` 用当前解析规则重跑已保存的页面文本，对比历史决策的类型/金额/是否有金额，最多返回 20 条变化示例；不写账本、不弹层。入口在诊断页「识别行为 → 回放已保存文本」。
+- 决策与反馈分表：`capture_trace` 只写决策，`capture_feedback` 存保存/丢弃/最终金额/是否改过金额；`markState()` 不再回写 trace。`capture_trace.evidence` 存分类信号 JSON，默认只存信号种类/权重，开启「记录页面文本（调试）」才带命中片段。
+- 开关：`记录页面文本（调试）`，默认关闭；开启后只保留 7 天、最多 500 条，仅本机，可一键清空。用于收集样本，不做上传。
 - 操作：`重新识别`（把保存的文本重新跑一遍解析，展示结果，不弹层）、`复制原因码`。
 
 ## 12. 与现有语义的对应（迁移不破坏行为）
@@ -459,8 +489,15 @@ confidence = 0.55 * amountConfidence
 ### 13.1 单元测试（无需真机）
 
 - `CaptureParserTest`：真实页面文本 fixture（Alipay/微信/云闪付/银行/美团/京东各 3～5 例）→ 断言 `PageKind`、金额、方向、商户、单号、置信度档位。
+- `CaptureParserTest`（宿主内支付）：闲鱼成功页不得取 0.01/推荐价；闲鱼确认购买页/付款弹窗产出 `PaymentIntent`；淘宝成功页强锚点金额仍可解析。
 - `CaptureAmountTest`：排除词表逐项断言；"限额/汇率/尾号/优惠"不得被选中；千分位、0.01、整数元。
 - `CaptureGateTest`：固定时钟 + 内存账本，逐条断言原因码；同一观察重复两次只产生一个候选。
+- `CapturePageTest`：`PageDoc` 一次归一化、行边界、几何排序与区域裁剪。
+- `CaptureAmountTest`：收银台强锚点置信度、通知金额抽取、近完成标记锚点优先、同层多金额触发 review。
+- `CaptureClassifyTest`：完成/失败信号共存、会话列表 boost、margin 歧义兜底、通知发送方门禁。
+- `CaptureCorpusTest`：回放 `app/src/test/resources/capture/corpus.tsv`，逐条断言页面/通知的 PageKind、金额与方向。
+- `CaptureStatsTest`：双通道对账的同额/时间窗/金额差异/渠道不匹配匹配规则。
+- `CaptureRouteTest`：同宿主返回、跨宿主重置、支付 App 直接打开另一个宿主不继承返回。
 - `CaptureDirectionTest`：提现/充值/还款/退款/收款/支付。
 - `CaptureRouteTest`：HOST→PAY→HOST 会话合并；进程重启恢复；超过 TTL 失效。
 
@@ -478,6 +515,7 @@ confidence = 0.55 * amountConfidence
 10. 进程被杀时队列里有 2 笔 → 重启后都能恢复。
 11. 支付宝首页「最近消息」同时有「转账成功 ¥0.01」「付款成功 ¥21.00」→ `PAGE_LIST`；没有首页标记但一页多行完成标记+金额 → `MULTI_TRANSACTION`。
 12. 支付宝「转账 → 最近/联系人/我的」收款人列表（多行「转给TA/收到TA」）→ `PAGE_LIST`；滚动后 tab 不在树里时由转账行标记兜底为 `MULTI_TRANSACTION`；单笔「转账成功 + 转给TA」仍正常识别。
+13. 微信首页会话列表（含「微信支付 已支付¥2.22」摘要行）→ `PAGE_CHAT`；底部 tab 不在无障碍树里时，由"每行独立时间标签 ≥3 条"的结构特征兜底，摘要里的金额永不入账。
 
 ### 13.2 真机回归清单
 
@@ -507,15 +545,32 @@ confidence = 0.55 * amountConfidence
 - 账单日期仍优先用页面/通知里的明确时间；支付 App 页面若带旧日期且超过 10 分钟，新增 `STALE_PAGE` 拒绝，防止翻历史回执。
 - 「低置信度也弹层」落地为设置项：默认开；关闭后 `needsReview` 或置信度 <0.60 只记诊断。
 - 旧去重键直接删除而非导入；账本从空开始，旧账单靠 `bills` 表兜底。
-- 诊断页入口：设置 → 自动记账 → 识别记录与诊断；不单独占首页入口。
+- 诊断页入口：首页菜单 → 识别记录；设置页不提供入口。
 - App 列表默认只列内置包名 + 用户覆盖，避免打开页面就触发 MIUI「读取已安装应用」提示；「扫描其它应用」按需枚举全部可启动应用（清单声明 `QUERY_ALL_PACKAGES`，仅本机使用）。
 - 金额排除词判定改为**紧邻前缀**（金额前压缩空白后 6 字符）：整段前缀判定会把「您尾号4321的卡交易¥100.00」整条拒掉，还会跳过真金额后取到同行优惠额（「已优惠2元，实付50元」取到 2）。紧邻窗口由 `CaptureText.adjacentPrefixExcluded` 统一实现。
 - 无单号的宿主结果页 `page:` 键 TTL 从 24h 降为 10 分钟（`TTL_PAGE_NO_ORDER`）：弱指纹（仅金额+方向）挂 24h 会把每天同价的真实第二笔判成 `DUPLICATE_PAGE`；有单号时仍为 24h。
+- 账单详情的大字金额常带正负号（如 `-30.05`），`CaptureText.isolatedAmount` 允许前置 `+/-/−`；`先用后付订单完成付款` 计入支出完成语义，状态文字缺失时不会落进「立即领取」的营销页判定。多窗口选择按 `AccessibilityWindowInfo.layer` 取最上层，避免账单详情被下层的账单列表顶掉。
+- 支付宝账单详情顶部有「全部账单」入口，会命中 `BILL_LIST`；`looksLikeSingleBillDetail` 对同时具备「账单详情」或「支付时间+付款方式」、且有「账单分类/计入收支」、没有多行完成标记+金额的页面放行，仍按单笔详情解析。真机样本金额为「支出30.05元」，由弱锚点「支出」取到。
 - 账本 `claim` 异常从 fail-open（返回 CLAIMED）改为 **fail-closed**（返回 `DUPLICATE_CAPTURE`）：DB 忙时宁可漏弹，也不能同一笔重复弹层。
 - 支付宝结果页为渐进渲染，无障碍层对支付宝**固定跑快慢两遍解析**（事件后 160ms 与 450ms，参照实测参数），绕过 600ms 节流；签名去重保证已稳定页面不重复解析。
 - 无障碍服务 `onServiceConnected` 时调用 `restoreCaptureQueue`：进程被杀后服务重绑、用户未打开 App 也能恢复待确认队列（§8.3 的落地补齐）。
-- 用户在弹层保存时改过金额的，往该笔判定记录追加 `amount_edited` 标记（`CaptureLedger.markAmountEdited`），诊断页今日摘要显示条数——这是规则迭代的核心反馈信号。
+- 用户在弹层保存时改过金额的，写入 `capture_feedback.amount_edited`；`capture_trace` 保持不可变。诊断页按 App/页面类型展示“捕获 → 保存 → 改金额”，这是规则迭代的核心反馈信号。
+- 诊断摘要改为 `CaptureLedger.todayStats()` 的 SQL 全量聚合：`capture_trace` 负责捕获/拒绝/合并，`capture_feedback` 负责保存/丢弃/改金额；不再从最近 200 条列表倒推今日汇总。`capture_trace.evidence` 保存分类信号，默认不含命中文本。
+- 语料回放：`app/src/test/resources/capture/corpus.tsv` 覆盖支付宝/微信/银行/美团/淘宝/闲鱼等页面与通知，`CaptureCorpusTest` 逐条断言 PageKind/金额/方向。
+- 支付宝转账成功页会把「转账成功￥0.01」标题和「转账成功 / 0.01」状态重复渲染；`countMarkedAmountRows` 对**相邻且同额**的完成标记行去重，避免把单笔回执判成 `MULTI_TRANSACTION` 的账单列表。分隔较远的同额行仍按两笔处理。
+- 诊断统计从 `CaptureLedger` 拆到 `CaptureStats`：`today()` 负责漏斗与按 App/页面类型，`reconcilePoints()` 负责屏幕/通知同额 2 分钟配对；`CaptureLedger` 只保留账本、队列、决策日志与反馈。
+- 诊断页新增「回放已保存文本」：`MuyianBillCore.replayCaptureTraces()` 用当前解析规则重跑历史 trace 文本，输出类型/金额/是否有金额的变化统计与最多 20 条示例；不写库、不弹层。
+- 诊断页新增双通道对账：屏幕/通知成交按「同额 + 2 分钟内」贪心配对，展示仅屏幕/仅通知数量，作为漏采参考。
 - `BillSheetActivity` 声明 `configChanges`：转屏/折叠不再触发 `onDestroy` 的未保存丢弃分支，用户正在编辑的内容得以保留。
+- 采集层页面签名只做**短时事件去抖**（2 秒）：账本才是交易去重边界，不能因为同商户同金额的结果页文本相同就永久跳过第二笔。签名超时后允许重新解析，重复由 `capture:` / `bill:` 键裁决。
+- 页面文本的 `compact` 改为**行内去空白、行间留一个空格**：避免"支付"与"成功"跨行拼成"支付成功"，同时保留 `扫一扫` / `收付款` 这类跨节点导航标记的 `.{0,20}` 窗口。
+- 路线状态按宿主隔离：只有回到路线记录的 `hostPkg` 才算 `RETURNED`；进入另一个 HOST App 时，`hostTriggerAt`、`intent`、`sessionId`、`RETURNED` 全部清空，防止 3 分钟内打开任意宿主继承上一笔支付上下文。
+- 身份裁决固定 `order > session > page > capture > bill`；order 与 session 指向不同 txn、或强键与 page/capture/bill 冲突时，直接判重复，不在两条记录之间合并（宁可少弹，不能并错）。
+- `mergePending()` 返回合并后的账单 JSON；`CapturePresenter` 同步更新内存队列和正在显示的弹层（用户已改过的金额/备注不覆盖），不再出现"数据库已合并、弹层还是旧金额"。
+- 解析器拆出 `PageDoc`（`CapturePage.kt`）与 `AmountExtractor`（`CaptureAmount.kt`）：页面文本只归一化一次，屏幕/通知/收银台共用同一套金额候选与择取。屏幕的 `STRUCT_HEADLINE`/区域逻辑、通知的行序逻辑、收银台的支付意图逻辑只是同一 extractor 的三种入口，不再各维护一份锚点/排除词代码。
+- 页面分类拆出 `PageClassifier`（`CaptureClassify.kt`）：每个标记/结构特征产出带权重的 `PageSignal`，同一 PageKind 取最高权重，不同 PageKind 取 top1，top1/top2 分差 <5 判 `PAGE_AMBIGUOUS`。权重表刻意保持现有判定顺序，因此已回归页面结论不变；分类结果额外携带信号、假设列表和 margin，供测试与后续诊断使用。
+- 金额强锚点改为"方向专属层 → 通用层"两层收集，同层内按 `候选置信度 + 锚点优先级(≤0.02) + 离完成标记距离(≤0.04)` 打分，不再由锚点书写顺序先到先得；同一层出现多个不同金额时置 `needsReview`。
+- 置信度中的 `pageConfidence` 改为分类器 top 权重 / 1100；`needsReview` 增加最终置信度 <0.80 的条件，真正落地文档里的"0.60~0.80 提示核对"。
 
 ## 15. 兼容与红线
 

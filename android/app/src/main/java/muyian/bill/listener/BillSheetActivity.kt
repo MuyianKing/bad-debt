@@ -89,11 +89,21 @@ class BillSheetActivity : Activity() {
         @Volatile
         private var alive = false
 
+        /** 当前正在显示的弹层：支付侧合并字段时，需要同步正在编辑的这一笔 */
+        @Volatile
+        private var current: BillSheetActivity? = null
+
         /** 已经真正拉起过的通知 ID：启动看门狗用它区分"从未出现"和"出现后又被关掉" */
         private val startedNoticeIds = ArrayList<Int>()
 
         fun isAlive(): Boolean {
             return alive
+        }
+
+        /** 队列里的同一笔被支付侧补全：交给主线程更新当前弹层，不重建输入框。 */
+        fun mergeCurrent(txnId: String, billJson: String) {
+            val activity = current ?: return
+            activity.uiHandler.post { activity.applyMergedBill(txnId, billJson) }
         }
 
         fun markStarted(noticeId: Int) {
@@ -116,12 +126,14 @@ class BillSheetActivity : Activity() {
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private var billJson = ""
+    private var billTxnId = ""
     private var income = false
     private var costType = ""
     private var accent = 0xFFF7A600.toInt()
     private var accentTint = 0
     private var amountInput: EditText? = null
     private var remarkInput: EditText? = null
+    private var metaView: TextView? = null
     private var sheetHost: View? = null
     private var dimView: View? = null
     private var outChip: TextView? = null
@@ -161,6 +173,7 @@ class BillSheetActivity : Activity() {
             finish()
             return
         }
+        current = this
         uiHandler.postDelayed(timeoutTask, TIMEOUT_MS)
         registerScreenOff()
     }
@@ -174,6 +187,7 @@ class BillSheetActivity : Activity() {
         }
         if (parsed == null) return false
         billJson = raw
+        billTxnId = parsed.optString("txnId")
         income = parsed.optDouble("money", 0.0) >= 0
         costType = parsed.optString("costType")
         accent = accentValue
@@ -190,6 +204,64 @@ class BillSheetActivity : Activity() {
         setContentView(buildRoot(parsed, cats))
         playEnter()
         return true
+    }
+
+    /**
+     * 支付侧后到补全：只更新金额/渠道/单号/商户等字段。
+     * 用户已经改过的金额或备注不覆盖，避免把正在输入的内容冲掉。
+     */
+    private fun applyMergedBill(txnId: String, raw: String) {
+        if (isFinishing || isDestroyed) return
+        if (txnId.isEmpty() || txnId != billTxnId) return
+        val incoming = try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            return
+        }
+        val merged = try {
+            JSONObject(billJson)
+        } catch (_: Exception) {
+            return
+        }
+        val oldAmount = Math.abs(merged.optDouble("money", 0.0))
+        val currentText = amountInput?.text?.toString()?.trim() ?: ""
+        val typed = currentText.toDoubleOrNull()
+        val amountEdited = currentText.isEmpty() ||
+            (typed != null && Math.abs(typed - oldAmount) > 0.005)
+        val oldMerchant = merged.optString("merchant")
+
+        if (incoming.has("money")) {
+            merged.put("money", incoming.optDouble("money", merged.optDouble("money", 0.0)))
+        }
+        if (incoming.optString("bankName").isNotEmpty()) {
+            merged.put("bankName", incoming.optString("bankName"))
+        }
+        if (merged.optString("orderNo").isEmpty() && incoming.optString("orderNo").isNotEmpty()) {
+            merged.put("orderNo", incoming.optString("orderNo"))
+        }
+        if (merged.optString("merchant").isEmpty() && incoming.optString("merchant").isNotEmpty()) {
+            merged.put("merchant", incoming.optString("merchant"))
+        }
+        if (incoming.optBoolean("needsReview", false)) {
+            merged.put("needsReview", true)
+        }
+        billJson = merged.toString()
+
+        if (!amountEdited) {
+            amountInput?.let { input ->
+                input.setText(
+                    String.format(Locale.US, "%.2f", Math.abs(merged.optDouble("money", oldAmount)))
+                )
+                input.setSelection(input.text.length)
+            }
+        }
+        val bank = merged.optString("bankName")
+        val clock = merged.optString("clock")
+        metaView?.text = if (bank.isEmpty()) clock else bank + " · " + clock
+        val remark = remarkInput?.text?.toString()?.trim() ?: ""
+        if (remark.isEmpty() || remark == oldMerchant.trim()) {
+            remarkInput?.setText(merged.optString("merchant"))
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -209,6 +281,7 @@ class BillSheetActivity : Activity() {
 
     override fun onDestroy() {
         alive = false
+        if (current === this) current = null
         uiHandler.removeCallbacks(timeoutTask)
         uiHandler.removeCallbacks(finishTask)
         unregisterScreenOff()
@@ -303,6 +376,7 @@ class BillSheetActivity : Activity() {
         meta.textSize = 12f
         meta.setTextColor(0xFF8A90A0.toInt())
         meta.setPadding(0, dp(2), 0, dp(10))
+        metaView = meta
         box.addView(meta)
 
         val needsReview = data.optBoolean("needsReview", false) ||

@@ -133,4 +133,68 @@ class CaptureIdentityTest {
         assertEquals(Reason.PAGE_PENDING, CaptureGates.pageReason(PageKind.PAY_PENDING))
         assertNull(CaptureGates.pageReason(PageKind.PAY_SUCCESS))
     }
+
+    // ---------- CaptureClaimPolicy：order > session，冲突不合并 ----------
+
+    @Test
+    fun claimPolicyMergesSameOrderAndSession() {
+        val choice = CaptureClaimPolicy.choose(
+            listOf(
+                ClaimHit("t1", "order", "order:1"),
+                ClaimHit("t1", "session", "session:1")
+            )
+        )
+        assertEquals("t1", choice!!.mergeTxnId)
+        assertNull(choice.duplicateReason)
+    }
+
+    @Test
+    fun claimPolicyRejectsOrderVsSessionConflict() {
+        val choice = CaptureClaimPolicy.choose(
+            listOf(
+                ClaimHit("order-txn", "order", "order:1"),
+                ClaimHit("session-txn", "session", "session:1")
+            )
+        )
+        assertEquals("", choice!!.mergeTxnId)
+        assertEquals(Reason.DUPLICATE_ORDER, choice.duplicateReason)
+        assertEquals("order-txn", choice.duplicateTxnId)
+    }
+
+    @Test
+    fun claimPolicyRejectsConflictingPageAgainstSessionMerge() {
+        val choice = CaptureClaimPolicy.choose(
+            listOf(
+                ClaimHit("session-txn", "session", "session:1"),
+                ClaimHit("page-txn", "page", "page:x")
+            )
+        )
+        assertEquals("", choice!!.mergeTxnId)
+        assertEquals(Reason.DUPLICATE_PAGE, choice.duplicateReason)
+    }
+
+    @Test
+    fun claimPolicyMergesSessionOnly() {
+        val choice = CaptureClaimPolicy.choose(
+            listOf(ClaimHit("t1", "session", "session:1"))
+        )
+        assertEquals("t1", choice!!.mergeTxnId)
+        assertNull(choice.duplicateReason)
+    }
+
+    @Test
+    fun claimPolicyDuplicateReasonFollowsKeyKind() {
+        assertEquals(
+            Reason.DUPLICATE_PAGE,
+            CaptureClaimPolicy.choose(listOf(ClaimHit("t1", "page", "page:x")))!!.duplicateReason
+        )
+        assertEquals(
+            Reason.DUPLICATE_CAPTURE,
+            CaptureClaimPolicy.choose(listOf(ClaimHit("t1", "capture", "capture:x")))!!.duplicateReason
+        )
+        assertEquals(
+            Reason.DUPLICATE_BILL,
+            CaptureClaimPolicy.choose(listOf(ClaimHit("t1", "bill", "bill:x")))!!.duplicateReason
+        )
+    }
 }

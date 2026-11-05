@@ -20,14 +20,44 @@ data class CaptureApp(
 
 data class CaptureReasonCount(val reason: String, val label: String, val count: Int)
 
+data class CaptureAppStat(
+    val pkg: String = "",
+    val app: String = "",
+    val captured: Int = 0,
+    val saved: Int = 0,
+    val discarded: Int = 0,
+    val rejected: Int = 0,
+    val edited: Int = 0
+)
+
+data class CaptureKindStat(
+    val kind: String = "",
+    val label: String = "",
+    val captured: Int = 0,
+    val saved: Int = 0,
+    val discarded: Int = 0,
+    val rejected: Int = 0,
+    val edited: Int = 0
+)
+
+data class CaptureReconcile(
+    val screen: Int = 0,
+    val notify: Int = 0,
+    val matched: Int = 0,
+    val screenOnly: Int = 0,
+    val notifyOnly: Int = 0
+)
+
 data class CaptureSummary(
+    val pending: Int = 0,
     val accepted: Int = 0,
     val saved: Int = 0,
     val discarded: Int = 0,
     val rejected: Int = 0,
     val merged: Int = 0,
     val amountEdited: Int = 0,
-    val reasons: List<CaptureReasonCount> = emptyList()
+    val reasons: List<CaptureReasonCount> = emptyList(),
+    val reconcile: CaptureReconcile = CaptureReconcile()
 )
 
 data class CaptureTrace(
@@ -46,6 +76,7 @@ data class CaptureTrace(
     val channel: String,
     val confidence: Double,
     val needsReview: Boolean,
+    val evidence: String,
     val text: String
 )
 
@@ -79,9 +110,60 @@ data class CaptureReparse(
     }
 }
 
+data class CaptureReplaySample(
+    val app: String = "",
+    val oldKindLabel: String = "",
+    val newKindLabel: String = "",
+    val oldAmount: Double = 0.0,
+    val newAmount: Double = 0.0,
+    val oldReasonLabel: String = "",
+    val newReasonLabel: String = ""
+)
+
+data class CaptureReplaySummary(
+    val total: Int = 0,
+    val withText: Int = 0,
+    val changed: Int = 0,
+    val kindChanged: Int = 0,
+    val amountChanged: Int = 0,
+    val newlyParsed: Int = 0,
+    val lostParse: Int = 0,
+    val samples: List<CaptureReplaySample> = emptyList()
+) {
+    fun summary(): String {
+        if (total == 0) return "没有可回放的识别记录"
+        if (withText == 0) {
+            return "共 $total 条记录，但没有保存页面文本。\n请先开启「记录页面文本（调试）」并触发几笔。"
+        }
+        val b = StringBuilder()
+        b.append("回放 ").append(total).append(" 条，有文本 ").append(withText).append(" 条\n")
+        b.append("变化 ").append(changed).append(" 条：类型 ").append(kindChanged)
+            .append(" · 金额 ").append(amountChanged)
+            .append(" · 新增可识别 ").append(newlyParsed)
+            .append(" · 变为不可识别 ").append(lostParse)
+        if (samples.isNotEmpty()) {
+            b.append("\n\n示例：")
+            for (s in samples.take(5)) {
+                b.append("\n").append(s.app.ifEmpty { "未知应用" }).append("：")
+                    .append(s.oldKindLabel.ifEmpty { "未知" }).append(" → ")
+                    .append(s.newKindLabel.ifEmpty { "未知" })
+                if (s.oldAmount > 0 || s.newAmount > 0) {
+                    b.append(" · ").append(money(s.oldAmount)).append(" → ").append(money(s.newAmount))
+                }
+            }
+        }
+        return b.toString()
+    }
+
+    private fun money(v: Double): String =
+        String.format(java.util.Locale.US, "%.2f", v)
+}
+
 data class CaptureDiagnostics(
     val summary: CaptureSummary = CaptureSummary(),
     val traces: List<CaptureTrace> = emptyList(),
+    val apps: List<CaptureAppStat> = emptyList(),
+    val kinds: List<CaptureKindStat> = emptyList(),
     val settings: CaptureSettingsData = CaptureSettingsData()
 )
 
@@ -127,21 +209,66 @@ object Capture {
                         channel = t.optString("channel", ""),
                         confidence = t.optDouble("confidence", 0.0),
                         needsReview = t.optBoolean("needsReview", false),
+                        evidence = t.optString("evidence", ""),
                         text = t.optString("text", "")
+                    )
+                )
+            }
+            val appStats = ArrayList<CaptureAppStat>()
+            val appArr = s.optJSONArray("apps") ?: org.json.JSONArray()
+            for (i in 0 until appArr.length()) {
+                val a = appArr.optJSONObject(i) ?: continue
+                appStats.add(
+                    CaptureAppStat(
+                        pkg = a.optString("pkg", ""),
+                        app = a.optString("app", ""),
+                        captured = a.optInt("captured", 0),
+                        saved = a.optInt("saved", 0),
+                        discarded = a.optInt("discarded", 0),
+                        rejected = a.optInt("rejected", 0),
+                        edited = a.optInt("edited", 0)
+                    )
+                )
+            }
+            val kindStats = ArrayList<CaptureKindStat>()
+            val kindArr = s.optJSONArray("kinds") ?: org.json.JSONArray()
+            for (i in 0 until kindArr.length()) {
+                val k = kindArr.optJSONObject(i) ?: continue
+                kindStats.add(
+                    CaptureKindStat(
+                        kind = k.optString("kind", ""),
+                        label = k.optString("kindLabel", ""),
+                        captured = k.optInt("captured", 0),
+                        saved = k.optInt("saved", 0),
+                        discarded = k.optInt("discarded", 0),
+                        rejected = k.optInt("rejected", 0),
+                        edited = k.optInt("edited", 0)
                     )
                 )
             }
             CaptureDiagnostics(
                 summary = CaptureSummary(
+                    pending = s.optInt("pending", 0),
                     accepted = s.optInt("accepted", 0),
                     saved = s.optInt("saved", 0),
                     discarded = s.optInt("discarded", 0),
                     rejected = s.optInt("rejected", 0),
                     merged = s.optInt("merged", 0),
                     amountEdited = s.optInt("amountEdited", 0),
-                    reasons = reasons
+                    reasons = reasons,
+                    reconcile = s.optJSONObject("reconcile")?.let { r ->
+                        CaptureReconcile(
+                            screen = r.optInt("screen", 0),
+                            notify = r.optInt("notify", 0),
+                            matched = r.optInt("matched", 0),
+                            screenOnly = r.optInt("screenOnly", 0),
+                            notifyOnly = r.optInt("notifyOnly", 0)
+                        )
+                    } ?: CaptureReconcile()
                 ),
                 traces = traces,
+                apps = appStats,
+                kinds = kindStats,
                 settings = parseSettings(o.optJSONObject("settings"))
             )
         } catch (_: Exception) {
@@ -220,6 +347,44 @@ object Capture {
             )
         } catch (_: Exception) {
             CaptureReparse(reasonLabel = "解析失败")
+        }
+    }
+
+    /** 影子回放：用当前解析规则重跑已保存的页面文本，不写账本、不弹层。 */
+    fun replay(context: Context, limit: Int = 200): CaptureReplaySummary {
+        val raw = runCatching {
+            MuyianBillCore.replayCaptureTraces(context, limit)
+        }.getOrNull() ?: return CaptureReplaySummary()
+        return try {
+            val o = JSONObject(raw)
+            val samples = ArrayList<CaptureReplaySample>()
+            val arr = o.optJSONArray("samples") ?: org.json.JSONArray()
+            for (i in 0 until arr.length()) {
+                val s = arr.optJSONObject(i) ?: continue
+                samples.add(
+                    CaptureReplaySample(
+                        app = s.optString("app", ""),
+                        oldKindLabel = s.optString("oldKindLabel", ""),
+                        newKindLabel = s.optString("newKindLabel", ""),
+                        oldAmount = s.optDouble("oldAmount", 0.0),
+                        newAmount = s.optDouble("newAmount", 0.0),
+                        oldReasonLabel = s.optString("oldReasonLabel", ""),
+                        newReasonLabel = s.optString("newReasonLabel", "")
+                    )
+                )
+            }
+            CaptureReplaySummary(
+                total = o.optInt("total", 0),
+                withText = o.optInt("withText", 0),
+                changed = o.optInt("changed", 0),
+                kindChanged = o.optInt("kindChanged", 0),
+                amountChanged = o.optInt("amountChanged", 0),
+                newlyParsed = o.optInt("newlyParsed", 0),
+                lostParse = o.optInt("lostParse", 0),
+                samples = samples
+            )
+        } catch (_: Exception) {
+            CaptureReplaySummary()
         }
     }
 

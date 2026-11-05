@@ -170,6 +170,82 @@ class CaptureGateTest {
         )
     }
 
+    // ---------- CaptureSession：宿主通知先于 RETURNED 到达 ----------
+
+    private val routeTtl = 15L * 60 * 1000L
+    private val returnWindow = 3L * 60 * 1000L
+
+    private fun session(
+        pkg: String,
+        now: Long,
+        payPkg: String = "com.eg.android.AlipayGphone",
+        hostPkg: String = "com.sankuai.meituan",
+        returned: Boolean = false,
+        enteredAt: Long = now - 2_000L,
+        evidenceAt: Long = now - 2_000L,
+        returnedAt: Long = 0L,
+        updatedAt: Long = now - 2_000L
+    ) = CaptureSession.resolve(
+        pkg = pkg,
+        payPkg = payPkg,
+        hostPkg = hostPkg,
+        sessionId = "com.eg.android.AlipayGphone:1793267477706",
+        returned = returned,
+        enteredAt = enteredAt,
+        evidenceAt = evidenceAt,
+        returnedAt = returnedAt,
+        updatedAt = updatedAt,
+        now = now,
+        ttlMs = routeTtl,
+        returnWindowMs = returnWindow
+    )
+
+    @Test
+    fun hostNotificationBeforeReturnedSharesSession() {
+        // 支付宝成功页刚出现 2 秒，美团通知先到，"窗口回前台"的无障碍事件还没来
+        val now = 1_793_267_480_038L
+        assertEquals(
+            "com.eg.android.AlipayGphone:1793267477706",
+            session("com.sankuai.meituan", now)
+        )
+    }
+
+    @Test
+    fun staleHostEvidenceDoesNotShareSession() {
+        val now = 1_793_267_480_038L
+        assertEquals("", session("com.sankuai.meituan", now, evidenceAt = now - 4L * 60 * 1000L))
+        assertEquals("", session("com.sankuai.meituan", now, evidenceAt = 0L))
+    }
+
+    @Test
+    fun returnedHostStillUsesRouteTtl() {
+        // 原有行为：回前台 10 分钟后宿主结果页仍并入同一笔
+        val now = 1_793_267_480_038L
+        assertEquals(
+            "com.eg.android.AlipayGphone:1793267477706",
+            session(
+                "com.sankuai.meituan", now, returned = true,
+                evidenceAt = now - 11L * 60 * 1000L, returnedAt = now - 10L * 60 * 1000L
+            )
+        )
+    }
+
+    @Test
+    fun payAppKeepsSessionForRouteTtl() {
+        val now = 1_793_267_480_038L
+        assertEquals(
+            "com.eg.android.AlipayGphone:1793267477706",
+            session("com.eg.android.AlipayGphone", now, enteredAt = now - 10L * 60 * 1000L)
+        )
+    }
+
+    @Test
+    fun unrelatedOrExpiredRouteGetsNoSession() {
+        val now = 1_793_267_480_038L
+        assertEquals("", session("com.tencent.mm", now))
+        assertEquals("", session("com.sankuai.meituan", now, updatedAt = now - routeTtl - 1L))
+    }
+
     // ---------- CaptureText.adjacentPrefixExcluded（排除词误杀修复的回归） ----------
 
     @Test

@@ -47,7 +47,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.muyian.debt.state.AppState
-import com.muyian.debt.state.Screen
 import com.muyian.debt.data.Files
 import com.muyian.debt.data.GlassStyle
 import com.muyian.debt.data.MascotStyle
@@ -468,14 +467,6 @@ fun SettingsScreen(app: AppState) {
                     desc = "补充无障碍覆盖不到的场景：收款到账提醒只在通知栏、熄屏碰卡支付的交易通知。两路来源自动去重，不会重复入账。",
                     action = if (status.notificationListener) null else "去开启",
                     onClick = { NativeStatus.openNotificationListenerSettings(ctx) }
-                )
-                SettingCell(
-                    icon = "list",
-                    gradient = Brush.linearGradient(p.gradMint),
-                    title = "识别记录与诊断",
-                    desc = "查看最近每笔支付为什么被接受或拒绝、今日拒绝原因，并管理参与识别的 App。全部只在本机。",
-                    action = "查看",
-                    onClick = { app.navigate(Screen.Capture) }
                 )
                 SettingCell(
                     icon = "rotate-ccw",

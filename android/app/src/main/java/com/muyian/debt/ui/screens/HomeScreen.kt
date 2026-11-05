@@ -1,8 +1,13 @@
 package com.muyian.debt.ui.screens
 
 import android.app.Activity
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -101,6 +106,10 @@ fun HomeScreen(app: AppState, activity: Activity) {
     val navSolid by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8 } }
 
     LaunchedEffect(navSolid) { app.homeNavSolid = navSolid }
+    // 添加按钮只在列表回到最顶部时出现；滚离顶部就收起（缩放+淡入淡出）
+    val fabShown by remember {
+        derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 }
+    }
 
     fun loadWeekBills() {
         val merged = ArrayList<Bill>()
@@ -290,13 +299,19 @@ fun HomeScreen(app: AppState, activity: Activity) {
             }
         }
 
-        AppFab(
-            onClick = { app.openAdd() },
+        AnimatedVisibility(
+            visible = fabShown,
+            enter = fadeIn(animationSpec = Motion.Enter) +
+                scaleIn(animationSpec = Motion.Enter, initialScale = 0.72f),
+            exit = fadeOut(animationSpec = Motion.Exit) +
+                scaleOut(animationSpec = Motion.Exit, targetScale = 0.72f),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(bottom = rpx(48))
-        )
+        ) {
+            AppFab(onClick = { app.openAdd() })
+        }
 
     }
 }

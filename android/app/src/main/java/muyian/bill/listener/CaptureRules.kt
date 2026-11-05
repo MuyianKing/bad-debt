@@ -47,12 +47,20 @@ object CaptureRules {
         "微信支付凭证|交易单号|商户单号|收款方|转账单号|支付凭证|交易流水号|订单号"
     )
     val PAY_TRIGGER = Pattern.compile(
-        "确认支付|立即支付|去支付|确认付款|立即付款|去付款|提交订单|收银台|" +
-            "选择支付方式|输入支付密码|指纹支付|面容支付|免密支付|同意协议并支付"
+        "确认支付|立即支付|去支付|确认付款|立即付款|去付款|提交订单|收银台|确认购买|" +
+            "快速支付|快速付款|极速支付|极速付款|" +
+            "选择支付方式|更改付款方式|输入支付密码|指纹支付|面容支付|免密支付|同意协议并支付"
     )
+    /** 支付宝系收银台的快速付款按钮；旁边常有"支"字图标 */
+    private val QUICK_PAY = Pattern.compile("快速支付|快速付款|极速支付|极速付款")
+    private val ALIPAY_QUICK_PAY = Pattern.compile(
+        "支\\s*(?:快速|极速)(?:支付|付款)|(?:快速|极速)(?:支付|付款)\\s*支"
+    )
+    private val ALIPAY_GLYPH_LINE = Pattern.compile("(^|\\n)\\s*支\\s*($|\\n)")
 
     val EXPENSE_MARK = Pattern.compile(
-        "支付成功|付款成功|扣款成功|付款完成|交易成功|消费成功|已支付|支付完成|转出成功|转账成功"
+        "支付成功|付款成功|扣款成功|付款完成|交易成功|消费成功|已支付|支付完成|转出成功|转账成功|" +
+            "先用后付订单完成付款"
     )
     val INCOME_MARK = Pattern.compile(
         "收款成功|收款到账|已到账|已收款|收入|入账|转入成功|存入零钱|存入余额|到账"
@@ -75,7 +83,8 @@ object CaptureRules {
             "还款成功|已还款|还款完成|" +
             "提现成功|充值成功|转入零钱通|转入余额宝|转出到卡|本人账户|转入本人|" +
             // 转账页的列表行：不是完成语义，但用于识别"一页多笔"
-            "转给TA|收到TA"
+            "转给TA|收到TA|" +
+            "先用后付订单完成付款"
     )
 
     val EXPENSE_WORD = Pattern.compile("支出|付款|支付|消费|扣款|转出|买单|代扣|缴费")
@@ -123,6 +132,9 @@ object CaptureRules {
     private val MEITUAN_ANCHORS = listOf("实付金额", "实付", "订单金额", "支付金额")
     private val JD_ANCHORS = listOf("应付金额", "实付金额", "支付金额", "订单金额")
     private val UNIONPAY_ANCHORS = listOf("交易金额", "支付金额", "订单金额")
+    /** 淘宝系宿主：确认购买页按钮、订单详情的成交价/商品总价 */
+    private val TAOBAO_ANCHORS = listOf("实付款", "实付金额", "成交价", "商品总价", "订单金额", "确认购买")
+    private val TAOBAO_EXCLUDES = listOf("运费", "优惠", "红包", "积分")
     private val BANK_ANCHORS = listOf(
         "交易金额", "支出金额", "消费金额", "转账金额", "取现金额", "存入金额"
     )
@@ -188,6 +200,18 @@ object CaptureRules {
         add(AppRule(
             "com.jd.jrapp", AppRole.PAY, AdapterId.JD, "京东金融",
             JD_ANCHORS, listOf("京豆", "白条")
+        ))
+        add(AppRule(
+            "com.taobao.taobao", AppRole.HOST, AdapterId.GENERIC, "淘宝",
+            TAOBAO_ANCHORS, TAOBAO_EXCLUDES
+        ))
+        add(AppRule(
+            "com.tmall.wireless", AppRole.HOST, AdapterId.GENERIC, "天猫",
+            TAOBAO_ANCHORS, TAOBAO_EXCLUDES
+        ))
+        add(AppRule(
+            "com.taobao.idlefish", AppRole.HOST, AdapterId.GENERIC, "闲鱼",
+            TAOBAO_ANCHORS, TAOBAO_EXCLUDES
         ))
         val banks = listOf(
             "com.icbc", "com.chinamworld.main", "com.cmbchina.ccd.pluto.cmbActivity",
@@ -293,6 +317,15 @@ object CaptureRules {
         if (text.contains("微信支付") || text.contains("零钱")) return "微信"
         if (text.contains("支付宝") || text.contains("花呗") || text.contains("余额宝")) return "支付宝"
         if (text.contains("云闪付") || text.contains("银联")) return "云闪付"
+        // 支付宝"快速支付/极速付款"按钮旁的"支"字图标也是强信号
+        if (hasAlipayQuickPay(text)) return "支付宝"
         return ""
+    }
+
+    private fun hasAlipayQuickPay(text: String): Boolean {
+        if (!QUICK_PAY.matcher(text).find()) return false
+        if (text.contains("支付宝")) return true
+        if (ALIPAY_QUICK_PAY.matcher(text).find()) return true
+        return ALIPAY_GLYPH_LINE.matcher(text).find()
     }
 }
