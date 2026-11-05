@@ -173,14 +173,14 @@ class PureLogicTest {
     }
 
     @Test
-    fun qianjiParsesRows() {
+    fun excelImportParsesRows() {
         val header = listOf("时间", "类型", "金额", "分类", "二级分类", "备注", "ID")
         val rows = listOf(
             listOf("2026-10-01 12:30", "支出", "12.50", "三餐", "", "午饭", "A1"),
             listOf("2026-10-02 08:00", "收入", "100", "工资", "", "工资", "A2"),
             listOf("坏时间", "支出", "1", "", "", "", "A3")
         )
-        val parsed = Qianji.parseSheet(header, rows)
+        val parsed = ExcelImport.parseSheet(header, rows)
         assertTrue(parsed.ok)
         assertEquals(3, parsed.total)
         assertEquals(1, parsed.expense)
@@ -189,14 +189,14 @@ class PureLogicTest {
         assertEquals("2026-10-01", parsed.minDay)
         assertEquals("2026-10-02", parsed.maxDay)
         assertEquals(2, parsed.rows.size)
-        assertEquals(listOf("A1", "A2"), Qianji.orderNos(parsed.rows))
+        assertEquals(listOf("A1", "A2"), ExcelImport.orderNos(parsed.rows))
     }
 
     @Test
-    fun qianjiMappingFallsBackToOther() {
+    fun excelImportMappingFallsBackToOther() {
         val leaves = listOf("三餐" to "三餐", "交通" to "交通", "其它" to "其它")
-        val mappings = Qianji.buildMappings(
-            listOf(Qianji.CatCount("支出", "不存在", "", 3), Qianji.CatCount("支出", "三餐", "", 5)),
+        val mappings = ExcelImport.buildMappings(
+            listOf(ExcelImport.CatCount("支出", "不存在", "", 3), ExcelImport.CatCount("支出", "三餐", "", 5)),
             leaves
         )
         assertEquals("三餐", mappings[0].target)

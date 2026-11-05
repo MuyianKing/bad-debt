@@ -10,10 +10,10 @@
 - `Prefs.kt` — 本地设置存储（SharedPreferences `muyian_native`）：`str` / `bool` / `putStr` / `putBool`，并负责旧版本 `DCStorage` 的一次性只读迁移（key `legacy_migrated_v1`）。页面不要直接持有 `SharedPreferences`。
 - `Mascots.kt` — 角色（吉祥物）唯一来源：`MASCOTS` / `THEME_MASCOT` / `NEZHA` / `WUKONG`、表情列表、`active` / `styleOf` / `resolve` / `setStyle` / `setAutoMood`。存储 key `muyian_mascot_style_v1:<角色id>`、`muyian_mascot_auto_mood_v1`；素材在 `app/src/main/assets/mascots/`。新增角色只改这个模块 + 放图 + 改主题映射。
 - `LauncherIcon.kt` — 桌面图标与哪吒基础表情的映射：按 `grin` / `cheer` / `grumpy` 互斥启用三个 `activity-alias`，只在切换表情和 `MainActivity` 启动时调用；不要绕过它直接改组件状态。
-- `Qianji.kt` — 钱迹 Excel 的纯数据处理：表头定位、时间/类型/金额校验、汇总统计、分类计数、钱迹分类 → 叶子名映射、入库账单拼装（`parseSheet` / `buildLeafColumns` / `buildMappings` / `buildBillsJson` / `orderNos`）。原生只负责把 xlsx 读成「表头 + 原始单元格行」并批量写库。
+- `ExcelImport.kt` — Excel 账单的纯数据处理：表头定位、时间/类型/金额校验、汇总统计、分类计数、导入分类 → 叶子名映射、入库账单拼装（`parseSheet` / `buildLeafColumns` / `buildMappings` / `buildBillsJson` / `orderNos`）。原生只负责把 xlsx 读成「表头 + 原始单元格行」并批量写库。
 - `Lunar.kt` / `LunarData.kt` — 农历与节日（1900–2100），仅供日历角标使用。
 - `Stats.kt` / `CalendarModel.kt` / `WeekStats.kt` / `Dates.kt` — 统计、日历、最近 7 日与日期格式化的纯计算；页面只负责动画与绘制。
-- `Backup.kt` / `ImportFlow.kt` / `FilePick.kt` / `Batch.kt` — 备份解析与恢复、钱迹导入流程、SAF 选文件轮询、分块写库；页面不再直接解析原生 JSON。
+- `Backup.kt` / `ImportFlow.kt` / `FilePick.kt` / `Batch.kt` — 备份解析与恢复、Excel 账单导入流程、SAF 选文件轮询、分块写库；页面不再直接解析原生 JSON。
 - `NativeStatus.kt` — 无障碍/通知/悬浮窗/MIUI 弹层/电池/自愈状态的类型化快照与系统页面跳转。
 - `Files.kt` — 应用私有目录图片复制/删除（账单图、背景图共用）。
 

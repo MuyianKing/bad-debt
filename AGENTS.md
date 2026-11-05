@@ -5,12 +5,12 @@
 ## 一、通用约束（任何改动都必须遵守）
 
 - **技术栈与工程形态固定**：Kotlin + Jetpack Compose，单 Activity（`MainActivity`）+ Compose 导航；系统能力与原生数据层位于 `android/app/src/main/java/muyian/bill/listener/` 同包文件（`CaptureModels/Text/Rules/Parser` 负责观察与解析，`CaptureRoute` 负责支付路线，`CaptureLedger` 负责交易账本与去重，`CaptureEngine` 负责门禁与编排，`CapturePresenter` 负责弹层队列，`hybrid.kt` 只剩 `MuyianBillCore` 门面与导入/备份，`BillDb.kt` 负责 SQLite，`SystemPerms.kt` 负责权限，`XlsxReader.kt` 负责 xlsx，`PendingNotices.kt` 负责待确认通知，Activity/Service 各自成文件）。用 `android/` 下的 Android Gradle 工程构建，不引入第三方 UI 库、图表库或网络/统计依赖；唯一例外是已内置的 `com/kyant/backdrop`（Apache-2.0，仅用于液态玻璃，见 `android/third_party/kyant-backdrop/NOTICE.md`），不得再新增其它 UI 库。目标平台只有 Android 真机。
-- **实现优先级：能 Kotlin/Compose 就不下沉系统服务**：页面、组件、格式化、分类/主题/角色、钱迹映射、导入/备份流程放在 `data/` 与 `ui/` 的 Kotlin 代码；`muyian.bill.listener` 只承担系统级能力（无障碍采集、通知监听、确认弹层、后台保活、SAF 选文件、原生 SQLite 数据层）。新增系统能力写入同包对应文件，由 `MuyianBillCore` 暴露同步方法，不引入跨语言桥接层。
+- **实现优先级：能 Kotlin/Compose 就不下沉系统服务**：页面、组件、格式化、分类/主题/角色、Excel 账单映射、导入/备份流程放在 `data/` 与 `ui/` 的 Kotlin 代码；`muyian.bill.listener` 只承担系统级能力（无障碍采集、通知监听、确认弹层、后台保活、SAF 选文件、原生 SQLite 数据层）。新增系统能力写入同包对应文件，由 `MuyianBillCore` 暴露同步方法，不引入跨语言桥接层。
 - **隐私红线**：通知/窗口文本只在手机本地解析，数据只存本机 SQLite 与 SharedPreferences。禁止任何上传、统计 SDK、云同步与新增网络请求。
 - **确认弹层不可绕过**：解析成功的账单不自动入账，必须由原生底部确认弹层（`BillSheetActivity`）用户点「保存」才写库；取消/返回/60 秒超时，以及弹层已经显示后的熄屏，都直接丢弃这一笔。弹层从一开始就因熄屏/锁屏或 ROM 拦截拉不起来时，允许发一条「待确认」通知兜底，但点通知必须回到同一个确认弹层；通知本身不得写库、不得提供直接入账入口。不得重新引入悬浮卡、兜底草稿或其他旁路。
 - **自动采集以无障碍服务为主渠道**，通知监听只是可选辅助渠道，禁止把通知监听改回唯一渠道。
 - **UI 基线**：全部界面用 Jetpack Compose；颜色/圆角/阴影/毛玻璃统一走 `ui/theme/Theme.kt` 的 `Palette` 与 `LocalPalette`，图标统一走 `ui/icons` 的 `AppIcon` 与 `IconData`，卡片统一用 `Modifier.glass` / `Modifier.liquidGlass` / `solidCard`。禁止在页面里写死主题色；装饰性渐变、光斑、光晕先复用主题令牌（`gradPrimary` 等），不要临时拼色。页面底色统一用 `p.bg` 纯色（与统计页一致），不许为了玻璃效果给页面加光晕/渐变/照片。状态栏图标、安全区与返回键由 `MainActivity` 统一处理，页面不各写一套。
-- **原生接口约定**：`MuyianBillCore` 的对外方法保持**同步调用**，复杂结构用 JSON 字符串传递；页面侧通过 `data/Bills.kt`、`data/Qianji.kt`、`data/NativeStatus.kt`、`data/Backup.kt`、`data/ImportFlow.kt`、`data/FilePick.kt` 的类型化封装消费，不直接调 `MuyianBillCore`、不自己拼 JSON。
+- **原生接口约定**：`MuyianBillCore` 的对外方法保持**同步调用**，复杂结构用 JSON 字符串传递；页面侧通过 `data/Bills.kt`、`data/ExcelImport.kt`、`data/NativeStatus.kt`、`data/Backup.kt`、`data/ImportFlow.kt`、`data/FilePick.kt` 的类型化封装消费，不直接调 `MuyianBillCore`、不自己拼 JSON。
 - **数据口径不可另立**：金额支出为负、收入为正；`costType` 存叶子名，统计经 `Cats.topNameOf()` 归并；日期用 `year/month/day` 三字段，页面间传 `YYYY-MM-DD`。
 - **不擅自建分支**：没有明确指示时，禁止新建分支、切换分支或改写分支历史（`checkout -b`、`switch -c`、`branch`、`rebase`、`reset --hard` 等），一律在当前分支（默认 `main`）上直接改动与提交。只有用户明确要求建分支时才建。
 - **专项约束以 `docs/` 为准**：改到哪一类就按对应文档执行；本文件与具体文档表述冲突时，以更具体的那篇为准。

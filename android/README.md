@@ -43,7 +43,7 @@ cd android
 ```
 app/src/main/java/com/muyian/debt/
 ├── MainActivity.kt          # 单 Activity + Compose 导航 + 系统栏
-├── data/                    # Bill/Category/Prefs、格式化、农历、钱迹映射、AppState
+├── data/                    # Bill/Category/Prefs、格式化、农历、Excel 账单映射、AppState
 ├── ui/theme/Theme.kt        # 三主题设计令牌（Palette）
 ├── ui/icons/                # 24x24 图标路径 + Compose 绘制
 ├── ui/components/           # 玻璃卡、角色图、账单列表、底部弹层、滚轮、动效
@@ -62,7 +62,7 @@ app/src/main/java/muyian/bill/listener/   # 系统级原生核心
 - 日历：农历/节日角标、四种口径、选中日摘要 + 账单合并卡、编辑/删除；
 - 分类管理：长按拖拽、父类/子类实时让位、增删改、图标选择、子类面板；
 - 设置：三主题、角色表情/跟随场景、背景图（全站页面共用）、无障碍/通知/悬浮窗/MIUI 后台弹出/自恢复/电池/保活/最近任务/自启动；
-- 导入/备份：钱迹 xlsx 映射预览与分批入库、本应用 JSON 导出/合并恢复、缺失分类补全；
+- 导入/备份：Excel 账单映射预览与分批入库、本应用 JSON 导出/合并恢复、缺失分类补全；
 - 主题与原生确认弹层颜色同步。
 
 ## 动效约定

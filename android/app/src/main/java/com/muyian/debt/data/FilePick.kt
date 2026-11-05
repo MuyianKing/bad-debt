@@ -5,7 +5,7 @@ import kotlinx.coroutines.delay
 import muyian.bill.listener.MuyianBillCore
 import org.json.JSONObject
 
-enum class PickKind { QIANJI, BACKUP }
+enum class PickKind { EXCEL, BACKUP }
 
 sealed class OpenResult {
     data object Ok : OpenResult()
@@ -42,7 +42,7 @@ object FilePick {
     fun open(context: Context, kind: PickKind): OpenResult {
         val raw = try {
             when (kind) {
-                PickKind.QIANJI -> MuyianBillCore.openImportPicker(context)
+                PickKind.EXCEL -> MuyianBillCore.openImportPicker(context)
                 PickKind.BACKUP -> MuyianBillCore.openBackupPicker(context)
             }
         } catch (e: Exception) {

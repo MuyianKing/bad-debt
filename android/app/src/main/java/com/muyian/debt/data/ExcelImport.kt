@@ -4,8 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 
-/** 钱迹 Excel 的纯数据处理：原生只负责把 xlsx 读成二维文本，这里做账单语义。 */
-object Qianji {
+/** Excel 账单的纯数据处理：原生只负责把 xlsx 读成二维文本，这里做账单语义。 */
+object ExcelImport {
     const val MAX_ROWS = 20000
     private val TIME_RE = Regex("(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
 
@@ -45,7 +45,7 @@ object Qianji {
         val typeIdx = cols["type"] ?: -1
         val amountIdx = cols["amount"] ?: -1
         if (timeIdx < 0 || typeIdx < 0 || amountIdx < 0) {
-            return ParsedSheet(false, "表头缺少 时间/类型/金额 列，请确认是钱迹导出的 Excel")
+            return ParsedSheet(false, "表头缺少 时间/类型/金额 列，请确认是记账 App 导出的 Excel")
         }
         var total = 0
         var skipped = 0
@@ -150,7 +150,7 @@ object Qianji {
             o.put("day", t.d)
             o.put("clock", "${t.mo}月${t.d}日 ${t.hh}:${t.mm}")
             o.put("money", if (income) amount else -amount)
-            o.put("bankName", "钱迹")
+            o.put("bankName", "导入")
             o.put("costType", if (income) "收入" else (map["${r.type}|${r.cat}|${r.sub}"] ?: "其它"))
             o.put("orderRemark", r.remark)
             o.put("reimb", 0)

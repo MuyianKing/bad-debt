@@ -4,7 +4,7 @@
 
 Android 双渠道自动记账 App（无障碍为主 + 通知监听辅助）。技术栈：**Kotlin + Jetpack Compose**，系统能力与原生数据层集中在 `muyian/bill/listener/` 同包文件。
 
-界面布局参考【钱迹】，配色与视觉按本项目的三主题重做。
+界面布局自研，配色与视觉按本项目的三主题统一。
 
 > 构建、签名与数据迁移见 [android/README.md](android/README.md)；开发与 AI 协作的通用强约束见 [AGENTS.md](AGENTS.md)，按主题拆分的业务细则见 [docs/](docs/README.md)，改动前必读。
 
@@ -20,7 +20,7 @@ muyian/
     └── app/src/main/java/
         ├── com/muyian/debt/
         │   ├── MainActivity.kt               # 单 Activity + Compose 导航 + 系统栏
-        │   ├── data/                         # 账单/分类/设置/角色/钱迹/统计/备份/导入
+        │   ├── data/                         # 账单/分类/设置/角色/导入/统计/备份
         │   ├── state/                        # AppState 门面 + 主题/导航/弹层/设置子状态
         │   └── ui/
         │       ├── theme/Theme.kt            # 三主题设计令牌（Palette）

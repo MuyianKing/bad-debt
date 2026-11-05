@@ -476,13 +476,13 @@ class MuyianBillCore private constructor() {
             )
         }
 
-        // ---------- 钱迹 Excel 导入 ----------
-        // 选文件由 ImportPickActivity 中转（SAF，无需存储权限）：选中的文件拷到应用私有目录
-        // qianji_import.xlsx，路径与状态放在静态字段，页面侧用同步 API 轮询读取。
+        // ---------- Excel 账单导入 ----------
+        // 选文件由 ImportPickActivity 中转（SAF，无需存储权限）：选中的文件拷到应用私有目录，
+        // 路径与状态放在静态字段，页面侧用同步 API 轮询读取。
         // 原生只做「xlsx 解压成表头 + 原始单元格行」和「批量写库」；时间/类型/金额校验、
-        // 统计、分类计数与映射、入库字段拼装在 com.muyian.debt.data 的 Qianji.kt。
+        // 统计、分类计数与映射、入库字段拼装在 com.muyian.debt.data 的 Excel 账单数据层。
 
-        private const val IMPORT_CACHE_NAME = "qianji_import.xlsx"
+        private const val IMPORT_CACHE_NAME = "import_sheet.xlsx"
         private const val IMPORT_MAX_ROWS = 20000
         private const val IMPORT_MAX_COLUMNS = 64
         private val importLock = Any()
@@ -572,7 +572,7 @@ class MuyianBillCore private constructor() {
         }
 
         /**
-         * 读取钱迹导出的 xlsx，只解压成「表头 + 原始单元格行」，不做账单语义解析。
+         * 读取导入的 xlsx，只解压成「表头 + 原始单元格行」，不做账单语义解析。
          */
         @JvmStatic
         fun readImportSheet(path: String): String {
@@ -636,7 +636,7 @@ class MuyianBillCore private constructor() {
                 return result.toString()
             } catch (e: Exception) {
                 Log.e(TAG, "read import sheet failed", e)
-                result.put("ok", false).put("error", "解析失败，请确认是钱迹导出的 Excel 文件")
+                result.put("ok", false).put("error", "解析失败，请确认选择的是 Excel 账单文件")
                 return result.toString()
             }
         }

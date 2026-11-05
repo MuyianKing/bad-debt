@@ -67,8 +67,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
 /**
- * 钱迹导入的文件选择中转 Activity：透明主题，拉起系统文件选择器（SAF），
- * 把选中的文件拷进应用私有目录（qianji_import.xlsx）后通知 MuyianBillCore，由页面侧轮询。
+ * 账单导入的文件选择中转 Activity：透明主题，拉起系统文件选择器（SAF），
+ * 把选中的文件拷进应用私有目录后通知 MuyianBillCore，由页面侧轮询。
  * 通过 ContentResolver 读用户选中的 Uri，不需要任何存储权限。
  */
 class ImportPickActivity : Activity() {
@@ -130,7 +130,7 @@ class ImportPickActivity : Activity() {
             return
         }
         try {
-            val targetName = if (kind == "json") "muyian_backup.json" else "qianji_import.xlsx"
+            val targetName = if (kind == "json") "muyian_backup.json" else "import_sheet.xlsx"
             val out = File(getFilesDir(), targetName)
             val ins = contentResolver.openInputStream(uri)
             if (ins == null) {
@@ -175,7 +175,7 @@ class ImportPickActivity : Activity() {
         } catch (e: Exception) {
             // ignore
         }
-        return if (kind == "json") "muyian_backup.json" else "qianji_import.xlsx"
+        return if (kind == "json") "muyian_backup.json" else "import_sheet.xlsx"
     }
 
     override fun onDestroy() {

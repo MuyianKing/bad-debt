@@ -512,7 +512,7 @@ confidence = 0.55 * amountConfidence
 - 金额排除词判定改为**紧邻前缀**（金额前压缩空白后 6 字符）：整段前缀判定会把「您尾号4321的卡交易¥100.00」整条拒掉，还会跳过真金额后取到同行优惠额（「已优惠2元，实付50元」取到 2）。紧邻窗口由 `CaptureText.adjacentPrefixExcluded` 统一实现。
 - 无单号的宿主结果页 `page:` 键 TTL 从 24h 降为 10 分钟（`TTL_PAGE_NO_ORDER`）：弱指纹（仅金额+方向）挂 24h 会把每天同价的真实第二笔判成 `DUPLICATE_PAGE`；有单号时仍为 24h。
 - 账本 `claim` 异常从 fail-open（返回 CLAIMED）改为 **fail-closed**（返回 `DUPLICATE_CAPTURE`）：DB 忙时宁可漏弹，也不能同一笔重复弹层。
-- 支付宝结果页为渐进渲染，无障碍层对支付宝**固定跑快慢两遍解析**（事件后 160ms 与 450ms，参照钱迹实测参数），绕过 600ms 节流；签名去重保证已稳定页面不重复解析。
+- 支付宝结果页为渐进渲染，无障碍层对支付宝**固定跑快慢两遍解析**（事件后 160ms 与 450ms，参照实测参数），绕过 600ms 节流；签名去重保证已稳定页面不重复解析。
 - 无障碍服务 `onServiceConnected` 时调用 `restoreCaptureQueue`：进程被杀后服务重绑、用户未打开 App 也能恢复待确认队列（§8.3 的落地补齐）。
 - 用户在弹层保存时改过金额的，往该笔判定记录追加 `amount_edited` 标记（`CaptureLedger.markAmountEdited`），诊断页今日摘要显示条数——这是规则迭代的核心反馈信号。
 - `BillSheetActivity` 声明 `configChanges`：转屏/折叠不再触发 `onDestroy` 的未保存丢弃分支，用户正在编辑的内容得以保留。
@@ -520,7 +520,7 @@ confidence = 0.55 * amountConfidence
 ## 15. 兼容与红线
 
 - `MuyianBillCore` 对外仍全部 `@JvmStatic` 同步返回，复杂结构仍用 JSON 字符串；页面侧仍通过 `data/` 封装消费。
-- `bills` 表结构不变，`source` 取值仍为 `manual/notify/screen/qianji`，金额支出负、收入正。
+- `bills` 表结构不变，`source` 取值仍为 `manual/notify/screen/import`，金额支出负、收入正。
 - 新增 SQLite 表只在 `BillDb.openDb()` 里建，旧库 `ALTER TABLE` 兼容策略不变。
 - 不新增网络请求、不上传文本；调试文本留存默认关闭且仅本机。
 - 弹层仍是唯一确认入口；通知仍只是弹层入口；不引入悬浮卡/草稿。

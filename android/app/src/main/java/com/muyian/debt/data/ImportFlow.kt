@@ -19,14 +19,14 @@ sealed class ImportLoadResult {
     data class Ok(
         val fileName: String,
         val summary: ImportSummary,
-        val mappings: List<Qianji.MappingRow>,
-        val rows: List<Qianji.SheetRow>
+        val mappings: List<ExcelImport.MappingRow>,
+        val rows: List<ExcelImport.SheetRow>
     ) : ImportLoadResult()
 
     data class Error(val message: String) : ImportLoadResult()
 }
 
-/** 钱迹导入的流程层：读表、解析、去重计数、分块入库都在这里，页面只做状态切换。 */
+/** Excel 账单导入的流程层：读表、解析、去重计数、分块入库都在这里，页面只做状态切换。 */
 object ImportFlow {
     private const val CHUNK = 200
     private const val ROW_PAGE = 500
@@ -53,12 +53,12 @@ object ImportFlow {
         for (i in 0 until headerArr.length()) header.add(headerArr.optString(i, ""))
 
         val raw = fetchAllRows() ?: return ImportLoadResult.Error("读取表格失败，请重选文件")
-        val parsed = Qianji.parseSheet(header, raw)
+        val parsed = ExcelImport.parseSheet(header, raw)
         if (!parsed.ok) return ImportLoadResult.Error(parsed.error)
         if (parsed.rows.isEmpty()) return ImportLoadResult.Error("文件里没有可导入的账单")
 
         var dupInDb = 0
-        val orderNos = Qianji.orderNos(parsed.rows)
+        val orderNos = ExcelImport.orderNos(parsed.rows)
         if (orderNos.isNotEmpty()) {
             val arr = JSONArray()
             orderNos.forEach { arr.put(it) }
@@ -71,7 +71,7 @@ object ImportFlow {
         }
 
         return ImportLoadResult.Ok(
-            fileName = name.ifEmpty { "钱迹账单.xlsx" },
+            fileName = name.ifEmpty { "账单.xlsx" },
             summary = ImportSummary(
                 total = parsed.total,
                 expense = parsed.expense,
@@ -81,13 +81,13 @@ object ImportFlow {
                 maxDay = parsed.maxDay,
                 dupInDb = dupInDb
             ),
-            mappings = Qianji.buildMappings(parsed.cats, leafColumns),
+            mappings = ExcelImport.buildMappings(parsed.cats, leafColumns),
             rows = parsed.rows
         )
     }
 
-    fun billsJson(rows: List<Qianji.SheetRow>, mappings: List<Qianji.MappingRow>): String =
-        Qianji.buildBillsJson(rows, mappings)
+    fun billsJson(rows: List<ExcelImport.SheetRow>, mappings: List<ExcelImport.MappingRow>): String =
+        ExcelImport.buildBillsJson(rows, mappings)
 
     suspend fun commit(
         context: Context,

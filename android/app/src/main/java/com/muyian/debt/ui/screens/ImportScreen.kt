@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.muyian.debt.state.AppState
 import com.muyian.debt.data.CommitOutcome
+import com.muyian.debt.data.ExcelImport
 import com.muyian.debt.data.FilePick
 import com.muyian.debt.data.ImportFlow
 import com.muyian.debt.data.ImportLoadResult
@@ -52,7 +53,6 @@ import com.muyian.debt.data.ImportSummary
 import com.muyian.debt.data.OpenResult
 import com.muyian.debt.data.PickKind
 import com.muyian.debt.data.PickResult
-import com.muyian.debt.data.Qianji
 import com.muyian.debt.data.fmtNum
 import com.muyian.debt.ui.components.GhostButton
 import com.muyian.debt.ui.components.GroupTitle
@@ -80,11 +80,11 @@ fun ImportScreen(app: AppState) {
     var importedCount by remember { mutableIntStateOf(0) }
     var fileName by remember { mutableStateOf("") }
     var summary by remember { mutableStateOf(ImportSummary()) }
-    var mappings by remember { mutableStateOf<List<Qianji.MappingRow>>(emptyList()) }
-    var rows by remember { mutableStateOf<List<Qianji.SheetRow>>(emptyList()) }
+    var mappings by remember { mutableStateOf<List<ExcelImport.MappingRow>>(emptyList()) }
+    var rows by remember { mutableStateOf<List<ExcelImport.SheetRow>>(emptyList()) }
     var result by remember { mutableStateOf(CommitOutcome()) }
 
-    val leafColumns = remember(app.categories) { Qianji.buildLeafColumns(app.categories) }
+    val leafColumns = remember(app.categories) { ExcelImport.buildLeafColumns(app.categories) }
 
     fun handlePicked(path: String, name: String) {
         when (val loaded = ImportFlow.load(ctx, path, name, leafColumns)) {
@@ -114,7 +114,7 @@ fun ImportScreen(app: AppState) {
 
     fun onPick() {
         if (picking || importing) return
-        when (val r = FilePick.open(ctx, PickKind.QIANJI)) {
+        when (val r = FilePick.open(ctx, PickKind.EXCEL)) {
             OpenResult.Ok -> picking = true
             is OpenResult.Error -> app.showToast(r.message)
         }
@@ -166,7 +166,7 @@ fun ImportScreen(app: AppState) {
                 .pageBottomPadding()
         ) {
             if (current == "pick") {
-                GroupTitle("从钱迹导入")
+                GroupTitle("导入历史账单")
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -180,11 +180,11 @@ fun ImportScreen(app: AppState) {
                             contentAlignment = Alignment.Center
                         ) { Icon("file-text", Color.White, rpx(18)) }
                         Spacer(Modifier.width(rpx(14)))
-                        Text("导入钱迹历史账单", color = p.text, fontSize = rsp(30), fontWeight = FontWeight.Bold)
+                        Text("导入 Excel 历史账单", color = p.text, fontSize = rsp(30), fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(rpx(16)))
                     for (line in listOf(
-                        "1. 在钱迹 App「我的 → 数据导出」里导出 Excel 账单，把文件保存到手机（微信/QQ 传给自己后「用其他应用打开 → 保存」即可）",
+                        "1. 在原来用的记账 App 里导出 Excel 账单，把文件保存到手机（微信/QQ 传给自己后「用其他应用打开 → 保存」即可）",
                         "2. 点下方按钮，在系统文件选择器里选中它",
                         "3. 确认分类映射后开始导入，可随时取消"
                     )) {
@@ -194,7 +194,7 @@ fun ImportScreen(app: AppState) {
                     Box(Modifier.fillMaxWidth().height(rpx(1)).background(p.lineSoft))
                     Spacer(Modifier.height(rpx(14)))
                     Text(
-                        "全程只在手机本地解析，不联网；按钱迹单号去重，重复导入不会重复入账。同一笔如果之前已手动或自动记过，单号不同不会自动合并，导入后可在账单里删掉多余的。",
+                        "全程只在手机本地解析，不联网；按单号去重，重复导入不会重复入账。同一笔如果之前已手动或自动记过，单号不同不会自动合并，导入后可在账单里删掉多余的。",
                         color = p.dim,
                         fontSize = rsp(22),
                         lineHeight = rsp(37)
@@ -202,7 +202,7 @@ fun ImportScreen(app: AppState) {
                 }
                 Spacer(Modifier.height(rpx(32)))
                 PrimaryButton(
-                    text = if (picking) "等待选择文件…" else "选择钱迹 Excel 文件",
+                    text = if (picking) "等待选择文件…" else "选择 Excel 文件",
                     onClick = ::onPick,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = rpx(24)),
                     enabled = !picking,

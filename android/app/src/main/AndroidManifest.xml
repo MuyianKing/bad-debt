@@ -117,7 +117,7 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:windowSoftInputMode="adjustResize" />
 
-        <!-- 钱迹导入的文件选择中转 Activity -->
+        <!-- 账单导入的文件选择中转 Activity -->
         <activity
             android:name="muyian.bill.listener.ImportPickActivity"
             android:exported="false"

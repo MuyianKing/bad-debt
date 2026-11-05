@@ -18,6 +18,8 @@ import java.util.regex.Pattern
 internal object BillDb {
     private const val TAG = "MuyianBill"
     private const val DB_NAME = "muyian.db"
+    private const val SOURCE_IMPORT = "import"
+    private val KNOWN_SOURCES = setOf("manual", "notify", "screen", SOURCE_IMPORT)
     private val dbLock = Any()
 
     @Volatile
@@ -197,7 +199,7 @@ fun deleteBill(context: Context, id: String): Boolean {
     }
 }
 
-/** 统计一组钱迹单号在库中已存在的条数：{"count":n} */
+/** 统计一组订单号在库中已存在的条数：{"count":n} */
 fun countExistingOrders(context: Context, orderNosJson: String): String {
     var count = 0
     val arr = try {
@@ -237,7 +239,7 @@ fun countExistingOrders(context: Context, orderNosJson: String): String {
 
 /**
  * 批量入库：billsJson 是页面映射好的账单数组（金额已带符号，收入 costType 由页面固定为"收入"）。
- * 按 orderNo（钱迹单号）去重：库里已有或本批已插入的都跳过。单事务，返回 {"success","inserted","skipped"}。
+ * 按 orderNo（订单号）去重：库里已有或本批已插入的都跳过。单事务，返回 {"success","inserted","skipped"}。
  */
 fun commitImportBills(context: Context, billsJson: String): String {
     val result = JSONObject()
@@ -293,10 +295,10 @@ fun commitImportBills(context: Context, billsJson: String): String {
                 cv.put("day", o.optInt("day"))
                 cv.put("clock", o.optString("clock"))
                 cv.put("money", money)
-                cv.put("bankName", o.optString("bankName", "钱迹"))
+                cv.put("bankName", o.optString("bankName", "导入"))
                 cv.put("costType", o.optString("costType", "消费"))
                 cv.put("orderRemark", o.optString("orderRemark", ""))
-                cv.put("source", "qianji")
+                cv.put("source", SOURCE_IMPORT)
                 cv.put("sourcePkg", "")
                 cv.put("createdAt", o.optLong("createdAt", System.currentTimeMillis()))
                 cv.put("reimb", o.optInt("reimb", 0))
@@ -392,7 +394,9 @@ fun commitBackupBills(context: Context, billsJson: String): String {
                 cv.put("bankName", o.optString("bankName"))
                 cv.put("costType", o.optString("costType"))
                 cv.put("orderRemark", o.optString("orderRemark", ""))
-                cv.put("source", o.optString("source", "manual"))
+                cv.put("source", o.optString("source", "manual").let {
+                    if (it in KNOWN_SOURCES) it else SOURCE_IMPORT
+                })
                 cv.put("sourcePkg", o.optString("sourcePkg", ""))
                 cv.put("createdAt", o.optLong("createdAt", System.currentTimeMillis()))
                 cv.put("reimb", o.optInt("reimb", 0))
@@ -494,6 +498,15 @@ internal fun openDb(context: Context): SQLiteDatabase {
                 db.execSQL("alter table bills add column orderNo text")
             } catch (e: Exception) {
                 // column already exists
+            }
+            // 历史导入账单的 source 标记统一为 import
+            try {
+                db.execSQL(
+                    "update bills set source='import' where source is not null and source != '' " +
+                        "and source not in ('manual','notify','screen','import')"
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "migrate import source failed", e)
             }
             // 自动记账账本、待确认队列、诊断记录（新增表，不影响旧库）
             CaptureLedger.ensureSchema(db)

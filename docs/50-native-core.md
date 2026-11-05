@@ -4,7 +4,7 @@
 
 ## API 约定
 
-- 原生核心包名 `muyian.bill.listener`，对外入口是 `object MuyianBillCore`（`hybrid.kt`），方法全部 `@JvmStatic`、同步返回。复杂结构用 **JSON 字符串**传递，页面侧通过 `data/Bills.kt`、`data/Qianji.kt`、`data/Capture.kt` 的解析函数消费。
+- 原生核心包名 `muyian.bill.listener`，对外入口是 `object MuyianBillCore`（`hybrid.kt`），方法全部 `@JvmStatic`、同步返回。复杂结构用 **JSON 字符串**传递，页面侧通过 `data/Bills.kt`、`data/ExcelImport.kt`、`data/Capture.kt` 的解析函数消费。
 - 同包分文件，不要把所有逻辑塞回 `hybrid.kt`：
   - `CaptureModels.kt` / `CaptureText.kt` / `CaptureRules.kt` / `CaptureParser.kt` / `CaptureGates.kt`：纯 Kotlin，无 Android import，可单测。
   - `CaptureRegistry.kt`：App 角色、用户覆盖、采集设置、应用名查询。
@@ -74,8 +74,8 @@
 - 无障碍服务注册名固定全限定名 `muyian.bill.listener.MuyianBillAccessibilityService`，配置在 `app/src/main/res/xml/muyian_accessibility_config.xml`（含 `flagRetrieveInteractiveWindows`）；通知监听为 `muyian.bill.listener.BillNotificationListener`。
 - **无障碍自愈顺序**：应用每次回前台（`AppState.onResume()`）必须先 `repairAccessibilityIfNeeded()` 再自增 `resumeToken`；设置页「立即恢复」走同一个 `repairAccessibilityService()`。
 
-## 钱迹导入与备份
+## Excel 账单导入与备份
 
 - 文件选择采用「拉起 + 轮询」：`openImportPicker()` 拉起 `ImportPickActivity`（SAF `ACTION_GET_CONTENT`，无需存储权限），页面侧每 500ms 轮询 `getImportPickState()` 直到 `picked/cancelled/error`。
-- xlsx 读取与账单语义分离：原生 `readImportSheet()` 只用 `ZipInputStream + XmlPullParser` 解压成「表头 + 原始单元格行」，`getImportSheetRows(offset, limit)` 分块取回；语义解析在 `data/Qianji.kt`。
+- xlsx 读取与账单语义分离：原生 `readImportSheet()` 只用 `ZipInputStream + XmlPullParser` 解压成「表头 + 原始单元格行」，`getImportSheetRows(offset, limit)` 分块取回；语义解析在 `data/ExcelImport.kt`。
 - 备份导出用 `openBackupExport(content, name)` 拉起 `BackupSaveActivity`（SAF `ACTION_CREATE_DOCUMENT`），内容经进程内静态字段传递；`getBackupSaveState()` 轮询。`readBackupText()` 上限 50MB；`getAllBills()` 分页；`commitBackupBills()` 按 `id` / `orderNo` 去重。数据口径见 `40-data.md`。

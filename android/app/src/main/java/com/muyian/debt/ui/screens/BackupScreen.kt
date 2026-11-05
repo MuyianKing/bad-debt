@@ -237,15 +237,15 @@ fun BackupScreen(app: AppState) {
                     }
                 }
 
-                GroupTitle("从钱迹导入")
+                GroupTitle("导入历史账单")
                 BackupCard(
                     icon = "file-text",
                     iconColor = p.blue,
-                    title = "导入钱迹历史账单",
-                    desc = "选择钱迹 App 导出的 Excel，把历史账单批量记进来。只在手机本地解析，按单号去重，重复导入不会重复入账。"
+                    title = "导入 Excel 历史账单",
+                    desc = "选择记账 App 导出的 Excel，把历史账单批量记进来。只在手机本地解析，按单号去重，重复导入不会重复入账。"
                 ) {
                     PrimaryButton(
-                        text = "导入钱迹账单",
+                        text = "导入 Excel 账单",
                         onClick = { app.navigate(Screen.Import) },
                         modifier = Modifier.fillMaxWidth()
                     )
