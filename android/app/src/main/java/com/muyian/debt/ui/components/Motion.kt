@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import com.muyian.debt.ui.theme.LocalPalette
 import com.muyian.debt.ui.theme.rpx
 import kotlinx.coroutines.delay
@@ -85,6 +87,21 @@ fun RiseIn(
         content()
     }
 }
+
+/**
+ * 列表 item 的动效口径：只补位置，不给整个 item 做透明度。
+ *
+ * 出场/退场淡入淡出由 LazyLayoutItemAnimator 统一驱动，它一旦被中断（切页返回、列表重建、
+ * 连续两次刷新数据），item 会停在当时的 alpha（通常是 0）却继续占着槽位，
+ * 看起来就是列表中间凭空空出一整块。item 自己的淡入交给内容侧的 [RiseIn]，
+ * 这里只保留增删时的位置补间，任何情况下都不会把整块内容变透明。
+ */
+fun LazyItemScope.listItemMotion(): Modifier =
+    Modifier.animateItem(
+        fadeInSpec = null,
+        placementSpec = tween<IntOffset>(Motion.Medium, easing = Motion.Out),
+        fadeOutSpec = null
+    )
 
 /**
  * 数值滚动：金额变化时从旧值补间到新值，首次进入从 0 滚上来。

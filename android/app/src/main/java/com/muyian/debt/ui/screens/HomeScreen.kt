@@ -81,6 +81,7 @@ import com.muyian.debt.ui.components.countUp
 import com.muyian.debt.ui.components.glass
 import com.muyian.debt.ui.components.glassPageBackground
 import com.muyian.debt.ui.components.liquidGlass
+import com.muyian.debt.ui.components.listItemMotion
 import com.muyian.debt.ui.components.navBottomPadding
 import com.muyian.debt.ui.components.pressable
 import com.muyian.debt.ui.components.stagger
@@ -100,7 +101,11 @@ fun HomeScreen(app: AppState, activity: Activity) {
     val ctx = LocalContext.current
     var year by remember { mutableIntStateOf(app.homeYear) }
     var month by remember { mutableIntStateOf(app.homeMonth) }
-    var bills by remember { mutableStateOf<List<Bill>>(emptyList()) }
+    // 返回首页时整页重建：先用上次读到的那批账单撑住第一帧，别从空列表重新填一遍
+    val cacheKey = "$year-$month"
+    val cached = if (app.homeBillsKey == cacheKey) app.homeBills else emptyList()
+    var bills by remember { mutableStateOf(cached) }
+    var loaded by remember { mutableStateOf(app.homeBillsKey == cacheKey) }
     var weekBills by remember { mutableStateOf<List<Bill>>(emptyList()) }
     val listState = rememberLazyListState()
     val navSolid by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8 } }
@@ -119,6 +124,9 @@ fun HomeScreen(app: AppState, activity: Activity) {
 
     fun load() {
         bills = Bills.month(ctx, year, month)
+        app.homeBills = bills
+        app.homeBillsKey = "$year-$month"
+        loaded = true
         loadWeekBills()
     }
 
@@ -192,11 +200,11 @@ fun HomeScreen(app: AppState, activity: Activity) {
                     groups = listOf(group),
                     onRow = { app.showBillActions(it) },
                     onRowLong = { app.requestDeleteBill(it) },
-                    modifier = Modifier.animateItem(),
+                    modifier = listItemMotion(),
                     glassStyle = app.glassStyle
                 )
             }
-            if (groups.isEmpty()) {
+            if (loaded && groups.isEmpty()) {
                 item(key = "empty") {
                     Column(
                         Modifier.fillMaxWidth().padding(top = rpx(90), bottom = rpx(60)),

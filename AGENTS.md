@@ -4,7 +4,7 @@
 
 ## 一、通用约束（任何改动都必须遵守）
 
-- **技术栈与工程形态固定**：Kotlin + Jetpack Compose，单 Activity（`MainActivity`）+ Compose 导航；系统能力与原生数据层位于 `android/app/src/main/java/muyian/bill/listener/` 同包文件（`CaptureModels/Text/Rules/Parser` 负责观察与解析，`CaptureRoute` 负责支付路线，`CaptureLedger` 负责交易账本与去重，`CaptureEngine` 负责门禁与编排，`CapturePresenter` 负责弹层队列，`hybrid.kt` 只剩 `MuyianBillCore` 门面与导入/备份，`BillDb.kt` 负责 SQLite，`SystemPerms.kt` 负责权限，`XlsxReader.kt` 负责 xlsx，`PendingNotices.kt` 负责待确认通知，Activity/Service 各自成文件）。用 `android/` 下的 Android Gradle 工程构建，不引入第三方 UI 库、图表库或网络/统计依赖；唯一例外是已内置的 `com/kyant/backdrop`（Apache-2.0，仅用于液态玻璃，见 `android/third_party/kyant-backdrop/NOTICE.md`），不得再新增其它 UI 库。目标平台只有 Android 真机。
+- **技术栈与工程形态固定**：Kotlin + Jetpack Compose，单 Activity（`MainActivity`）+ Compose 导航；系统能力与原生数据层位于 `android/app/src/main/java/muyian/bill/listener/` 同包文件，**文件清单与职责以 `docs/30-modules.md` 为准**（`Capture*` 负责观察/分类/解析/门禁/账本/编排，其中 `CaptureEngine` 只做编排、门禁在 `CaptureGates`；`hybrid.kt` 只剩 `MuyianBillCore` 门面与导入/备份；`BillDb`/`SystemPerms`/`XlsxReader`/`PendingNotices`/Activity/Service 各自成文件）。用 `android/` 下的 Android Gradle 工程构建，不引入第三方 UI 库、图表库或网络/统计依赖；唯一例外是已内置的 `com/kyant/backdrop`（Apache-2.0，仅用于液态玻璃，见 `android/third_party/kyant-backdrop/NOTICE.md`），不得再新增其它 UI 库。目标平台只有 Android 真机。
 - **实现优先级：能 Kotlin/Compose 就不下沉系统服务**：页面、组件、格式化、分类/主题/角色、Excel 账单映射、导入/备份流程放在 `data/` 与 `ui/` 的 Kotlin 代码；`muyian.bill.listener` 只承担系统级能力（无障碍采集、通知监听、确认弹层、后台保活、SAF 选文件、原生 SQLite 数据层）。新增系统能力写入同包对应文件，由 `MuyianBillCore` 暴露同步方法，不引入跨语言桥接层。
 - **隐私红线**：通知/窗口文本只在手机本地解析，数据只存本机 SQLite 与 SharedPreferences。禁止任何上传、统计 SDK、云同步与新增网络请求。
 - **确认弹层不可绕过**：解析成功的账单不自动入账，必须由原生底部确认弹层（`BillSheetActivity`）用户点「保存」才写库；取消/返回/60 秒超时，以及弹层已经显示后的熄屏，都直接丢弃这一笔。弹层从一开始就因熄屏/锁屏或 ROM 拦截拉不起来时，允许发一条「待确认」通知兜底，但点通知必须回到同一个确认弹层；通知本身不得写库、不得提供直接入账入口。不得重新引入悬浮卡、兜底草稿或其他旁路。

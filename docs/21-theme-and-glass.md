@@ -6,7 +6,7 @@
 
 - 主题唯一来源是 `ui/theme/Theme.kt`：`Wukong`（默认）、`Nezha`、`Shaseng` 三个 `Palette`，`AllPalettes` 是内置主题，`paletteOf(id, customColor)` 按 id 取（`custom` 走 `customPalette()`），`LocalPalette` 是 Compose 侧的当前主题。
 - 当前主题由 `AppState.themeId` 持有，持久化 key `muyian_theme_v1`；切换走 `AppState.setTheme(id)`，它会写 SharedPreferences、更新 `LocalPalette`，并调用 `applyCardTheme()` 同步原生确认弹层的强调色。
-- **原生弹层不认 Compose 主题**：`applyCardTheme()` 通过 `MuyianBillCore.setCardThemeColor(context, hex)` 传色。深色主题的页面强调色是亮银，而原生弹层是浅色底，所以深色主题传固定的深色 `#1A1A1D`；浅色主题按 `inkOnPrimary` 判断：白字主色传 `primaryFill`，深字主色传压暗后的 `primaryDeep`（原生保存键固定白字）。
+- **原生弹层不认 Compose 主题**：`applyCardTheme()` 通过 `MuyianBillCore.setCardThemeColor(context, hex)` 传强调色，并用 `setCardThemeDark(context, dark)` 标记深浅。浅色主题按 `inkOnPrimary` 判断：白字主色传 `primaryFill`，深字主色传压暗后的 `primaryDeep`；深色主题传 `primary`（亮银），由弹层按亮度决定保存键文字色，面板改用深色卡 `#1C1C1F` / 主文字 `#F2F2F4` / 次文字 `#A2A2AA`，不再出现深色主题下白底弹层。
 - 页面取色一律 `LocalPalette.current.xxx`，不要写死主题色；只有在 SVG/Canvas 必须字面色的地方才用 `palette` 字段。
 
 ## 自定义主题色

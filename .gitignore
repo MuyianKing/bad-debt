@@ -3,3 +3,5 @@
 .idea/
 .tmp/
 .zcode/
+.workbuddy/
+.dbg/

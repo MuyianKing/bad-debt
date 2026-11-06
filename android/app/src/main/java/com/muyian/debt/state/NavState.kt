@@ -108,4 +108,13 @@ class NavState(private val categoryState: CategoryState) {
     /** 首页选中的月份跨页面保留。 */
     var homeYear by mutableIntStateOf(java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
     var homeMonth by mutableIntStateOf(java.util.Calendar.getInstance().get(java.util.Calendar.MONTH) + 1)
+
+    /**
+     * 首页列表的上一次读取结果。返回首页时 `HomeScreen` 是整页重建的，
+     * 没有这份缓存就会先按空列表组合一帧、再由 LaunchedEffect 填数据，
+     * 列表项于是每次返回都整体走一遍出场动画（动画被转场打断就会卡住，见 `listItemMotion`）。
+     * 只用它撑住返回后的第一帧，真正的数据仍由页面挂载/回前台时重新查库覆盖。
+     */
+    var homeBills by mutableStateOf<List<Bill>>(emptyList())
+    var homeBillsKey by mutableStateOf("")
 }

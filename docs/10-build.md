@@ -7,8 +7,8 @@
 - 唯一工程在 `android/`，用 Android Studio 或命令行 Gradle 构建。根工程名 `MuyianNative`（`settings.gradle.kts`），模块 `:app`。
 - 版本：Gradle 8.13、AGP 8.10.1、Kotlin 2.0.21、Compose BOM 2024.10.01。
 - 依赖只有 AndroidX 与 Compose：`core-ktx`、`activity-compose`、`lifecycle-runtime-ktx`、`compose.ui`、`compose.foundation`、`compose.material3`。禁止引入第三方 UI/图表/网络/统计库；确需新增依赖必须在 `docs/` 写明理由，并确认不违反隐私红线。
-- `compileSdk 36`、`buildToolsVersion 36.0.0`、`minSdk 23`、`targetSdk 33`；Java/JVM target 17。
-- `applicationId = com.muyian.debt`，`versionCode 100`，`versionName 0.1.0`。
+- `compileSdk 36`、`buildToolsVersion 36.0.0`、`minSdk 23`、`targetSdk 33`；Java/JVM target 17。`targetSdk 33` 是当前确认弹层在真机上验证过的基线；升级前必须按 `docs/80-checklist.md` 第 8 项在 Android 13/14/15/16 真机回归「弹层能否拉起 / 待确认通知兜底」，不能只靠单测判断。
+- `applicationId = com.muyian.debt`，`versionCode 101`，`versionName 0.1.0`。
 - 目标平台只有 Android 真机。工程没有 NDK 与 `.so`，不需要 `abiFilters`；产物是纯 Kotlin/DEX，任意 ABI 的真机都能安装。
 
 ## 构建与签名
@@ -30,7 +30,7 @@
 ## 相机与权限
 
 - 记一笔备注图片的拍照入口用 `ActivityResultContracts.TakePicture()`；首次拍照前用 `RequestPermission()` 申请 `android.permission.CAMERA`。相册入口用 `ActivityResultContracts.GetContent()`，设置页背景图只从相册选，不触发相机权限。
-- `android/app/src/main/AndroidManifest.xml` 声明的权限：`CAMERA`、`POST_NOTIFICATIONS`、`SYSTEM_ALERT_WINDOW`、`VIBRATE`、`QUERY_ALL_PACKAGES`（仅「识别记录 → 扫描其它应用」按需枚举已安装应用，不读取应用数据）、`WRITE_SECURE_SETTINGS`（无障碍自恢复，需 adb 授予）、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`（后台保活）、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`。
+- `android/app/src/main/AndroidManifest.xml` 声明的权限：`CAMERA`、`POST_NOTIFICATIONS`、`SYSTEM_ALERT_WINDOW`、`VIBRATE`、`QUERY_ALL_PACKAGES`（仅「识别记录 → 扫描其它应用」按需枚举已安装应用，不读取应用数据）、`WRITE_SECURE_SETTINGS`（无障碍自恢复，需 adb 授予：`adb shell pm grant com.muyian.debt android.permission.WRITE_SECURE_SETTINGS`，未授权时设置页「立即恢复」不可用）、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`（后台保活）、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`。
 - 只申请与功能直接相关的权限，不额外申请存储/位置/通讯录等权限；文件选择走 SAF，不需要存储权限。识别应用列表默认只按内置包名查询，打开诊断页不会触发「读取已安装应用」类 ROM 提示。
 - 权限属于安装时/运行时配置：清单增删权限后必须重新安装；`WRITE_SECURE_SETTINGS`、无障碍、通知使用权、悬浮窗、MIUI「后台弹出界面」、电池优化白名单在新包/新签名上都要重新授权。
 

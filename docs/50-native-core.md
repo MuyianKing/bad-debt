@@ -49,6 +49,7 @@
 ## 交易身份与去重
 
 - 身份键：`order:<单号>`（24h）> `session:<支付会话>`（15min）> `page:<包名:页面指纹>`（宿主结果页，24h）> `capture:<包名:金额:方向:商户>`（5min）> `bill:<真实渠道:金额:方向>`（2min）。
+- 页面现场（`CapturePageMemory`，prefs `capture_page_v1`）：弹层露出后记下「包名 + 金额 + 方向 + 商户」指纹，同一 App 再解析到同一指纹直接判 `DUPLICATE_PAGE`；解析到该 App 的其它页面（`UNKNOWN` 除外，结果页渐进渲染会短暂落到未识别）即解除，保活 30 分钟。用来拦「几分钟后重新打开支付 App、结果页还停在那一屏」的重复弹层，账本的时间窗口覆盖不到。
 - `CaptureLedger.claim()` 在一个事务里查询全部键：命中同会话/同单号 → `MERGED`（后到的支付侧字段补进已排队账单）；命中页面/捕获/账单 → `DUPLICATE`；强键与重复类键指向不同 txn 时按 `DUPLICATE` 处理，不跨 txn 合并；否则插入并返回 `CLAIMED`。
 - 已入账兜底：有单号先查 `bills.orderNo`；无单号查同渠道 + 金额 ±0.005 + `createdAt` ±2 分钟。`bills` 表新增 `idx_bills_created` / `idx_bills_order` 索引，禁止再全表扫描。
 - 支付会话：`CaptureRoute` 在支付 App 出现收银台/成功页/支付通知时记证据，回到宿主后进入 `RETURNED`；宿主结果页只接受「3 分钟内刚从有证据的支付 App 返回」或「10 分钟内点过收银台/提交订单」。路线只属于记录的宿主，进入另一个 HOST App 会清空 `hostTrigger`/`intent`/`session`。**不再使用“15 分钟内存在任意 flow 就放行”的兜底。**

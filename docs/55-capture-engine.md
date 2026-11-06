@@ -105,8 +105,13 @@
 | `CaptureStats.kt` | 今日漏斗、按 App/页面类型统计、屏幕/通知双通道对账 | 仅 `Context` |
 | `CaptureGates.kt` | 有序门禁与原因码 | 无（账本接口注入） |
 | `CaptureEngine.kt` | 编排：观察 → 判定 → 弹层；`MuyianBillCore` 门面转调 | 有 |
-| `CaptureDiagnostics.kt` | 诊断查询、计数、调试文本留存 | 有 |
-| `hybrid.kt` | 只保留 `MuyianBillCore` 门面、弹层队列、导入/备份 | 有 |
+| `CaptureRegistry.kt` | App 角色与设置（内置包名、用户覆盖项） | 有 |
+| `CapturePresenter.kt` | 弹层队列与 `BillSheetActivity` 拉起 | 有 |
+| `CapturePageMemory.kt` | 结果页指纹，拦截同一页面重复弹层 | 有 |
+| `CaptureLearning.kt` | 本机分类学习 | 有 |
+| `hybrid.kt` | 只保留 `MuyianBillCore` 门面、导入/备份 | 有 |
+
+> 诊断查询与计数已拆到 `CaptureStats` / `CaptureLedger`（见 §14.1），不再有独立的 `CaptureDiagnostics.kt`。
 
 ### 3.2 纯逻辑下沉的好处
 
@@ -322,10 +327,13 @@ enum class Direction { EXPENSE, INCOME, REFUND, TRANSFER, REPAYMENT, UNKNOWN }
 | `order:<no>` | 单号唯一 | 解析出的订单号 | 24h |
 | `session:<id>` | 同一次"宿主→支付→宿主"往返 | `RouteEngine.sessionId` | 15min |
 | `page:<pkg>:<hash>` | 宿主结果页 | 包名 + 金额 + 方向 + 单号 + 商户的结构哈希 | 24h |
-| `capture:<pkg>:<hash>` | 无单号捕获 | 包名 + 金额 + 关键行前 40 字 | 5min |
+| `capture:<pkg>:<hash>` | 无单号捕获 | 包名 + 金额 + 方向 + 商户（`CaptureIdentity.captureFingerprint`） | 5min |
 | `bill:<channel>:<amount>:<bucket>` | 跨渠道兜底 | 渠道 + 金额 + 方向 + 2min 时间桶 | 2min |
+| 页面现场（`CapturePageMemory`，prefs） | 已经弹过的那张结果页 | 同上 `captureFingerprint`；同 App 出现别的页面即解除 | 30min |
 
 `bill` 键的 `channel` 必须是真实渠道（微信/支付宝/招商银行/云闪付），不能是"银行卡"，否则跨行同金额会误并——这正是 P4 的根因。
+
+前五个键都是**时间窗口**，判不了"同一张页面被重新看到"：用户付完款后重新打开支付 App，结果页还停在那一屏，此时 `capture:`（5min）已过期、`bill:`（2min）早已过期、重开 App 又把 `session:` 换成了新 ID，同一笔会再弹一次（2026-11-06 11:35 付款、11:40 重开支付宝实测）。`CapturePageMemory` 用页面内容补这一层：弹层真正露出后记下该页指纹，同 App 再次解析到同一指纹直接判 `DUPLICATE_PAGE`；解析到同 App 的其它页面（收银台/账单/失败页，`UNKNOWN` 除外——结果页渐进渲染会短暂落到未识别）就解除记录，所以"离开结果页后再付一笔同价"仍会正常弹层。
 
 ### 8.2 账本表
 
@@ -452,8 +460,9 @@ confidence = 0.55 * amountConfidence
 
 ### 11.3 本地学习（不做模型，只做计数）
 
-- `merchant_category_v1`（prefs JSON）：`规范化商户名 + 包名 → {分类: 次数}`，保存时累加；弹层按最高次数建议分类。
+- `merchant_category_v1`（prefs JSON）：`规范化商户名 + 包名 → {分类: 次数}`，保存时累加；弹层按最高次数建议分类。历史优先于关键词。
 - `pkg_category_v1`：App → 最常用分类，作为没有商户时的兜底。
+- 关键词兜底（`CaptureLearning.KEYWORDS`）：商户名或页面证据行命中"外卖/奶茶/打车/话费"等词时给对应分类；未命中统一默认 `三餐`，不再默认 `消费`。
 - 只在本机，可一键清空；不参与金额解析，避免"学坏"。
 
 ### 11.4 诊断页（首页菜单 → 识别记录）
@@ -562,7 +571,8 @@ confidence = 0.55 * amountConfidence
 - 诊断页新增「回放已保存文本」：`MuyianBillCore.replayCaptureTraces()` 用当前解析规则重跑历史 trace 文本，输出类型/金额/是否有金额的变化统计与最多 20 条示例；不写库、不弹层。
 - 诊断页新增双通道对账：屏幕/通知成交按「同额 + 2 分钟内」贪心配对，展示仅屏幕/仅通知数量，作为漏采参考。
 - `BillSheetActivity` 声明 `configChanges`：转屏/折叠不再触发 `onDestroy` 的未保存丢弃分支，用户正在编辑的内容得以保留。
-- 采集层页面签名只做**短时事件去抖**（2 秒）：账本才是交易去重边界，不能因为同商户同金额的结果页文本相同就永久跳过第二笔。签名超时后允许重新解析，重复由 `capture:` / `bill:` 键裁决。
+- 采集层页面签名只做**短时事件去抖**（2 秒）：签名不承担交易去重，不能因为同商户同金额的结果页文本相同就永久跳过第二笔。签名超时后允许重新解析，重复由 `capture:` / `bill:` 键裁决。
+- 页面级去重补在账本之外（`CapturePageMemory`）：统一时钟窗口只能覆盖"付完马上再看"，覆盖不到"几分钟后重新打开支付 App，结果页还停在那一屏"。改为记下已弹过的页面指纹，同 App 出现别的页面才解除；保活 30 分钟，`UNKNOWN` 不解除（结果页渐进渲染会短暂落到未识别）。真机回归：2026-11-06 11:35 保存 15.80、11:40 重开支付宝，识别记录由 `ACCEPTED` 变为 `DUPLICATE_PAGE`。
 - 页面文本的 `compact` 改为**行内去空白、行间留一个空格**：避免"支付"与"成功"跨行拼成"支付成功"，同时保留 `扫一扫` / `收付款` 这类跨节点导航标记的 `.{0,20}` 窗口。
 - 路线状态按宿主隔离：只有回到路线记录的 `hostPkg` 才算 `RETURNED`；进入另一个 HOST App 时，`hostTriggerAt`、`intent`、`sessionId`、`RETURNED` 全部清空，防止 3 分钟内打开任意宿主继承上一笔支付上下文。
 - 身份裁决固定 `order > session > page > capture > bill`；order 与 session 指向不同 txn、或强键与 page/capture/bill 冲突时，直接判重复，不在两条记录之间合并（宁可少弹，不能并错）。

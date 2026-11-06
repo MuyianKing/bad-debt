@@ -79,15 +79,17 @@ class ThemeState(private val context: Context, private val prefs: Prefs) {
     }
 
     fun applyCardTheme() {
-        // 原生弹层只认字面色，且保存键固定白字：主色偏亮时改用压暗后的 primaryDeep
+        // 原生弹层只认字面色：浅色主题用能承载白字的强调色；深色主题发 primary，
+        // 由弹层按亮度决定按钮文字色，避免近黑按钮在黑底上看不清。
         val argb = when {
-            palette.dark -> 0xFF1A1A1D.toInt()
+            palette.dark -> palette.primary.toArgb()
             palette.inkOnPrimary == Color.White -> palette.primaryFill.toArgb()
             else -> palette.primaryDeep.toArgb()
         }
         val hex = String.format("#%06X", argb and 0xFFFFFF)
         try {
             MuyianBillCore.setCardThemeColor(context, hex)
+            MuyianBillCore.setCardThemeDark(context, palette.dark)
         } catch (_: Exception) {
         }
     }

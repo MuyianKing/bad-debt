@@ -26,11 +26,13 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Muyian">
 
+        <!-- 配置变更不重建 Activity：正在编辑的「记一笔」草稿只在 NavState 内存里。
+             折叠展开 / 字号 / 显示大小变化都会走这里，避免编辑内容丢失。 -->
         <activity
             android:name="com.muyian.debt.MainActivity"
             android:exported="true"
             android:excludeFromRecents="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|fontScale|keyboardHidden|uiMode"
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Muyian"

@@ -58,6 +58,13 @@ class MuyianBillCore private constructor() {
         fun getCardThemeColor(context: Context): Int = SystemPerms.getCardThemeColor(context)
 
         @JvmStatic
+        fun setCardThemeDark(context: Context, dark: Boolean): Boolean =
+            SystemPerms.setCardThemeDark(context, dark)
+
+        @JvmStatic
+        fun isCardThemeDark(context: Context): Boolean = SystemPerms.isCardThemeDark(context)
+
+        @JvmStatic
         fun isIgnoringBatteryOptimizations(context: Context): Boolean =
             SystemPerms.isIgnoringBatteryOptimizations(context)
 

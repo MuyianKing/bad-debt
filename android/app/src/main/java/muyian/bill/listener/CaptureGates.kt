@@ -40,7 +40,7 @@ object CaptureIdentity {
             keys.add(LedgerKey("page:" + pkg + ":" + pageHash, "page", ttl))
         }
         if (facts.orderNo.isEmpty()) {
-            val captureHash = CaptureText.hash(pkg + "|" + amount + "|" + direction + "|" + merchant)
+            val captureHash = captureFingerprint(pkg, facts)
             keys.add(LedgerKey("capture:" + pkg + ":" + captureHash, "capture", TTL_CAPTURE))
             val channelKey = CaptureText.merchantKey(facts.channel)
             keys.add(LedgerKey("bill:" + channelKey + ":" + amount + ":" + direction, "bill", TTL_BILL))
@@ -49,10 +49,19 @@ object CaptureIdentity {
         val txnId = when {
             facts.orderNo.isNotEmpty() -> "o:" + facts.orderNo
             sessionId.isNotEmpty() -> "s:" + sessionId
-            else -> "c:" + CaptureText.hash(pkg + "|" + amount + "|" + direction + "|" + merchant)
+            else -> "c:" + captureFingerprint(pkg, facts)
         }
         return txnId to keys
     }
+
+    /**
+     * 无单号页面的捕获指纹：包名 + 金额 + 方向 + 商户。
+     * 账本的 `capture:` 键与 [CapturePageMemory] 共用这一份定义，避免两处哈希漂移。
+     */
+    fun captureFingerprint(pkg: String, facts: Facts): String = CaptureText.hash(
+        pkg + "|" + CaptureText.moneyKey(facts.amount) + "|" +
+            facts.direction.name + "|" + CaptureText.merchantKey(facts.merchant)
+    )
 }
 
 /**

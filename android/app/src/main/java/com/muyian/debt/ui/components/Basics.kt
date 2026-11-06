@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.BackdropRenderOptions
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -229,6 +230,11 @@ fun Modifier.liquidGlass(
             .drawBackdrop(
             backdrop = backdrop,
             shape = { actual },
+            // 卡片内容直接画在父层里，不再给每张卡单独留一个离屏 placement 层：
+            // 列表滚动/切页返回时这些常驻图层会被系统复用，个别机型上会带着上一帧的
+            // 透明度回来，表现为整张卡（标题+图标+金额）一起变淡甚至整块空白。
+            // 圆角裁切仍由 draw 内的 outline clip + 外层 Modifier.clip 负责，观感不变。
+            renderOptions = BackdropRenderOptions(placementLayer = false),
             effects = {
                 blur(blurPx)
                 vibrancy()

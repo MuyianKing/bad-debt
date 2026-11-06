@@ -129,6 +129,7 @@ class BillSheetActivity : Activity() {
     private var billTxnId = ""
     private var income = false
     private var costType = ""
+    private var dark = false
     private var accent = 0xFFF7A600.toInt()
     private var accentTint = 0
     private var amountInput: EditText? = null
@@ -143,12 +144,26 @@ class BillSheetActivity : Activity() {
     private var savedOk = false
     private var noticeId = 0
     private var screenReceiver: BroadcastReceiver? = null
+
+    /* 弹层不接 Compose 主题：深色主题在这里单独取一套面板色，和 Shaseng 的 bg/card/sub 对齐。 */
+    private val sheetBg: Int get() = if (dark) 0xFF1C1C1F.toInt() else Color.WHITE
+    private val mainText: Int get() = if (dark) 0xFFF2F2F4.toInt() else 0xFF1D2129.toInt()
+    private val subText: Int get() = if (dark) 0xFFA2A2AA.toInt() else 0xFF8A90A0.toInt()
+    private val chipText: Int get() = if (dark) 0xFFA2A2AA.toInt() else 0xFF5B6170.toInt()
+    private val chipBg: Int get() = if (dark) 0xFF26262A.toInt() else 0xFFF4F6FA.toInt()
+    private val handleColor: Int get() = if (dark) 0xFF3A3A40.toInt() else 0xFFE3E5EA.toInt()
+    private val warnText: Int get() = if (dark) 0xFFFFB35C.toInt() else 0xFFC8791A.toInt()
+    private val amountOut: Int get() = if (dark) 0xFFFF6F68.toInt() else 0xFFF0655E.toInt()
+    private val amountIn: Int get() = if (dark) 0xFF35D492.toInt() else 0xFF22B877.toInt()
+    private val placeHint: Int get() = if (dark) 0xFF6A6A72.toInt() else 0xFFC2C6D1.toInt()
+
     private val timeoutTask = Runnable { closeSheet() }
     private val finishTask = Runnable { finish() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         alive = true
+        dark = SystemPerms.isCardThemeDark(this)
         val raw = intent?.getStringExtra(EXTRA_BILL) ?: ""
         if (raw.isEmpty()) {
             finish()
@@ -191,7 +206,7 @@ class BillSheetActivity : Activity() {
         income = parsed.optDouble("money", 0.0) >= 0
         costType = parsed.optString("costType")
         accent = accentValue
-        accentTint = lighten(accent, 0.86f)
+        accentTint = if (dark) mix(sheetBg, accent, 0.18f) else lighten(accent, 0.86f)
         noticeId = noticeIdValue
         if (noticeId > 0) {
             markStarted(noticeId)
@@ -338,7 +353,7 @@ class BillSheetActivity : Activity() {
         val box = LinearLayout(this)
         box.orientation = LinearLayout.VERTICAL
         box.setPadding(dp(20), dp(14), dp(20), dp(22))
-        box.background = roundedTop(Color.WHITE, 22)
+        box.background = roundedTop(sheetBg, 22)
         box.elevation = dp(12).toFloat()
         scroller.addView(box, FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -346,7 +361,7 @@ class BillSheetActivity : Activity() {
         ))
 
         val handle = View(this)
-        handle.background = rounded(0xFFE3E5EA.toInt(), 2)
+        handle.background = rounded(handleColor, 2)
         val handleLp = LinearLayout.LayoutParams(dp(36), dp(4))
         handleLp.gravity = Gravity.CENTER_HORIZONTAL
         handleLp.bottomMargin = dp(14)
@@ -358,12 +373,12 @@ class BillSheetActivity : Activity() {
         val title = TextView(this)
         title.text = "自动识别到一笔账单"
         title.textSize = 15f
-        title.setTextColor(0xFF1D2129.toInt())
+        title.setTextColor(mainText)
         header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val close = TextView(this)
         close.text = "×"
         close.textSize = 22f
-        close.setTextColor(0xFF8A90A0.toInt())
+        close.setTextColor(subText)
         close.setPadding(dp(12), 0, 0, dp(2))
         close.setOnClickListener { closeSheet() }
         header.addView(close)
@@ -374,7 +389,7 @@ class BillSheetActivity : Activity() {
         val clock = data.optString("clock")
         meta.text = if (bank.isEmpty()) clock else bank + " · " + clock
         meta.textSize = 12f
-        meta.setTextColor(0xFF8A90A0.toInt())
+        meta.setTextColor(subText)
         meta.setPadding(0, dp(2), 0, dp(10))
         metaView = meta
         box.addView(meta)
@@ -385,7 +400,7 @@ class BillSheetActivity : Activity() {
             val hint = TextView(this)
             hint.text = "识别可能有误，请核对金额与分类"
             hint.textSize = 12f
-            hint.setTextColor(0xFFC8791A.toInt())
+            hint.setTextColor(warnText)
             hint.setPadding(0, 0, 0, dp(8))
             box.addView(hint)
         }
@@ -397,7 +412,7 @@ class BillSheetActivity : Activity() {
         val symbol = TextView(this)
         symbol.text = "¥"
         symbol.textSize = 22f
-        symbol.setTextColor(0xFF1D2129.toInt())
+        symbol.setTextColor(mainText)
         amountRow.addView(symbol)
         val amount = EditText(this)
         amount.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
@@ -422,7 +437,7 @@ class BillSheetActivity : Activity() {
         val catLabel = TextView(this)
         catLabel.text = "分类"
         catLabel.textSize = 12f
-        catLabel.setTextColor(0xFF8A90A0.toInt())
+        catLabel.setTextColor(subText)
         catLabel.setPadding(0, dp(10), 0, dp(6))
         box.addView(catLabel)
 
@@ -451,6 +466,8 @@ class BillSheetActivity : Activity() {
         remark.setText(data.optString("merchant"))
         remark.textSize = 15f
         remark.setSingleLine(true)
+        remark.setTextColor(mainText)
+        remark.setHintTextColor(placeHint)
         remark.setBackgroundColor(Color.TRANSPARENT)
         remark.setPadding(0, dp(12), 0, dp(12))
         remarkInput = remark
@@ -463,15 +480,15 @@ class BillSheetActivity : Activity() {
         val cancel = TextView(this)
         cancel.text = "取消"
         cancel.textSize = 15f
-        cancel.setTextColor(0xFF8A90A0.toInt())
+        cancel.setTextColor(subText)
         cancel.setPadding(dp(22), dp(10), dp(22), dp(10))
-        cancel.background = rounded(0xFFF4F6FA.toInt(), 16)
+        cancel.background = rounded(chipBg, 16)
         cancel.setOnClickListener { closeSheet() }
         buttons.addView(cancel)
         val save = TextView(this)
         save.text = "保存"
         save.textSize = 15f
-        save.setTextColor(Color.WHITE)
+        save.setTextColor(if (dark) readableOn(accent) else Color.WHITE)
         save.setPadding(dp(28), dp(10), dp(28), dp(10))
         save.background = rounded(accent, 16)
         save.setOnClickListener { saveBill() }
@@ -568,7 +585,7 @@ class BillSheetActivity : Activity() {
     }
 
     private fun typeColor(value: Boolean): Int {
-        return if (value) 0xFF22B877.toInt() else 0xFFF0655E.toInt()
+        return if (value) amountIn else amountOut
     }
 
     private fun setIncome(value: Boolean) {
@@ -579,16 +596,16 @@ class BillSheetActivity : Activity() {
     }
 
     private fun styleTypeChip(view: TextView, selected: Boolean) {
-        view.setTextColor(if (selected) 0xFF1D2129.toInt() else 0xFF8A90A0.toInt())
-        view.background = rounded(if (selected) accentTint else 0xFFF4F6FA.toInt(), 14)
+        view.setTextColor(if (selected) (if (dark) mainText else 0xFF1D2129.toInt()) else subText)
+        view.background = rounded(if (selected) accentTint else chipBg, 14)
     }
 
     private fun selectCategory(name: String) {
         costType = name
         for ((view, value) in categoryChips) {
             val selected = value == name
-            view.setTextColor(if (selected) accent else 0xFF5B6170.toInt())
-            view.background = rounded(if (selected) accentTint else 0xFFF4F6FA.toInt(), 14)
+            view.setTextColor(if (selected) (if (dark) mainText else accent) else chipText)
+            view.background = rounded(if (selected) accentTint else chipBg, 14)
         }
     }
 
@@ -596,8 +613,8 @@ class BillSheetActivity : Activity() {
         val view = TextView(this)
         view.text = text
         view.textSize = 13f
-        view.setTextColor(0xFF5B6170.toInt())
-        view.background = rounded(0xFFF4F6FA.toInt(), 14)
+        view.setTextColor(chipText)
+        view.background = rounded(chipBg, 14)
         view.setPadding(dp(12), dp(7), dp(12), dp(7))
         val lp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -618,6 +635,24 @@ class BillSheetActivity : Activity() {
         return Color.rgb(ch(Color.red(color)), ch(Color.green(color)), ch(Color.blue(color)))
     }
 
+    /** 把强调色按比例混进底色，用于深色面板的选中淡底 */
+    private fun mix(base: Int, tint: Int, ratio: Float): Int {
+        fun ch(b: Int, t: Int): Int = (b + (t - b) * ratio).toInt()
+        return Color.rgb(
+            ch(Color.red(base), Color.red(tint)),
+            ch(Color.green(base), Color.green(tint)),
+            ch(Color.blue(base), Color.blue(tint))
+        )
+    }
+
+    /** 实底按钮上的文字色：亮底用深字，暗底用白字 */
+    private fun readableOn(color: Int): Int {
+        val r = Color.red(color) / 255f
+        val g = Color.green(color) / 255f
+        val b = Color.blue(color) / 255f
+        return if (0.299f * r + 0.587f * g + 0.114f * b > 0.55f) 0xFF1A1A1D.toInt() else Color.WHITE
+    }
+
     private fun rounded(color: Int, radiusDp: Int): GradientDrawable {
         val drawable = GradientDrawable()
         drawable.setColor(color)
@@ -625,7 +660,7 @@ class BillSheetActivity : Activity() {
         return drawable
     }
 
-    /** 只有顶部两角圆角的白色面板 */
+    /** 只有顶部两角圆角的面板 */
     private fun roundedTop(color: Int, radiusDp: Int): GradientDrawable {
         val r = dp(radiusDp).toFloat()
         val drawable = GradientDrawable()

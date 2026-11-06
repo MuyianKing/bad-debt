@@ -33,7 +33,7 @@ muyian/
 ## 数据设计
 
 SQLite `files/muyian.db`，表 `bills(id, year, month, day, clock, money, bankName, costType, orderRemark, source, sourcePkg, createdAt, reimb, starred, orderNo)`。
-`money` 支出为负、收入为正；`source` 为 `screen`（支付页解析，主渠道）、`notify`（通知解析，辅助渠道与历史数据）或 `manual`（手动）；`reimb` 报销标记、`starred` 星标、`orderNo` 订单/交易单号（旧库自动 ALTER 补列）。账单在底部确认弹层点「保存」后入账；取消/返回/超时直接丢弃，不落任何草稿。
+`money` 支出为负、收入为正；`source` 为 `screen`（支付页解析，主渠道）、`notify`（通知解析，辅助渠道与历史数据）、`manual`（手动）或 `import`（Excel 导入）；`reimb` 报销标记、`starred` 星标、`orderNo` 订单/交易单号（旧库自动 ALTER 补列）。账单在底部确认弹层点「保存」后入账；取消/返回/超时直接丢弃，不落任何草稿。
 分类体系存本机 SharedPreferences（`muyian_native` / key `muyian_categories_v2`）：一级分类 + 子类，账单 `costType` 存叶子名，统计时归并到一级。
 
 去重四层（单号优先，无单号才逐级退回）：
@@ -55,6 +55,17 @@ SQLite `files/muyian.db`，表 `bills(id, year, month, day, clock, money, bankNa
    - 在「后台运行」分组把「电池优化」设为「不限制」；需要常驻时保持「后台保活」开启（默认开启，前台服务 + 低优先级通知）；「从多任务页面隐藏」默认开启；国产 ROM 再按需在「自启动 / 后台管理」里允许自启动；
 4. 真实验证：在支付宝/微信里支付或转账一笔，支付成功页面出现后 1 秒左右应从屏幕底部滑出记账弹层；点「保存」入账，点「取消」/返回键丢弃。熄屏/锁屏或未允许「后台弹出界面」时付款，应收到一条「待确认」通知；点通知仍进同一个确认弹层，取消后通知同步消失；
 5. 首页按返回键不会退出应用，而是回到桌面继续在后台运行；再次打开即恢复。
+
+### 可选：开启无障碍掉开关自愈
+
+默认不需要。若希望系统把无障碍开关关掉后 App 能自行恢复，需用 adb 授予签名级权限：
+
+```bash
+adb shell pm grant com.muyian.debt android.permission.WRITE_SECURE_SETTINGS
+```
+
+- 未授权时，设置页的「立即恢复」不可用，自动记账本身不受影响；
+- 换包名或换签名后需重新授予；系统升级 / 恢复出厂后也要重新执行。
 
 ## 构建注意
 

@@ -71,6 +71,14 @@ class AppState(val context: Context) {
         get() = nav.homeMonth
         set(value) { nav.homeMonth = value }
 
+    /** 首页列表的跨页面缓存：键为 "年-月"，只用于返回首页时撑住第一帧。 */
+    var homeBills: List<Bill>
+        get() = nav.homeBills
+        set(value) { nav.homeBills = value }
+    var homeBillsKey: String
+        get() = nav.homeBillsKey
+        set(value) { nav.homeBillsKey = value }
+
     /* ---------- 弹层 ---------- */
     val toastText get() = overlay.toastText
     val toastToken get() = overlay.toastToken

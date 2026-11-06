@@ -55,6 +55,9 @@ internal object CaptureEngine {
         val classification = parsed.classification
         val debugText = if (settings.debugText) items.joinToString("\n") { it.text } else ""
 
+        // 页面现场：同一 App 翻到别的页（收银台/账单/失败页）就作废上一条结果页记录
+        if (!force) CapturePageMemory.observe(context, pkg, analysis.kind, analysis.facts)
+
         if (analysis.kind == PageKind.CASHIER) {
             if (!force) {
                 val intent = CaptureParser.parseCashierIntent(effectiveRule, obs)
@@ -274,6 +277,17 @@ internal object CaptureEngine {
                 return rejected(Reason.DUPLICATE_SESSION)
             }
             CaptureLedger.ClaimKind.CLAIMED -> {
+                // 账本键都是时间窗口；重新打开支付 App 看到同一张结果页时会漏判，
+                // 再用页面现场拦一次（见 CapturePageMemory）。
+                if (candidate.source == CaptureSource.SCREEN &&
+                    CapturePageMemory.isSuccess(analysis.kind) &&
+                    CapturePageMemory.isReplay(context, candidate.sourcePkg, facts, candidate.createdAt)
+                ) {
+                    CaptureLedger.release(context, candidate.txnId)
+                    trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
+                        analysis.kind, "duplicate", Reason.DUPLICATE_PAGE, candidate.txnId, facts, debugText, classification)
+                    return rejected(Reason.DUPLICATE_PAGE)
+                }
                 val bill = buildBill(
                     context, candidate.sourcePkg, candidate.source, facts, candidate.txnId, candidate.createdAt
                 )
@@ -288,6 +302,11 @@ internal object CaptureEngine {
                     trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
                         analysis.kind, "rejected", Reason.QUEUE_FULL, candidate.txnId, facts, debugText, classification)
                     return rejected(Reason.QUEUE_FULL)
+                }
+                if (candidate.source == CaptureSource.SCREEN &&
+                    CapturePageMemory.isSuccess(analysis.kind)
+                ) {
+                    CapturePageMemory.remember(context, candidate.sourcePkg, facts, candidate.createdAt)
                 }
                 val reason = CaptureGates.acceptedReason(facts)
                 trace(context, settings, candidate.createdAt, candidate.sourcePkg, candidate.source,
@@ -334,7 +353,10 @@ internal object CaptureEngine {
             PageKind.TRANSFER_SUCCESS -> "转账"
             PageKind.REPAYMENT_SUCCESS -> "还款"
             PageKind.RECEIVE_SUCCESS -> "收入"
-            else -> CaptureLearning.suggest(context, pkg, facts.merchant, facts.direction)
+            else -> CaptureLearning.suggest(
+                context, pkg, facts.merchant, facts.direction,
+                facts.evidence.joinToString(" ")
+            )
         }
         val bill = JSONObject()
         bill.put("money", signed)

@@ -34,12 +34,12 @@
 - `ui/components/BillList.kt` — 按日分组账单列表，首页与日历页共用；`flush = true` 时去掉自带卡片底，供嵌进外层卡片。新列表需求优先扩展它。
 - `ui/components/Overlays.kt` — 全局浮层：Toast、确认框、操作菜单、滚轮选择器、日期选择器、图片预览。页面只改 `AppState` 状态位，不自己写 Dialog。
 - `ui/components/WheelPicker.kt` — 滚轮列，供日期与选项选择器复用。
-- `ui/components/Motion.kt` — 动效唯一入口：页面转场、`AnimatedSheet`、`AnimatedCenter`、`RiseIn`、`countUp`、`stagger`。页面不要各写时长/曲线。
+- `ui/components/Motion.kt` — 动效唯一入口：页面转场、`AnimatedSheet`、`AnimatedCenter`、`RiseIn`、`listItemMotion`、`countUp`、`stagger`。页面不要各写时长/曲线。`LazyColumn` 的 item 增删统一用 `listItemMotion()`：只补位置、不给整个 item 做淡入淡出，透明度动画一旦被打断会卡在 0 并留下占位的空块。
 - `ui/screens/` — 首页、记一笔、统计、日历、分类、设置、识别记录（含「查看全部」子页 `CaptureAllScreen`）、导入、备份九个入口页面。页面只做布局与事件，数据逻辑回 `data/`。
 
 ## 原生核心
 
-- `app/src/main/java/muyian/bill/listener/` — 包名 `muyian.bill.listener`，系统级能力的唯一实现，同包分文件：`CaptureModels/Text/Rules/Page/Amount/Classify/Parser/Gates`（纯逻辑，可单测）、`CaptureRegistry`（App 角色与设置）、`CaptureRoute`（支付路线）、`CaptureLedger`（账本/队列/决策日志/反馈）、`CaptureStats`（今日漏斗与双通道对账）、`CaptureEngine`（编排）、`CapturePresenter`（弹层队列）、`CaptureLearning`（本地分类学习）、`hybrid.kt`（`MuyianBillCore` 门面 + 导入/备份）、`BillDb.kt`（SQLite）、`SystemPerms.kt`（权限/自愈/主题色）、`XlsxReader.kt`（xlsx 解压）、`PendingNotices.kt`（待确认通知）、`BillSheetActivity.kt` / `ImportPickActivity.kt` / `BackupSaveActivity.kt`（中转与弹层）、三个 Service。对外入口仍是 `MuyianBillCore`（`@JvmStatic` 同步方法）。
+- `app/src/main/java/muyian/bill/listener/` — 包名 `muyian.bill.listener`，系统级能力的唯一实现，同包分文件：`CaptureModels/Text/Rules/Page/Amount/Classify/Parser/Gates`（纯逻辑，可单测）、`CaptureRegistry`（App 角色与设置）、`CaptureRoute`（支付路线）、`CaptureLedger`（账本/队列/决策日志/反馈）、`CapturePageMemory`（结果页现场，拦重复弹层）、`CaptureStats`（今日漏斗与双通道对账）、`CaptureEngine`（编排）、`CapturePresenter`（弹层队列）、`CaptureLearning`（本地分类学习）、`hybrid.kt`（`MuyianBillCore` 门面 + 导入/备份）、`BillDb.kt`（SQLite）、`SystemPerms.kt`（权限/自愈/主题色）、`XlsxReader.kt`（xlsx 解压）、`PendingNotices.kt`（待确认通知）、`BillSheetActivity.kt` / `ImportPickActivity.kt` / `BackupSaveActivity.kt`（中转与弹层）、三个 Service。对外入口仍是 `MuyianBillCore`（`@JvmStatic` 同步方法）。
 - `android/app/src/main/AndroidManifest.xml` — 权限与服务/Activity 注册；`res/xml/muyian_accessibility_config.xml` 是无障碍服务配置。
 
 ## 数据格式

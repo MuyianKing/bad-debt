@@ -22,6 +22,7 @@ internal object SystemPerms {
     private const val PREFS_NAME = "muyian_bill"
     private const val KEY_KEEP_ALIVE = "keep_alive_enabled"
     private const val KEY_CARD_THEME = "card_theme_color"
+    private const val KEY_CARD_THEME_DARK = "card_theme_dark"
     private const val KEY_POPUP_BLOCKED_AT = "popup_blocked_at"
     private const val MIUI_POPUP_OP = 10021
     private const val POPUP_BLOCKED_TTL_MS = 7 * 24 * 3600 * 1000L
@@ -193,6 +194,42 @@ fun getCardThemeColor(context: Context): Int {
     } catch (e: Exception) {
         DEFAULT_CARD_THEME
     }
+}
+
+/**
+ * 弹层是否应使用深色面板。旧版本没有独立开关，按已存的主题色亮度兜底，
+ * 保证升级后第一次弹层不会仍然白底。
+ */
+@JvmStatic
+fun isCardThemeDark(context: Context): Boolean {
+    return try {
+        val p = prefs(context)
+        if (p.contains(KEY_CARD_THEME_DARK)) {
+            p.getBoolean(KEY_CARD_THEME_DARK, false)
+        } else {
+            isDarkColor(p.getInt(KEY_CARD_THEME, DEFAULT_CARD_THEME))
+        }
+    } catch (e: Exception) {
+        false
+    }
+}
+
+@JvmStatic
+fun setCardThemeDark(context: Context, dark: Boolean): Boolean {
+    return try {
+        prefs(context).edit().putBoolean(KEY_CARD_THEME_DARK, dark).apply()
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "set card theme dark failed", e)
+        false
+    }
+}
+
+private fun isDarkColor(color: Int): Boolean {
+    val r = Color.red(color) / 255f
+    val g = Color.green(color) / 255f
+    val b = Color.blue(color) / 255f
+    return 0.299f * r + 0.587f * g + 0.114f * b < 0.25f
 }
 
 /** 电池优化白名单状态：true 表示系统不会因省电策略限制本应用后台 */
